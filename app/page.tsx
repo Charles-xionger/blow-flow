@@ -1,10 +1,13 @@
+import Canvas from "@/components/canvas/Canvas";
+import Sidebar from "@/components/sidebar/Sidebar";
+
 export default function Home() {
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center p-24">
-      <h1 className="text-4xl font-bold mb-4">AI Canvas Next.js</h1>
-      <p className="text-xl text-muted-foreground">
-        项目初始化完成！开始迁移...
-      </p>
-    </main>
+    <div className="flex h-screen">
+      <Sidebar />
+      <div className="flex-1">
+        <Canvas />
+      </div>
+    </div>
   );
 }

@@ -1,0 +1,153 @@
+"use client";
+
+import { memo, useCallback, useRef, useEffect } from "react";
+import type { Node, NodeProps } from "@xyflow/react";
+import { Handle, Position } from "@xyflow/react";
+import { useCanvasStore } from "@/store/useCanvasStore";
+import { Image, Upload, X } from "lucide-react";
+import type { NodeData } from "@/types";
+
+const OriginalImageNode = ({
+  id,
+  data,
+  selected,
+}: NodeProps<Node<NodeData>>) => {
+  const updateNodeData = useCanvasStore((state) => state.updateNodeData);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const result = event.target?.result as string;
+        updateNodeData(id, { imageSrc: result });
+      };
+      reader.readAsDataURL(file);
+    },
+    [id, updateNodeData],
+  );
+
+  const handlePaste = useCallback(
+    (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      for (const item of Array.from(items)) {
+        if (item.type.startsWith("image/")) {
+          const file = item.getAsFile();
+          if (file) {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+              const result = event.target?.result as string;
+              updateNodeData(id, { imageSrc: result });
+            };
+            reader.readAsDataURL(file);
+            e.preventDefault();
+            break;
+          }
+        }
+      }
+    },
+    [id, updateNodeData],
+  );
+
+  useEffect(() => {
+    if (selected) {
+      document.addEventListener("paste", handlePaste);
+      return () => document.removeEventListener("paste", handlePaste);
+    }
+  }, [selected, handlePaste]);
+
+  const hasResult = !!data.imageSrc;
+
+  return (
+    <>
+      {/* 输出句柄 */}
+      <Handle type="source" position={Position.Right} id="output" />
+
+      {/* 节点显示区域 */}
+      <div
+        style={{ width: "320px", height: "240px" }}
+        className={`relative rounded-2xl border ${
+          selected
+            ? "border-amber-500 ring-2 ring-amber-500/30"
+            : "border-zinc-700/50"
+        } bg-[#1a1a1a] overflow-hidden shadow-xl group transition-all duration-200`}
+      >
+        {hasResult ? (
+          <div className="relative w-full h-full">
+            <img
+              src={data.imageSrc}
+              alt="Uploaded"
+              className="w-full h-full object-contain"
+            />
+          </div>
+        ) : (
+          <div className="w-full h-full flex flex-col items-center justify-center text-zinc-500">
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 bg-zinc-800/50 text-zinc-500">
+              <Image size={28} className="opacity-60" />
+            </div>
+            <span className="text-sm font-medium opacity-60">原图</span>
+            <span className="text-xs opacity-40 mt-1">选中节点上传图片</span>
+          </div>
+        )}
+      </div>
+
+      {/* 控制面板 */}
+      {selected && (
+        <div
+          className="absolute top-full left-1/2 -translate-x-1/2 min-w-[400px] pt-4 z-[70] pointer-events-auto"
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <div className="bg-[#1a1a1a]/95 backdrop-blur-xl border border-zinc-700/50 rounded-2xl p-4 flex flex-col gap-3">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleFileChange}
+              className="hidden"
+            />
+
+            {!data.imageSrc ? (
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full py-8 border-2 border-dashed border-zinc-700 rounded-xl hover:border-amber-500 hover:bg-amber-500/10 transition-all flex flex-col items-center justify-center gap-2"
+              >
+                <Upload className="w-8 h-8 text-zinc-400" />
+                <span className="text-sm text-zinc-300">
+                  点击上传或粘贴图片
+                </span>
+                <span className="text-xs text-zinc-500">
+                  支持 JPG、PNG、GIF 格式
+                </span>
+              </button>
+            ) : (
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex-1 h-10 px-4 rounded-lg text-sm font-semibold border border-zinc-700 text-white hover:bg-zinc-800 transition-all"
+                >
+                  重新上传
+                </button>
+                <button
+                  onClick={() => updateNodeData(id, { imageSrc: undefined })}
+                  className="shrink-0 h-10 px-4 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 transition-all"
+                >
+                  <X size={16} />
+                  删除图片
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
+
+OriginalImageNode.displayName = "OriginalImageNode";
+
+export default memo(OriginalImageNode);

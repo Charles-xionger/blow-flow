@@ -12,8 +12,7 @@ export enum NodeType {
 }
 
 // 节点数据接口
-export interface NodeData {
-  [key: string]: unknown;
+export interface NodeData extends Record<string, unknown> {
   // 基础信息
   label: string;
   type: NodeType;

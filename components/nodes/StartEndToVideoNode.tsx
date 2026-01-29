@@ -1,0 +1,292 @@
+"use client";
+
+import { memo, useCallback, useMemo } from "react";
+import type { Node, NodeProps } from "@xyflow/react";
+import { Handle, Position } from "@xyflow/react";
+import { useCanvasStore } from "@/store/useCanvasStore";
+import {
+  Video,
+  Sparkles,
+  AlertCircle,
+  ArrowRightLeft,
+  Loader2,
+  Wand2,
+} from "lucide-react";
+import type { NodeData } from "@/types";
+
+const videoModels = [
+  { value: "Kling", label: "Kling" },
+  { value: "即梦", label: "即梦" },
+];
+
+const durations = [
+  { value: "5s", label: "5秒" },
+  { value: "10s", label: "10秒" },
+];
+
+const StartEndToVideoNode = ({
+  id,
+  data,
+  selected,
+}: NodeProps<Node<NodeData>>) => {
+  const updateNodeData = useCanvasStore((state) => state.updateNodeData);
+  const nodes = useCanvasStore((state) => state.nodes);
+  const edges = useCanvasStore((state) => state.edges);
+
+  // 获取上游节点的输入图片（需要两张）
+  const inputImages = useMemo(() => {
+    const inputEdges = edges.filter((edge) => edge.target === id);
+    const images = inputEdges
+      .map((edge) => {
+        const sourceNode = nodes.find((n) => n.id === edge.source);
+        return sourceNode?.data.imageSrc;
+      })
+      .filter(Boolean) as string[];
+
+    return images.slice(0, 2); // 只取前两张
+  }, [edges, nodes, id]);
+
+  const [startImage, endImage] = data.swapFrames
+    ? [inputImages[1], inputImages[0]]
+    : inputImages;
+
+  const handleGenerate = useCallback(async () => {
+    if (!data.prompt || inputImages.length < 2) return;
+
+    updateNodeData(id, { isLoading: true, error: undefined });
+
+    try {
+      const response = await fetch("/api/generate/start-end-to-video", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: data.prompt,
+          startImage,
+          endImage,
+          model: data.model || "Kling",
+          duration: data.duration || "5s",
+          promptOptimize: data.promptOptimize || false,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.success && result.data) {
+        updateNodeData(id, {
+          isLoading: false,
+          videoSrc: result.data,
+          inputImages,
+        });
+      } else {
+        throw new Error(result.error || "生成失败");
+      }
+    } catch (error) {
+      updateNodeData(id, {
+        isLoading: false,
+        error: error instanceof Error ? error.message : "生成失败",
+      });
+    }
+  }, [
+    id,
+    data.prompt,
+    data.model,
+    data.duration,
+    data.promptOptimize,
+    inputImages,
+    startImage,
+    endImage,
+    updateNodeData,
+  ]);
+
+  const hasResult = !!data.videoSrc && !data.isLoading;
+
+  return (
+    <>
+      {/* 输入句柄 */}
+      <Handle type="target" position={Position.Left} id="input" />
+
+      {/* 输出句柄 */}
+      <Handle type="source" position={Position.Right} id="output" />
+
+      {/* 节点显示区域 */}
+      <div
+        style={{ width: "320px", height: "240px" }}
+        className={`relative rounded-2xl border ${
+          selected
+            ? "border-pink-500 ring-2 ring-pink-500/30"
+            : "border-zinc-700/50"
+        } bg-[#1a1a1a] overflow-hidden shadow-xl group transition-all duration-200`}
+      >
+        {hasResult ? (
+          <div className="relative w-full h-full">
+            <video
+              src={data.videoSrc}
+              className="w-full h-full object-contain"
+              controls
+              loop
+            />
+          </div>
+        ) : (
+          <div className="w-full h-full flex flex-col items-center justify-center text-zinc-500">
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 bg-zinc-800/50 text-zinc-500">
+              <Video size={28} className="opacity-60" />
+            </div>
+            <span className="text-sm font-medium opacity-60">首尾帧生视频</span>
+            <span className="text-xs opacity-40 mt-1">选中节点开始创作</span>
+          </div>
+        )}
+
+        {data.isLoading && (
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center z-20">
+            <Loader2 size={32} className="text-pink-500 animate-spin mb-3" />
+            <span className="text-white/80 text-sm font-medium">生成中...</span>
+          </div>
+        )}
+      </div>
+
+      {/* 控制面板 */}
+      {selected && (
+        <div
+          className="absolute top-full left-1/2 -translate-x-1/2 min-w-[400px] pt-4 z-[70] pointer-events-auto"
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <div className="bg-[#1a1a1a]/95 backdrop-blur-xl border border-zinc-700/50 rounded-2xl p-4 flex flex-col gap-3">
+            {/* 输入图片预览 */}
+            {inputImages.length === 2 ? (
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-medium text-zinc-400">
+                    首尾帧
+                  </label>
+                  <button
+                    onClick={() =>
+                      updateNodeData(id, { swapFrames: !data.swapFrames })
+                    }
+                    className="text-xs text-pink-400 hover:text-pink-300 flex items-center gap-1 transition-colors"
+                    disabled={data.isLoading}
+                  >
+                    <ArrowRightLeft size={12} />
+                    交换
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="relative rounded-lg overflow-hidden border-2 border-green-500/50 h-24 bg-zinc-800/50">
+                    <img
+                      src={startImage}
+                      alt="Start Frame"
+                      className="w-full h-full object-contain"
+                    />
+                    <span className="absolute top-1 left-1 bg-green-500 text-white text-xs px-1.5 py-0.5 rounded">
+                      首帧
+                    </span>
+                  </div>
+                  <div className="relative rounded-lg overflow-hidden border-2 border-red-500/50 h-24 bg-zinc-800/50">
+                    <img
+                      src={endImage}
+                      alt="End Frame"
+                      className="w-full h-full object-contain"
+                    />
+                    <span className="absolute top-1 left-1 bg-red-500 text-white text-xs px-1.5 py-0.5 rounded">
+                      尾帧
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/10 px-3 py-2 rounded-lg border border-amber-500/20">
+                <AlertCircle size={16} />
+                <span>
+                  请连接两个图片节点作为首尾帧（当前 {inputImages.length}/2）
+                </span>
+              </div>
+            )}
+
+            <textarea
+              className="w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-pink-500/20 min-h-[72px] bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-pink-500 text-white placeholder-zinc-500 transition-all"
+              placeholder="描述从首帧到尾帧的过渡过程..."
+              value={data.prompt || ""}
+              onChange={(e) => updateNodeData(id, { prompt: e.target.value })}
+              onWheel={(e) => e.stopPropagation()}
+              rows={3}
+            />
+
+            <div className="flex items-center gap-2">
+              <select
+                value={data.model || "Kling"}
+                onChange={(e) => updateNodeData(id, { model: e.target.value })}
+                className="h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-pink-500/20"
+              >
+                {videoModels.map((m) => (
+                  <option key={m.value} value={m.value}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={data.duration || "5s"}
+                onChange={(e) =>
+                  updateNodeData(id, { duration: e.target.value })
+                }
+                className="h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-pink-500/20"
+              >
+                {durations.map((d) => (
+                  <option key={d.value} value={d.value}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-all border ${
+                  data.promptOptimize
+                    ? "text-pink-400 bg-pink-500/20 border-pink-500/30"
+                    : "text-zinc-400 hover:text-white border-zinc-700 hover:border-zinc-600 hover:bg-zinc-700"
+                }`}
+                onClick={() =>
+                  updateNodeData(id, { promptOptimize: !data.promptOptimize })
+                }
+              >
+                <Sparkles
+                  size={15}
+                  fill={data.promptOptimize ? "currentColor" : "none"}
+                />
+              </button>
+
+              <div className="flex-1" />
+
+              <button
+                onClick={handleGenerate}
+                disabled={
+                  data.isLoading || !data.prompt || inputImages.length < 2
+                }
+                className={`shrink-0 h-8 px-4 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 whitespace-nowrap transition-all active:scale-[0.98] ${
+                  data.isLoading || !data.prompt || inputImages.length < 2
+                    ? "bg-gray-400 text-white cursor-not-allowed"
+                    : "bg-gradient-to-r from-pink-600 to-pink-500 hover:from-pink-500 hover:to-pink-400 text-white shadow-lg shadow-pink-500/25 hover:shadow-pink-500/40"
+                }`}
+              >
+                {data.isLoading ? (
+                  <Loader2 className="animate-spin" size={15} />
+                ) : (
+                  <Wand2 size={15} />
+                )}
+                <span>{data.isLoading ? "生成中" : "生成"}</span>
+              </button>
+            </div>
+
+            {data.error && (
+              <div className="text-xs text-red-400 bg-red-500/10 px-3 py-2 rounded-lg border border-red-500/20">
+                {data.error}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
+
+StartEndToVideoNode.displayName = "StartEndToVideoNode";
+
+export default memo(StartEndToVideoNode);
