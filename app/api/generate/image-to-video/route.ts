@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateGenericVideo } from "@/lib/ai-services/video/generic";
+import { generateAliyunWanxVideo } from "@/lib/ai-services/video/aliyun-wanx";
 import { getModelConfig as getModelConfigFromDb } from "@/lib/db/model-configs";
 import { getCacheKey, getCache, setCache } from "@/lib/db/cache";
 import type { ModelConfig } from "@/types";
@@ -8,8 +9,13 @@ interface ImageToVideoRequest {
   prompt: string;
   inputImage: string;
   model?: string;
-  duration?: string;
+  duration?: string | number;
+  resolution?: string;
   promptOptimize?: boolean;
+  audioUrl?: string;
+  negativePrompt?: string;
+  watermark?: boolean;
+  shotType?: "single" | "multi";
 }
 
 async function getModelConfig(modelName: string): Promise<ModelConfig> {
@@ -22,10 +28,13 @@ async function getModelConfig(modelName: string): Promise<ModelConfig> {
   // 降级到环境变量
   return {
     modelId: modelName,
-    baseUrl: process.env.DEFAULT_BASE_URL || "",
-    key: process.env.DEFAULT_API_KEY || "",
-    endpoint: "/v1/video/create",
-    queryEndpoint: "/v1/video/query/{id}",
+    baseUrl:
+      process.env.ALIYUN_WANX_BASE_URL ||
+      process.env.DEFAULT_BASE_URL ||
+      "https://dashscope.aliyuncs.com",
+    key: process.env.ALIYUN_WANX_API_KEY || process.env.DEFAULT_API_KEY || "",
+    endpoint: "/api/v1/services/aigc/video-generation/video-synthesis",
+    queryEndpoint: "/api/v1/tasks/{task_id}",
   };
 }
 
@@ -35,9 +44,14 @@ export async function POST(request: NextRequest) {
     const {
       prompt,
       inputImage,
-      model = "Kling",
-      duration = "5s",
+      model = "wan2.6-i2v-flash",
+      duration = 10,
+      resolution = "720P",
       promptOptimize = false,
+      audioUrl,
+      negativePrompt = "",
+      watermark = false,
+      shotType,
     } = body;
 
     if (!prompt || !inputImage) {
@@ -77,15 +91,48 @@ export async function POST(request: NextRequest) {
       // TODO: 调用提示词优化服务
     }
 
-    const videoUrl = await generateGenericVideo(
-      config,
-      finalPrompt,
-      "16:9",
-      "720p",
-      duration,
-      [inputImage],
-      false,
-    );
+    let videoUrl: string;
+
+    // 判断是否是阿里云万相模型
+    const isAliyunWanx =
+      model.startsWith("wan") ||
+      model.includes("wanx") ||
+      model.includes("aliyun");
+
+    if (isAliyunWanx) {
+      // 使用阿里云万相 API
+      const durationNum =
+        typeof duration === "string" ? parseInt(duration) : duration;
+
+      videoUrl = await generateAliyunWanxVideo(
+        config,
+        finalPrompt,
+        inputImage,
+        {
+          resolution,
+          duration: durationNum,
+          promptExtend: promptOptimize,
+          watermark,
+          negativePrompt,
+          audioUrl,
+          shotType,
+        },
+      );
+    } else {
+      // 使用通用视频生成 API
+      const durationStr =
+        typeof duration === "number" ? `${duration}s` : duration;
+
+      videoUrl = await generateGenericVideo(
+        config,
+        finalPrompt,
+        "16:9",
+        resolution || "720p",
+        durationStr,
+        [inputImage],
+        false,
+      );
+    }
 
     // 保存到缓存
     setCache(cacheKey, model, prompt, { inputImage, duration }, videoUrl, {

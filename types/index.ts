@@ -84,6 +84,7 @@ export interface ModelDef {
     | "VIDEO_GEN_MINIMAX"
     | "KLING"
     | "KLING_OMNI"
+    | "ALIYUN_WANX"
     | "MJ_MODAL";
   category: "IMAGE" | "VIDEO";
   defaultEndpoint: string;
