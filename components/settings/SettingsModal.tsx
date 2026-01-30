@@ -1,7 +1,14 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
-import { X, Search, TestTube2, ChevronDown, ChevronRight } from "lucide-react";
+import {
+  X,
+  Search,
+  TestTube2,
+  ChevronDown,
+  ChevronRight,
+  Plus,
+} from "lucide-react";
 import { toast } from "sonner";
 
 interface ModelConfig {
@@ -30,6 +37,12 @@ const MODEL_REGISTRY: Record<
     defaultEndpoint: string;
   }
 > = {
+  "阿里云百炼-万相": {
+    id: "wan2.6-i2v",
+    name: "阿里云百炼（万相 i2v）",
+    category: "VIDEO",
+    defaultEndpoint: "/api/v1/services/aigc/video-generation/video-synthesis",
+  },
   BananaPro: {
     id: "banana-pro",
     name: "Banana Pro",
@@ -80,6 +93,16 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [testingModels, setTestingModels] = useState<Set<string>>(new Set());
   const [testResults, setTestResults] = useState<
     Record<string, "success" | "error" | null>
+  >({});
+  const [isAddModelOpen, setIsAddModelOpen] = useState(false);
+  const [newModel, setNewModel] = useState({
+    name: "",
+    id: "",
+    category: "IMAGE" as "IMAGE" | "VIDEO",
+    endpoint: "",
+  });
+  const [customModels, setCustomModels] = useState<
+    Record<string, (typeof MODEL_REGISTRY)[string]>
   >({});
 
   // 加载配置
@@ -150,9 +173,6 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     setTestingModels((prev) => new Set(prev).add(modelKey));
     setTestResults((prev) => ({ ...prev, [modelKey]: null }));
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
-
     try {
       const config = configs[modelKey];
       const baseUrl = (config?.baseUrl || globalBaseUrl || "").replace(
@@ -165,30 +185,37 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         throw new Error("缺少 Base URL 或 API Key");
       }
 
-      const testUrl = `${baseUrl}/v1/models`;
-
-      const response = await fetch(testUrl, {
-        method: "GET",
+      // 通过后端 API 测试连接，避免 CORS 问题
+      const response = await fetch("/api/test-connection", {
+        method: "POST",
         headers: {
-          Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
-        signal: controller.signal,
+        body: JSON.stringify({
+          baseUrl,
+          apiKey,
+          modelKey,
+        }),
       });
 
-      clearTimeout(timeoutId);
+      const result = await response.json();
 
-      if (response.ok || response.status === 401 || response.status === 403) {
+      if (result.success) {
         setTestResults((prev) => ({ ...prev, [modelKey]: "success" }));
-        toast.success(`${modelKey} 连接成功`);
+        toast.success(`${MODEL_REGISTRY[modelKey].name} 连接成功`, {
+          description: "API 密钥可以正常访问服务",
+        });
       } else {
         setTestResults((prev) => ({ ...prev, [modelKey]: "error" }));
-        toast.error(`${modelKey} 连接失败`);
+        toast.error(`${MODEL_REGISTRY[modelKey].name} 连接失败`, {
+          description: result.error || `状态码: ${result.status}`,
+        });
       }
     } catch (e: any) {
-      clearTimeout(timeoutId);
       setTestResults((prev) => ({ ...prev, [modelKey]: "error" }));
-      toast.error(`${modelKey} 测试失败: ${e.message}`);
+      toast.error(`${MODEL_REGISTRY[modelKey].name} 测试失败`, {
+        description: e.message,
+      });
     } finally {
       setTestingModels((prev) => {
         const newSet = new Set(prev);
