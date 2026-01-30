@@ -22,7 +22,7 @@ export const BaseNode = memo(
     return (
       <div
         className={cn(
-          "rounded-lg border-2 p-4 shadow-lg min-w-[280px] transition-all",
+          "rounded-lg border-2 p-4 shadow-lg min-w-70 transition-all",
           colorClasses[color as keyof typeof colorClasses] || colorClasses.blue,
           selected && "ring-2 ring-offset-2 ring-primary",
         )}

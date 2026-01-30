@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useRef } from "react";
+import React, { useCallback, useRef, useEffect } from "react";
 import {
   ReactFlow,
   Background,
@@ -17,6 +17,11 @@ import "@xyflow/react/dist/style.css";
 
 import { useCanvasStore } from "@/store/useCanvasStore";
 import { NodeType } from "@/types";
+import { Toolbar } from "./Toolbar";
+import { Sidebar } from "./Sidebar";
+import { TopBar } from "./TopBar";
+import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { toast } from "sonner";
 
 // 导入节点组件（下一步创建）
 import TextToImageNode from "@/components/nodes/TextToImageNode";
@@ -50,7 +55,56 @@ function CanvasInner() {
     onConnect,
     addNode,
     isDarkMode,
+    projectName,
   } = useCanvasStore();
+
+  // 同步主题到 DOM
+  useEffect(() => {
+    if (typeof document !== "undefined") {
+      document.documentElement.classList.toggle("dark", isDarkMode);
+    }
+  }, [isDarkMode]);
+
+  // 键盘快捷键：保存工作流
+  const handleSave = useCallback(async () => {
+    if (nodes.length === 0) {
+      toast.error("无法保存", {
+        description: "画布为空",
+      });
+      return;
+    }
+
+    try {
+      const workflow = {
+        name: projectName,
+        nodes,
+        edges,
+        viewport: { x: 0, y: 0, zoom: 1 },
+      };
+
+      const response = await fetch("/api/workflow", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(workflow),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        toast.success("保存成功", {
+          description: `工作流 "${projectName}" 已保存`,
+        });
+      } else {
+        throw new Error(result.error);
+      }
+    } catch (error) {
+      toast.error("保存失败", {
+        description: error instanceof Error ? error.message : "未知错误",
+      });
+    }
+  }, [nodes, edges, projectName]);
+
+  useKeyboardShortcuts(handleSave);
 
   // 处理画布点击（添加节点）
   const onPaneClick = useCallback((event: React.MouseEvent) => {
@@ -112,7 +166,8 @@ function CanvasInner() {
         nodeTypes={nodeTypes}
         connectionMode={ConnectionMode.Loose}
         defaultEdgeOptions={defaultEdgeOptions}
-        fitView
+        defaultViewport={{ x: 0, y: 0, zoom: 0.8 }}
+        fitView={nodes.length > 0}
         className={isDarkMode ? "dark" : ""}
       >
         <Background
@@ -143,13 +198,15 @@ function CanvasInner() {
           maskColor={isDarkMode ? "rgba(0,0,0,0.6)" : "rgba(255,255,255,0.6)"}
         />
 
-        {/* 顶部工具栏 */}
-        <Panel position="top-left" className="space-x-2">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-2">
-            {/* 工具栏按钮将在后续添加 */}
-          </div>
-        </Panel>
+        {/* 保留原工具栏（在底部） - 可选删除 */}
+        {/* <Toolbar /> */}
       </ReactFlow>
+
+      {/* 侧边栏 */}
+      <Sidebar />
+
+      {/* 顶部栏（项目名称 + 工具栏） */}
+      <TopBar />
     </div>
   );
 }
