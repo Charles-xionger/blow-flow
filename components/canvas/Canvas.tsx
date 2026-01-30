@@ -6,7 +6,6 @@ import {
   Background,
   Controls,
   MiniMap,
-  Panel,
   ReactFlowProvider,
   useReactFlow,
   ConnectionMode,
@@ -17,7 +16,6 @@ import "@xyflow/react/dist/style.css";
 
 import { useCanvasStore } from "@/store/useCanvasStore";
 import { NodeType } from "@/types";
-import { Toolbar } from "./Toolbar";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
@@ -45,11 +43,13 @@ const nodeTypes = {
 
 function CanvasInner() {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, getViewport } = useReactFlow();
 
   const {
     nodes,
     edges,
+    viewport,
+    setViewport,
     onNodesChange,
     onEdgesChange,
     onConnect,
@@ -79,7 +79,7 @@ function CanvasInner() {
         name: projectName,
         nodes,
         edges,
-        viewport: { x: 0, y: 0, zoom: 1 },
+        viewport: getViewport(),
       };
 
       const response = await fetch("/api/workflow", {
@@ -102,12 +102,12 @@ function CanvasInner() {
         description: error instanceof Error ? error.message : "未知错误",
       });
     }
-  }, [nodes, edges, projectName]);
+  }, [nodes, edges, projectName, getViewport]);
 
   useKeyboardShortcuts(handleSave);
 
   // 处理画布点击（添加节点）
-  const onPaneClick = useCallback((event: React.MouseEvent) => {
+  const onPaneClick = useCallback(() => {
     // 可以在这里添加快捷添加节点的逻辑
   }, []);
 
@@ -166,8 +166,9 @@ function CanvasInner() {
         nodeTypes={nodeTypes}
         connectionMode={ConnectionMode.Loose}
         defaultEdgeOptions={defaultEdgeOptions}
-        defaultViewport={{ x: 0, y: 0, zoom: 0.8 }}
-        fitView={nodes.length > 0}
+        defaultViewport={viewport}
+        onViewportChange={(newViewport) => setViewport(newViewport)}
+        fitView={nodes.length === 0}
         className={isDarkMode ? "dark" : ""}
       >
         <Background

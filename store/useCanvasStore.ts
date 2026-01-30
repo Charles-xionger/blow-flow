@@ -20,6 +20,7 @@ interface CanvasState {
   // 画布数据
   nodes: CanvasNode[];
   edges: Edge[];
+  viewport: { x: number; y: number; zoom: number };
 
   // UI 状态
   selectedNodeIds: string[];
@@ -29,6 +30,7 @@ interface CanvasState {
   // Actions
   setNodes: (nodes: CanvasNode[]) => void;
   setEdges: (edges: Edge[]) => void;
+  setViewport: (viewport: { x: number; y: number; zoom: number }) => void;
   onNodesChange: OnNodesChange;
   onEdgesChange: OnEdgesChange;
   onConnect: OnConnect;
@@ -76,6 +78,7 @@ export const useCanvasStore = create<CanvasState>()(
         // 初始状态
         nodes: [],
         edges: [],
+        viewport: { x: 0, y: 0, zoom: 0.8 },
         selectedNodeIds: [],
         isDarkMode: getInitialTheme(),
         projectName: "未命名项目",
@@ -83,6 +86,7 @@ export const useCanvasStore = create<CanvasState>()(
         // 节点和边的变化处理
         setNodes: (nodes) => set({ nodes }),
         setEdges: (edges) => set({ edges }),
+        setViewport: (viewport) => set({ viewport }),
 
         onNodesChange: (changes: NodeChange[]) => {
           set({
