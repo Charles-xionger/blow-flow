@@ -15,13 +15,15 @@ import {
 import type { NodeData } from "@/types";
 
 const videoModels = [
+  { value: "wan2.6-i2v-flash", label: "万相 i2v Flash (推荐)" },
+  { value: "wan2.6-i2v", label: "万相 i2v" },
   { value: "Kling", label: "Kling" },
   { value: "即梦", label: "即梦" },
 ];
 
 const durations = [
-  { value: "5s", label: "5秒" },
-  { value: "10s", label: "10秒" },
+  { value: "5", label: "5秒" },
+  { value: "10", label: "10秒" },
 ];
 
 const StartEndToVideoNode = ({
@@ -63,8 +65,8 @@ const StartEndToVideoNode = ({
           prompt: data.prompt,
           startImage,
           endImage,
-          model: data.model || "Kling",
-          duration: data.duration || "5s",
+          model: data.model || "wan2.6-i2v-flash",
+          duration: parseInt(data.duration || "5"),
           promptOptimize: data.promptOptimize || false,
         }),
       });
@@ -212,7 +214,7 @@ const StartEndToVideoNode = ({
 
             <div className="flex items-center gap-2">
               <select
-                value={data.model || "Kling"}
+                value={data.model || "wan2.6-i2v-flash"}
                 onChange={(e) => updateNodeData(id, { model: e.target.value })}
                 className="h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-pink-500/20"
               >
@@ -224,7 +226,7 @@ const StartEndToVideoNode = ({
               </select>
 
               <select
-                value={data.duration || "5s"}
+                value={data.duration || "5"}
                 onChange={(e) =>
                   updateNodeData(id, { duration: e.target.value })
                 }

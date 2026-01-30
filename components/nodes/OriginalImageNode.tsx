@@ -16,22 +16,47 @@ const OriginalImageNode = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
 
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const result = event.target?.result as string;
-        updateNodeData(id, { imageSrc: result });
-      };
-      reader.readAsDataURL(file);
+      // 显示加载状态
+      updateNodeData(id, { isLoading: true });
+
+      try {
+        // 上传到服务器
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const response = await fetch("/api/upload/image", {
+          method: "POST",
+          body: formData,
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+          // 使用永久 URL
+          updateNodeData(id, {
+            imageSrc: result.data.url,
+            isLoading: false,
+          });
+        } else {
+          throw new Error(result.error);
+        }
+      } catch (error) {
+        console.error("Upload failed:", error);
+        updateNodeData(id, {
+          error: error instanceof Error ? error.message : "上传失败",
+          isLoading: false,
+        });
+      }
     },
     [id, updateNodeData],
   );
 
   const handlePaste = useCallback(
-    (e: ClipboardEvent) => {
+    async (e: ClipboardEvent) => {
       const items = e.clipboardData?.items;
       if (!items) return;
 
@@ -39,13 +64,39 @@ const OriginalImageNode = ({
         if (item.type.startsWith("image/")) {
           const file = item.getAsFile();
           if (file) {
-            const reader = new FileReader();
-            reader.onload = (event) => {
-              const result = event.target?.result as string;
-              updateNodeData(id, { imageSrc: result });
-            };
-            reader.readAsDataURL(file);
             e.preventDefault();
+
+            // 显示加载状态
+            updateNodeData(id, { isLoading: true });
+
+            try {
+              // 上传到服务器
+              const formData = new FormData();
+              formData.append("file", file);
+
+              const response = await fetch("/api/upload/image", {
+                method: "POST",
+                body: formData,
+              });
+
+              const result = await response.json();
+
+              if (result.success) {
+                // 使用永久 URL
+                updateNodeData(id, {
+                  imageSrc: result.data.url,
+                  isLoading: false,
+                });
+              } else {
+                throw new Error(result.error);
+              }
+            } catch (error) {
+              console.error("Upload failed:", error);
+              updateNodeData(id, {
+                error: error instanceof Error ? error.message : "上传失败",
+                isLoading: false,
+              });
+            }
             break;
           }
         }
@@ -61,7 +112,9 @@ const OriginalImageNode = ({
     }
   }, [selected, handlePaste]);
 
-  const hasResult = !!data.imageSrc;
+  const hasResult = !!data.imageSrc && !data.isLoading;
+  const isLoading = data.isLoading;
+  const hasError = !!data.error;
 
   return (
     <>
@@ -77,7 +130,22 @@ const OriginalImageNode = ({
             : "border-zinc-700/50"
         } bg-[#1a1a1a] overflow-hidden shadow-xl group transition-all duration-200`}
       >
-        {hasResult ? (
+        {isLoading ? (
+          <div className="w-full h-full flex flex-col items-center justify-center text-zinc-500">
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 bg-zinc-800/50">
+              <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+            </div>
+            <span className="text-sm font-medium opacity-60">上传中...</span>
+          </div>
+        ) : hasError ? (
+          <div className="w-full h-full flex flex-col items-center justify-center text-red-500">
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 bg-red-500/10">
+              <X size={28} className="opacity-60" />
+            </div>
+            <span className="text-sm font-medium opacity-60">上传失败</span>
+            <span className="text-xs opacity-40 mt-1">{data.error}</span>
+          </div>
+        ) : hasResult ? (
           <div className="relative w-full h-full">
             <img
               src={data.imageSrc}

@@ -3,6 +3,7 @@ import { generateGenericVideo } from "@/lib/ai-services/video/generic";
 import { generateAliyunWanxVideo } from "@/lib/ai-services/video/aliyun-wanx";
 import { getModelConfig as getModelConfigFromDb } from "@/lib/db/model-configs";
 import { getCacheKey, getCache, setCache } from "@/lib/db/cache";
+import { getOSSClient } from "@/services/ossService";
 import type { ModelConfig } from "@/types";
 
 interface ImageToVideoRequest {
@@ -19,10 +20,18 @@ interface ImageToVideoRequest {
 }
 
 async function getModelConfig(modelName: string): Promise<ModelConfig> {
+  // 如果是万相模型，使用统一的配置 key
+  const configKey = modelName.startsWith("wan2.6")
+    ? "阿里云百炼-万相"
+    : modelName;
+
   // 优先从数据库读取
-  const config = getModelConfigFromDb(modelName);
+  const config = getModelConfigFromDb(configKey);
   if (config) {
-    return config;
+    return {
+      ...config,
+      modelId: modelName, // 保持实际的模型 ID
+    };
   }
 
   // 降级到环境变量
@@ -139,9 +148,37 @@ export async function POST(request: NextRequest) {
       ttl: 7200,
     });
 
+    // 将视频保存到 OSS（从临时 URL 下载并上传）
+    let persistedVideoUrl = videoUrl;
+    try {
+      const oss = getOSSClient();
+      const result = await oss.downloadAndUpload(
+        videoUrl,
+        "videos",
+        `video-${Date.now()}.mp4`,
+      );
+      persistedVideoUrl = result.url;
+      console.log("[API] Video persisted to OSS:", persistedVideoUrl);
+
+      // 更新缓存为持久化 URL
+      setCache(
+        cacheKey,
+        model,
+        prompt,
+        { inputImage, duration },
+        persistedVideoUrl,
+        {
+          ttl: 7200,
+        },
+      );
+    } catch (ossError) {
+      // OSS 保存失败不影响返回原始 URL
+      console.error("[API] Failed to persist video to OSS:", ossError);
+    }
+
     return NextResponse.json({
       success: true,
-      data: videoUrl,
+      data: persistedVideoUrl,
       cached: false,
     });
   } catch (error) {
