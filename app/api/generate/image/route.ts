@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateBananaImage } from "@/lib/ai-services/image/banana";
 import { generateFluxImage } from "@/lib/ai-services/image/flux";
+import { generateGenericImage } from "@/lib/ai-services/image/generic";
 import { getModelConfig as getModelConfigFromDb } from "@/lib/db/model-configs";
 import { getCacheKey, getCache, setCache } from "@/lib/db/cache";
 import type { ModelConfig } from "@/types";
@@ -17,11 +18,21 @@ interface GenerateImageRequest {
 
 // 从数据库或配置中获取模型配置
 async function getModelConfig(modelName: string): Promise<ModelConfig> {
+  console.log("[API] Getting config for model:", modelName);
+
   // 优先从数据库读取
   const config = getModelConfigFromDb(modelName);
   if (config) {
+    console.log("[API] Found config in database:", {
+      modelId: config.modelId,
+      baseUrl: config.baseUrl,
+      endpoint: config.endpoint,
+      hasKey: !!config.key,
+    });
     return config;
   }
+
+  console.log("[API] No config in database, using fallback");
 
   // 降级到环境变量（用于首次使用或测试）
   return {
@@ -53,6 +64,15 @@ export async function POST(request: NextRequest) {
     }
 
     const config = await getModelConfig(model);
+
+    console.log("[API] Image generation config:", {
+      model,
+      hasConfig: !!config,
+      modelId: config?.modelId,
+      baseUrl: config?.baseUrl,
+      endpoint: config?.endpoint,
+      hasKey: !!config?.key,
+    });
 
     if (!config.key) {
       return NextResponse.json(
@@ -93,10 +113,21 @@ export async function POST(request: NextRequest) {
       inputImages: string[],
     ) => Promise<string>;
 
+    // 智能选择生成函数
+    const baseUrl = config.baseUrl.toLowerCase();
+
     if (model.includes("Banana")) {
+      // Banana 系列模型使用专用函数
       generateFn = generateBananaImage;
-    } else {
+    } else if (baseUrl.includes("dashscope.aliyuncs.com")) {
+      // 阿里云使用通用函数
+      generateFn = generateGenericImage;
+    } else if (model.toLowerCase().includes("flux")) {
+      // Flux 系列使用专用函数
       generateFn = generateFluxImage;
+    } else {
+      // 其他模型使用通用函数（支持标准 OpenAI 格式）
+      generateFn = generateGenericImage;
     }
 
     // 批量生成

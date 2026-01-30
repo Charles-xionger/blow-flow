@@ -17,6 +17,7 @@ interface ImageToVideoRequest {
   negativePrompt?: string;
   watermark?: boolean;
   shotType?: "single" | "multi";
+  skipCache?: boolean; // 跳过缓存，强制重新生成
 }
 
 async function getModelConfig(modelName: string): Promise<ModelConfig> {
@@ -61,6 +62,7 @@ export async function POST(request: NextRequest) {
       negativePrompt = "",
       watermark = false,
       shotType,
+      skipCache = false,
     } = body;
 
     if (!prompt || !inputImage) {
@@ -79,21 +81,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 检查缓存
-    const cacheKey = getCacheKey(model, prompt, {
-      inputImage,
-      duration,
-    });
-
-    const cached = getCache(cacheKey);
-    if (cached) {
-      console.log("[API] Cache hit for image-to-video generation");
-      return NextResponse.json({
-        success: true,
-        data: cached,
-        cached: true,
+    // 检查缓存（除非明确跳过）
+    if (!skipCache) {
+      const cacheKey = getCacheKey(model, prompt, {
+        inputImage,
+        duration,
       });
+
+      const cached = getCache(cacheKey);
+      if (cached) {
+        console.log("[API] Cache hit for image-to-video generation");
+        return NextResponse.json({
+          success: true,
+          data: cached,
+          cached: true,
+        });
+      }
     }
+
+    // 生成缓存键
+    const cacheKey = `${model}:${prompt}:${JSON.stringify({ inputImage, duration })}`;
 
     const finalPrompt = prompt;
     if (promptOptimize && prompt) {

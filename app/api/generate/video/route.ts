@@ -14,6 +14,7 @@ interface GenerateVideoRequest {
   inputImages?: string[];
   promptOptimize?: boolean;
   isStartEndMode?: boolean;
+  skipCache?: boolean; // 跳过缓存，强制重新生成
 }
 
 async function getModelConfig(modelName: string): Promise<ModelConfig> {
@@ -46,6 +47,7 @@ export async function POST(request: NextRequest) {
       inputImages = [],
       promptOptimize = false,
       isStartEndMode = false,
+      skipCache = false,
     } = body;
 
     if (!prompt && inputImages.length === 0) {
@@ -64,20 +66,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 检查缓存
-    const cacheKey = getCacheKey(model, prompt, {
-      aspectRatio,
-      resolution,
-      duration,
-      inputImages,
-      isStartEndMode,
-    });
+    // 检查缓存（除非明确跳过）
+    if (!skipCache) {
+      const cacheKey = getCacheKey(model, prompt, {
+        aspectRatio,
+        resolution,
+        duration,
+        inputImages,
+        isStartEndMode,
+      });
 
-    const cached = getCache(cacheKey);
-    if (cached) {
-      console.log("[API] Cache hit for video generation");
-      return NextResponse.json({
-        success: true,
+      const cached = getCache(cacheKey);
+      if (cached) {
+        console.log("[API] Cache hit for video generation");
+        return NextResponse.json({
+          success: true,
         data: cached,
         cached: true,
       });

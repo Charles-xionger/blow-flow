@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useMemo } from "react";
+import { memo, useCallback, useMemo, useState, useEffect } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { Handle, Position } from "@xyflow/react";
 import { useCanvasStore } from "@/store/useCanvasStore";
@@ -13,13 +13,7 @@ import {
   Wand2,
 } from "lucide-react";
 import type { NodeData } from "@/types";
-
-const videoModels = [
-  { value: "wan2.6-i2v-flash", label: "万相 i2v Flash (推荐)" },
-  { value: "wan2.6-i2v", label: "万相 i2v" },
-  { value: "Kling", label: "Kling" },
-  { value: "即梦", label: "即梦" },
-];
+import { getVideoModels } from "@/lib/model-registry";
 
 const durations = [
   { value: "5", label: "5秒" },
@@ -32,21 +26,33 @@ const StartEndToVideoNode = ({
   selected,
 }: NodeProps<Node<NodeData>>) => {
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
-  const nodes = useCanvasStore((state) => state.nodes);
-  const edges = useCanvasStore((state) => state.edges);
 
-  // 获取上游节点的输入图片（需要两张）
-  const inputImages = useMemo(() => {
-    const inputEdges = edges.filter((edge) => edge.target === id);
-    const images = inputEdges
-      .map((edge) => {
-        const sourceNode = nodes.find((n) => n.id === edge.source);
-        return sourceNode?.data.imageSrc;
-      })
-      .filter(Boolean) as string[];
+  // 优化：只订阅与此节点相关的数据，避免不必要的重新渲染
+  const inputImages = useCanvasStore(
+    useCallback(
+      (state) => {
+        const inputEdges = state.edges.filter((edge) => edge.target === id);
+        const images = inputEdges
+          .map((edge) => {
+            const sourceNode = state.nodes.find((n) => n.id === edge.source);
+            return sourceNode?.data.imageSrc;
+          })
+          .filter(Boolean) as string[];
 
-    return images.slice(0, 2); // 只取前两张
-  }, [edges, nodes, id]);
+        return images.slice(0, 2); // 只取前两张
+      },
+      [id],
+    ),
+  );
+
+  const [videoModels, setVideoModels] = useState<
+    Array<{ value: string; label: string }>
+  >([]);
+
+  // 加载视频模型列表
+  useEffect(() => {
+    setVideoModels(getVideoModels());
+  }, []);
 
   const [startImage, endImage] = data.swapFrames
     ? [inputImages[1], inputImages[0]]
@@ -204,7 +210,7 @@ const StartEndToVideoNode = ({
             )}
 
             <textarea
-              className="w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-pink-500/20 min-h-18 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-pink-500 text-white placeholder-zinc-500 transition-all"
+              className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-pink-500/20 min-h-18 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-pink-500 text-white placeholder-zinc-500 transition-all"
               placeholder="描述从首帧到尾帧的过渡过程..."
               value={data.prompt || ""}
               onChange={(e) => updateNodeData(id, { prompt: e.target.value })}
@@ -214,7 +220,7 @@ const StartEndToVideoNode = ({
 
             <div className="flex items-center gap-2">
               <select
-                value={data.model || "wan2.6-i2v-flash"}
+                value={data.model || videoModels[0]?.value || ""}
                 onChange={(e) => updateNodeData(id, { model: e.target.value })}
                 className="h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-pink-500/20"
               >

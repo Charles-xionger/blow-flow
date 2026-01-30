@@ -1,19 +1,12 @@
 "use client";
 
-import { memo, useCallback, useMemo } from "react";
+import { memo, useCallback, useMemo, useState, useEffect } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { Handle, Position } from "@xyflow/react";
 import { useCanvasStore } from "@/store/useCanvasStore";
 import { Video, Sparkles, AlertCircle, Loader2, Wand2 } from "lucide-react";
 import type { NodeData } from "@/types";
-
-const videoModels = [
-  { value: "wan2.6-i2v-flash", label: "万相 i2v Flash (推荐)" },
-  { value: "wan2.6-i2v", label: "万相 i2v" },
-  { value: "Kling", label: "Kling" },
-  { value: "即梦", label: "即梦" },
-  { value: "海螺", label: "海螺" },
-];
+import { getVideoModels } from "@/lib/model-registry";
 
 const durations = [
   { value: "5", label: "5秒" },
@@ -26,62 +19,78 @@ const ImageToVideoNode = ({
   selected,
 }: NodeProps<Node<NodeData>>) => {
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
-  const nodes = useCanvasStore((state) => state.nodes);
-  const edges = useCanvasStore((state) => state.edges);
 
-  // 获取上游节点的输入图片
-  const inputImage = useMemo(() => {
-    const inputEdges = edges.filter((edge) => edge.target === id);
-    if (inputEdges.length === 0) return null;
+  // 优化：只订阅与此节点相关的数据，避免不必要的重新渲染
+  const inputImage = useCanvasStore(
+    useCallback(
+      (state) => {
+        const inputEdges = state.edges.filter((edge) => edge.target === id);
+        if (inputEdges.length === 0) return null;
 
-    const sourceNode = nodes.find((n) => n.id === inputEdges[0].source);
-    return sourceNode?.data.imageSrc;
-  }, [edges, nodes, id]);
+        const sourceNode = state.nodes.find(
+          (n) => n.id === inputEdges[0].source,
+        );
+        return sourceNode?.data.imageSrc;
+      },
+      [id],
+    ),
+  );
 
-  const handleGenerate = useCallback(async () => {
-    if (!data.prompt || !inputImage) return;
+  const [videoModels, setVideoModels] = useState<
+    Array<{ value: string; label: string }>
+  >([]);
 
-    updateNodeData(id, { isLoading: true, error: undefined });
+  // 加载视频模型列表
+  useEffect(() => {
+    setVideoModels(getVideoModels());
+  }, []);
 
-    try {
-      const response = await fetch("/api/generate/image-to-video", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt: data.prompt,
-          inputImage,
-          model: data.model || "wan2.6-i2v-flash",
-          duration: parseInt(data.duration || "5"),
-          promptOptimize: data.promptOptimize || false,
-        }),
-      });
+  useEffect(() => {
+    console.log("Video Models:", videoModels);
+  }, [videoModels]);
 
-      const result = await response.json();
+  const handleGenerate = useCallback(
+    async (skipCache = false) => {
+      if (!data.prompt || !inputImage) return;
 
-      if (result.success && result.data) {
+      console.log("Generating video with prompt:", data);
+
+      updateNodeData(id, { isLoading: true, error: undefined });
+
+      try {
+        const response = await fetch("/api/generate/image-to-video", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt: data.prompt,
+            inputImage,
+            model: data.model || "wan2.6-i2v-flash",
+            duration: parseInt(data.duration || "5"),
+            promptOptimize: data.promptOptimize || false,
+            skipCache, // 传递 skipCache 参数
+          }),
+        });
+
+        const result = await response.json();
+
+        if (result.success && result.data) {
+          updateNodeData(id, {
+            isLoading: false,
+            videoSrc: result.data,
+            inputImages: [inputImage],
+          });
+        } else {
+          throw new Error(result.error || "生成失败");
+        }
+      } catch (error) {
         updateNodeData(id, {
           isLoading: false,
-          videoSrc: result.data,
-          inputImages: [inputImage],
+          error: error instanceof Error ? error.message : "生成失败",
         });
-      } else {
-        throw new Error(result.error || "生成失败");
       }
-    } catch (error) {
-      updateNodeData(id, {
-        isLoading: false,
-        error: error instanceof Error ? error.message : "生成失败",
-      });
-    }
-  }, [
-    id,
-    data.prompt,
-    data.model,
-    data.duration,
-    data.promptOptimize,
-    inputImage,
-    updateNodeData,
-  ]);
+    },
+    [id, data, inputImage, updateNodeData],
+  );
 
   const hasResult = !!data.videoSrc && !data.isLoading;
 
@@ -158,7 +167,7 @@ const ImageToVideoNode = ({
             )}
 
             <textarea
-              className="w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500/20 min-h-18 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-indigo-500 text-white placeholder-zinc-500 transition-all"
+              className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500/20 min-h-18 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-indigo-500 text-white placeholder-zinc-500 transition-all"
               placeholder="描述视频的运动和变化..."
               value={data.prompt || ""}
               onChange={(e) => updateNodeData(id, { prompt: e.target.value })}
@@ -168,7 +177,7 @@ const ImageToVideoNode = ({
 
             <div className="flex items-center gap-2">
               <select
-                value={data.model || "wan2.6-i2v-flash"}
+                value={data.model || videoModels[0]?.value || ""}
                 onChange={(e) => updateNodeData(id, { model: e.target.value })}
                 className="h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
               >
@@ -212,7 +221,7 @@ const ImageToVideoNode = ({
               <div className="flex-1" />
 
               <button
-                onClick={handleGenerate}
+                onClick={() => handleGenerate()}
                 disabled={data.isLoading || !data.prompt || !inputImage}
                 className={`shrink-0 h-8 px-4 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 whitespace-nowrap transition-all active:scale-[0.98] ${
                   data.isLoading || !data.prompt || !inputImage

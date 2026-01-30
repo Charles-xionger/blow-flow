@@ -114,7 +114,7 @@ const CreativeDescNode = ({
         >
           <div className="bg-[#1a1a1a]/95 backdrop-blur-xl border border-zinc-700/50 rounded-2xl p-4 flex flex-col gap-3">
             <textarea
-              className="w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-cyan-500/20 min-h-18 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-cyan-500 text-white placeholder-zinc-500 transition-all"
+              className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-cyan-500/20 min-h-18 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-cyan-500 text-white placeholder-zinc-500 transition-all"
               placeholder="输入简单的描述，AI 会帮你扩展成专业提示词..."
               value={data.prompt || ""}
               onChange={(e) => updateNodeData(id, { prompt: e.target.value })}
@@ -170,7 +170,7 @@ const CreativeDescNode = ({
                   onChange={(e) =>
                     updateNodeData(id, { optimizedPrompt: e.target.value })
                   }
-                  className="w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-cyan-500/20 min-h-30 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-cyan-500 text-white placeholder-zinc-500 transition-all"
+                  className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-cyan-500/20 min-h-30 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-cyan-500 text-white placeholder-zinc-500 transition-all"
                   onWheel={(e) => e.stopPropagation()}
                 />
                 <p className="text-xs text-zinc-500 mt-2">

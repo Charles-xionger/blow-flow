@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateBananaImage } from "@/lib/ai-services/image/banana";
 import { generateFluxImage } from "@/lib/ai-services/image/flux";
+import { generateGenericImage } from "@/lib/ai-services/image/generic";
 import { getModelConfig as getModelConfigFromDb } from "@/lib/db/model-configs";
 import { getCacheKey, getCache, setCache } from "@/lib/db/cache";
 import type { ModelConfig } from "@/types";
@@ -11,6 +12,7 @@ interface ImageToImageRequest {
   model?: string;
   aspectRatio?: string;
   promptOptimize?: boolean;
+  skipCache?: boolean; // 跳过缓存，强制重新生成
 }
 
 async function getModelConfig(modelName: string): Promise<ModelConfig> {
@@ -38,6 +40,7 @@ export async function POST(request: NextRequest) {
       model = "BananaPro",
       aspectRatio = "1:1",
       promptOptimize = false,
+      skipCache = false,
     } = body;
 
     if (!prompt || !inputImage) {
@@ -56,20 +59,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 检查缓存
-    const cacheKey = getCacheKey(model, prompt, {
-      inputImage,
-      aspectRatio,
-    });
-
-    const cached = getCache(cacheKey);
-    if (cached) {
-      console.log("[API] Cache hit for image-to-image generation");
-      return NextResponse.json({
-        success: true,
-        data: cached,
-        cached: true,
+    // 检查缓存（除非明确跳过）
+    if (!skipCache) {
+      const cacheKey = getCacheKey(model, prompt, {
+        inputImage,
+        aspectRatio,
       });
+
+      const cached = getCache(cacheKey);
+      if (cached) {
+        console.log("[API] Cache hit for image-to-image generation");
+        return NextResponse.json({
+          success: true,
+          data: cached,
+          cached: true,
+        });
+      }
     }
 
     const finalPrompt = prompt;
@@ -85,20 +90,35 @@ export async function POST(request: NextRequest) {
       inputImages: string[],
     ) => Promise<string>;
 
+    // 智能选择生成函数
+    const baseUrl = config.baseUrl.toLowerCase();
+
     if (model.includes("Banana")) {
       generateFn = generateBananaImage;
-    } else {
+    } else if (baseUrl.includes("dashscope.aliyuncs.com")) {
+      // 阿里云使用通用函数（支持 wan2.6 图生图）
+      generateFn = generateGenericImage;
+    } else if (model.toLowerCase().includes("flux")) {
       generateFn = generateFluxImage;
+    } else {
+      // 其他模型使用通用函数
+      generateFn = generateGenericImage;
     }
 
     const imageUrl = await generateFn(config, finalPrompt, aspectRatio, "1k", [
       inputImage,
     ]);
 
-    // 保存到缓存
-    setCache(cacheKey, model, prompt, { inputImage, aspectRatio }, imageUrl, {
-      ttl: 3600,
-    });
+    // 保存到缓存（图生图使用较短的缓存时间，因为用户通常期望每次生成都是新的）
+    if (!skipCache) {
+      const cacheKey = getCacheKey(model, prompt, {
+        inputImage,
+        aspectRatio,
+      });
+      setCache(cacheKey, model, prompt, { inputImage, aspectRatio }, imageUrl, {
+        ttl: 300, // 5分钟缓存，避免短时间内重复请求
+      });
+    }
 
     return NextResponse.json({
       success: true,

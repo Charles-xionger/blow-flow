@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(request: NextRequest) {
   try {
-    const { baseUrl, apiKey, modelKey } = await request.json();
+    const { baseUrl, apiKey } = await request.json();
 
     if (!baseUrl || !apiKey) {
       return NextResponse.json(
@@ -20,8 +20,9 @@ export async function POST(request: NextRequest) {
 
     const cleanBaseUrl = baseUrl.replace(/\/$/, "");
 
-    if (modelKey === "阿里云百炼-万相") {
-      // 阿里云百炼：使用简单的模型列表查询
+    // 根据 baseUrl 判断平台类型
+    if (cleanBaseUrl.includes("dashscope.aliyuncs.com")) {
+      // 阿里云百炼：使用兼容模式的模型列表查询
       testUrl = `${cleanBaseUrl}/compatible-mode/v1/models`;
     } else {
       // 其他平台：使用标准 OpenAI API 端点

@@ -8,8 +8,20 @@ import {
   ChevronDown,
   ChevronRight,
   Plus,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { AddModelModal } from "./AddModelModal";
+import { getAllModels, type ModelDefinition } from "@/lib/model-registry";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 interface ModelConfig {
   baseUrl?: string;
@@ -27,60 +39,6 @@ interface SettingsModalProps {
 const GLOBAL_BASE_URL_KEY = "GLOBAL_BASE_URL";
 const GLOBAL_API_KEY_KEY = "GLOBAL_API_KEY";
 
-// 模型注册表
-const MODEL_REGISTRY: Record<
-  string,
-  {
-    id: string;
-    name: string;
-    category: "IMAGE" | "VIDEO";
-    defaultEndpoint: string;
-  }
-> = {
-  "阿里云百炼-万相": {
-    id: "wan2.6-i2v",
-    name: "阿里云百炼（万相 i2v）",
-    category: "VIDEO",
-    defaultEndpoint: "/api/v1/services/aigc/video-generation/video-synthesis",
-  },
-  BananaPro: {
-    id: "banana-pro",
-    name: "Banana Pro",
-    category: "IMAGE",
-    defaultEndpoint: "/v1/images/generations",
-  },
-  Flux2: {
-    id: "flux-2",
-    name: "Flux 2",
-    category: "IMAGE",
-    defaultEndpoint: "/v1/images/generations",
-  },
-  "Sora 2": {
-    id: "sora-2",
-    name: "Sora 2",
-    category: "VIDEO",
-    defaultEndpoint: "/v1/videos",
-  },
-  "Veo 3.1 Fast": {
-    id: "veo-3.1-fast",
-    name: "Veo 3.1 Fast",
-    category: "VIDEO",
-    defaultEndpoint: "/v1/videos",
-  },
-  Kling: {
-    id: "kling-v1",
-    name: "Kling",
-    category: "VIDEO",
-    defaultEndpoint: "/v1/videos/generations",
-  },
-  MiniMax: {
-    id: "minimax-v1",
-    name: "MiniMax",
-    category: "VIDEO",
-    defaultEndpoint: "/v1/video/generation",
-  },
-};
-
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [globalBaseUrl, setGlobalBaseUrl] = useState("");
   const [globalApiKey, setGlobalApiKey] = useState("");
@@ -95,15 +53,12 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     Record<string, "success" | "error" | null>
   >({});
   const [isAddModelOpen, setIsAddModelOpen] = useState(false);
-  const [newModel, setNewModel] = useState({
-    name: "",
-    id: "",
-    category: "IMAGE" as "IMAGE" | "VIDEO",
-    endpoint: "",
-  });
-  const [customModels, setCustomModels] = useState<
-    Record<string, (typeof MODEL_REGISTRY)[string]>
+  const [modelRegistry, setModelRegistry] = useState<
+    Record<string, ModelDefinition>
   >({});
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [modelToDelete, setModelToDelete] = useState<string | null>(null);
+  const [savingModels, setSavingModels] = useState<Set<string>>(new Set());
 
   // 加载配置
   useEffect(() => {
@@ -111,8 +66,104 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setGlobalBaseUrl(localStorage.getItem(GLOBAL_BASE_URL_KEY) || "");
       setGlobalApiKey(localStorage.getItem(GLOBAL_API_KEY_KEY) || "");
 
+      // 加载所有模型（内置 + 自定义）
+      const allModels = getAllModels();
+      setModelRegistry(allModels);
+
+      // 从数据库和 localStorage 加载配置
+      loadConfigs(allModels);
+    }
+  }, [isOpen]);
+
+  // 从数据库和 localStorage 加载配置
+  const loadConfigs = async (allModels: Record<string, ModelDefinition>) => {
+    try {
+      // 首先从数据库加载
+      console.log("[Settings] Loading configs from database...");
+      const response = await fetch("/api/model-config");
+      const result = await response.json();
+
       const newConfigs: Record<string, ModelConfig> = {};
-      Object.keys(MODEL_REGISTRY).forEach((key) => {
+      let dbConfigCount = 0;
+      let localConfigCount = 0;
+
+      if (result.success && result.data) {
+        console.log("[Settings] Database response:", result);
+
+        // 使用数据库中的配置
+        Object.keys(allModels).forEach((key) => {
+          const dbConfig = result.data[key];
+          if (dbConfig && (dbConfig.baseUrl || dbConfig.key)) {
+            // 数据库中有配置，使用数据库配置并同步到 localStorage
+            newConfigs[key] = {
+              baseUrl: dbConfig.baseUrl,
+              key: dbConfig.key,
+              modelId: dbConfig.modelId,
+              endpoint: dbConfig.endpoint,
+            };
+
+            // 同步回 localStorage，确保数据一致性
+            if (typeof window !== "undefined") {
+              localStorage.setItem(
+                `API_CONFIG_MODEL_${key}`,
+                JSON.stringify(newConfigs[key]),
+              );
+            }
+
+            dbConfigCount++;
+            console.log(`[Settings] Loaded config for ${key} from database`);
+          } else {
+            // 如果数据库中没有，尝试从 localStorage 加载
+            const stored = localStorage.getItem(`API_CONFIG_MODEL_${key}`);
+            if (stored) {
+              try {
+                const localConfig = JSON.parse(stored);
+                if (localConfig.baseUrl || localConfig.key) {
+                  newConfigs[key] = localConfig;
+                  localConfigCount++;
+                  console.log(
+                    `[Settings] Loaded config for ${key} from localStorage`,
+                  );
+                } else {
+                  newConfigs[key] = {};
+                }
+              } catch {
+                newConfigs[key] = {};
+              }
+            } else {
+              newConfigs[key] = {};
+            }
+          }
+        });
+
+        console.log(
+          `[Settings] Loaded ${dbConfigCount} configs from database, ${localConfigCount} from localStorage`,
+        );
+      } else {
+        console.log(
+          "[Settings] Database load failed, falling back to localStorage",
+        );
+        // 如果数据库加载失败，从 localStorage 加载
+        Object.keys(allModels).forEach((key) => {
+          const stored = localStorage.getItem(`API_CONFIG_MODEL_${key}`);
+          if (stored) {
+            try {
+              newConfigs[key] = JSON.parse(stored);
+            } catch {
+              newConfigs[key] = {};
+            }
+          } else {
+            newConfigs[key] = {};
+          }
+        });
+      }
+
+      setConfigs(newConfigs);
+    } catch (error) {
+      console.error("[Settings] Failed to load configs:", error);
+      // 降级到 localStorage
+      const newConfigs: Record<string, ModelConfig> = {};
+      Object.keys(allModels).forEach((key) => {
         const stored = localStorage.getItem(`API_CONFIG_MODEL_${key}`);
         if (stored) {
           try {
@@ -126,33 +177,140 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       });
       setConfigs(newConfigs);
     }
-  }, [isOpen]);
+  };
 
   // 保存全局配置
-  const saveGlobalConfig = () => {
+  const saveGlobalConfig = async () => {
     if (typeof window === "undefined") return;
     localStorage.setItem(GLOBAL_BASE_URL_KEY, globalBaseUrl);
     localStorage.setItem(GLOBAL_API_KEY_KEY, globalApiKey);
 
+    // 更新所有使用全局配置的模型到数据库
+    try {
+      const updatePromises = Object.keys(modelRegistry).map(
+        async (modelKey) => {
+          const config = configs[modelKey] || {};
+          const modelDef = modelRegistry[modelKey];
+
+          // 如果模型没有自己的 baseUrl 或 key，使用全局配置
+          const fullConfig = {
+            modelId: config.modelId || modelDef.id,
+            baseUrl: config.baseUrl || globalBaseUrl,
+            key: config.key || globalApiKey,
+            endpoint: config.endpoint || modelDef.defaultEndpoint,
+          };
+
+          // 只有当有完整配置时才保存
+          if (fullConfig.baseUrl && fullConfig.key) {
+            await fetch("/api/model-config", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                modelName: modelKey,
+                config: fullConfig,
+              }),
+            });
+          }
+        },
+      );
+
+      await Promise.all(updatePromises);
+    } catch (error) {
+      console.error("Failed to update configs in database:", error);
+    }
+
     toast.success("全局配置已保存");
   };
 
-  // 更新模型配置
+  // 更新模型配置（仅更新本地状态，不保存）
   const updateConfig = (
     modelKey: string,
     field: keyof ModelConfig,
     value: string,
   ) => {
-    setConfigs((prev) => {
-      const newConfig = { ...prev[modelKey], [field]: value };
-      if (typeof window !== "undefined") {
-        localStorage.setItem(
-          `API_CONFIG_MODEL_${modelKey}`,
-          JSON.stringify(newConfig),
-        );
+    const newConfig = { ...configs[modelKey], [field]: value };
+
+    setConfigs((prev) => ({
+      ...prev,
+      [modelKey]: newConfig,
+    }));
+  };
+
+  // 保存模型配置到数据库
+  const saveModelConfig = async (modelKey: string) => {
+    setSavingModels((prev) => new Set(prev).add(modelKey));
+
+    try {
+      const modelDef = modelRegistry[modelKey];
+      if (!modelDef) {
+        toast.error("模型定义不存在");
+        return;
       }
-      return { ...prev, [modelKey]: newConfig };
-    });
+
+      const config = configs[modelKey];
+
+      // 构建完整的配置对象
+      const fullConfig = {
+        modelId: config.modelId || modelDef.id,
+        baseUrl: config.baseUrl || globalBaseUrl,
+        key: config.key || globalApiKey,
+        endpoint: config.endpoint || modelDef.defaultEndpoint,
+      };
+
+      console.log("[Settings] Saving config to database:", {
+        modelKey,
+        fullConfig: {
+          ...fullConfig,
+          key: fullConfig.key ? "***" : "(empty)",
+        },
+      });
+
+      // 验证必填字段
+      if (!fullConfig.baseUrl || !fullConfig.key) {
+        toast.error("请填写 Base URL 和 API Key");
+        return;
+      }
+
+      // 保存到数据库
+      const response = await fetch("/api/model-config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          modelName: modelKey,
+          config: fullConfig,
+        }),
+      });
+
+      const result = await response.json();
+      console.log("[Settings] Database save result:", result);
+
+      if (result.success) {
+        // 保存成功后，同步到 localStorage
+        if (typeof window !== "undefined") {
+          localStorage.setItem(
+            `API_CONFIG_MODEL_${modelKey}`,
+            JSON.stringify(config),
+          );
+        }
+
+        toast.success(
+          `"${modelRegistry[modelKey]?.name || modelKey}" 配置已保存`,
+        );
+      } else {
+        throw new Error(result.error || "保存失败");
+      }
+    } catch (error) {
+      console.error("Failed to save config to database:", error);
+      toast.error(
+        `保存失败：${error instanceof Error ? error.message : "未知错误"}`,
+      );
+    } finally {
+      setSavingModels((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(modelKey);
+        return newSet;
+      });
+    }
   };
 
   // 切换展开状态
@@ -202,18 +360,18 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
       if (result.success) {
         setTestResults((prev) => ({ ...prev, [modelKey]: "success" }));
-        toast.success(`${MODEL_REGISTRY[modelKey].name} 连接成功`, {
+        toast.success(`${modelRegistry[modelKey]?.name || modelKey} 连接成功`, {
           description: "API 密钥可以正常访问服务",
         });
       } else {
         setTestResults((prev) => ({ ...prev, [modelKey]: "error" }));
-        toast.error(`${MODEL_REGISTRY[modelKey].name} 连接失败`, {
+        toast.error(`${modelRegistry[modelKey]?.name || modelKey} 连接失败`, {
           description: result.error || `状态码: ${result.status}`,
         });
       }
     } catch (e: any) {
       setTestResults((prev) => ({ ...prev, [modelKey]: "error" }));
-      toast.error(`${MODEL_REGISTRY[modelKey].name} 测试失败`, {
+      toast.error(`${modelRegistry[modelKey]?.name || modelKey} 测试失败`, {
         description: e.message,
       });
     } finally {
@@ -227,8 +385,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
   // 过滤模型列表
   const filteredModels = useMemo(() => {
-    return Object.keys(MODEL_REGISTRY).filter((key) => {
-      const def = MODEL_REGISTRY[key];
+    return Object.keys(modelRegistry).filter((key) => {
+      const def = modelRegistry[key];
 
       const matchesSearch =
         !searchTerm ||
@@ -242,7 +400,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
       return matchesSearch && matchesType;
     });
-  }, [searchTerm, filterType]);
+  }, [searchTerm, filterType, modelRegistry]);
 
   // 判断模型是否已配置
   const isConfigured = (key: string) => {
@@ -251,6 +409,119 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       (config?.key || globalApiKey) &&
       (config?.baseUrl || globalBaseUrl)
     );
+  };
+
+  // 删除模型配置
+  const handleDeleteConfig = (modelKey: string) => {
+    console.log("[Settings] Delete config clicked for:", modelKey);
+    setModelToDelete(modelKey);
+    setDeleteConfirmOpen(true);
+  };
+
+  // 确认删除
+  const confirmDeleteConfig = async () => {
+    if (!modelToDelete) return;
+
+    // 保存原始配置用于回滚
+    const originalConfig = configs[modelToDelete];
+
+    try {
+      // 先调用数据库删除（如果配置存在的话）
+      const response = await fetch(
+        `/api/model-config?model=${encodeURIComponent(modelToDelete)}`,
+        {
+          method: "DELETE",
+        },
+      );
+
+      const result = await response.json();
+
+      // 404 表示配置不存在，这是正常情况（配置可能从未保存过）
+      // 只有非 404 的错误才需要抛出异常
+      if (!result.success && response.status !== 404) {
+        throw new Error(result.error || "数据库删除失败");
+      }
+
+      // 数据库删除成功或配置不存在，清除本地状态
+      setConfigs((prev) => {
+        const newConfigs = { ...prev };
+        delete newConfigs[modelToDelete]; // 使用 delete 删除属性而不是设置为空对象
+        return newConfigs;
+      });
+
+      // 从 localStorage 清除
+      if (typeof window !== "undefined") {
+        localStorage.removeItem(`API_CONFIG_MODEL_${modelToDelete}`);
+      }
+
+      // 清除测试结果
+      setTestResults((prev) => {
+        const newResults = { ...prev };
+        delete newResults[modelToDelete];
+        return newResults;
+      });
+
+      toast.success(
+        `"${modelRegistry[modelToDelete]?.name || modelToDelete}" 配置已删除`,
+      );
+    } catch (error) {
+      console.error("Failed to delete config:", error);
+      // 回滚本地状态
+      setConfigs((prev) => ({
+        ...prev,
+        [modelToDelete]: originalConfig || {},
+      }));
+      toast.error(
+        `删除配置失败：${error instanceof Error ? error.message : "未知错误"}`,
+      );
+    } finally {
+      setDeleteConfirmOpen(false);
+      setModelToDelete(null);
+    }
+  };
+  // 添加自定义模型
+  const handleAddCustomModel = (model: {
+    key: string;
+    name: string;
+    id: string;
+    category: "IMAGE" | "VIDEO";
+    defaultEndpoint: string;
+  }) => {
+    // 保存到 localStorage 的自定义模型列表
+    const customModelsKey = "CUSTOM_MODELS";
+    const stored = localStorage.getItem(customModelsKey);
+    const customModels = stored ? JSON.parse(stored) : {};
+
+    customModels[model.key] = {
+      id: model.id,
+      name: model.name,
+      category: model.category,
+      defaultEndpoint: model.defaultEndpoint,
+    };
+
+    localStorage.setItem(customModelsKey, JSON.stringify(customModels));
+
+    // 更新本地状态
+    setModelRegistry((prev) => ({
+      ...prev,
+      [model.key]: {
+        id: model.id,
+        name: model.name,
+        category: model.category,
+        defaultEndpoint: model.defaultEndpoint,
+      },
+    }));
+
+    // 初始化新模型的配置
+    setConfigs((prev) => ({
+      ...prev,
+      [model.key]: {},
+    }));
+
+    // 显示成功提示
+    toast.success(`模型 "${model.name}" 添加成功`, {
+      description: "模型已添加到列表，可以立即使用",
+    });
   };
 
   if (!isOpen) return null;
@@ -344,6 +615,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   placeholder="搜索模型..."
                 />
               </div>
+              <button
+                type="button"
+                onClick={() => setIsAddModelOpen(true)}
+                className="shrink-0 px-4 py-2.5 rounded-xl text-sm font-medium bg-blue-500 hover:bg-blue-600 text-white transition-all flex items-center gap-2"
+              >
+                <Plus size={16} />
+                添加模型
+              </button>
               <div
                 className={`flex p-1 rounded-xl border ${borderColor} bg-[#0f0f11]`}
               >
@@ -370,10 +649,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             {/* 模型列表 */}
             <div className="space-y-2">
               {filteredModels.map((key) => {
-                const def = MODEL_REGISTRY[key];
+                const def = modelRegistry[key];
                 const config = configs[key] || {};
                 const isExpanded = expandedModels.has(key);
                 const isTesting = testingModels.has(key);
+                const isSaving = savingModels.has(key);
                 const testResult = testResults[key];
                 const configured = isConfigured(key);
 
@@ -489,14 +769,58 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           />
                         </div>
 
-                        <button
-                          onClick={() => testConnection(key)}
-                          disabled={isTesting}
-                          className="w-full mt-2 px-4 py-2 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 text-sm font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-                        >
-                          <TestTube2 size={14} />
-                          {isTesting ? "测试中..." : "测试连接"}
-                        </button>
+                        <div className="flex gap-2 mt-2">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              testConnection(key);
+                            }}
+                            disabled={isTesting}
+                            className="flex-1 px-4 py-2 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 text-sm font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                          >
+                            <TestTube2 size={14} />
+                            {isTesting ? "测试中..." : "测试连接"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              saveModelConfig(key);
+                            }}
+                            disabled={isSaving}
+                            className="flex-1 px-4 py-2 rounded-lg bg-green-500/10 hover:bg-green-500/20 text-green-400 text-sm font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                          >
+                            <svg
+                              xmlns="http://www.w3.org/2000/svg"
+                              width="14"
+                              height="14"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                              <polyline points="17 21 17 13 7 13 7 21" />
+                              <polyline points="7 3 7 8 15 8" />
+                            </svg>
+                            {isSaving ? "保存中..." : "保存配置"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteConfig(key);
+                            }}
+                            className="px-4 py-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                            title="删除此模型的配置"
+                          >
+                            <Trash2 size={14} />
+                            删除配置
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -506,6 +830,67 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           </div>
         </div>
       </div>
+
+      {/* 添加模型弹窗 */}
+      <AddModelModal
+        isOpen={isAddModelOpen}
+        onClose={() => setIsAddModelOpen(false)}
+        onAdd={handleAddCustomModel}
+      />
+
+      {/* 删除配置确认对话框 */}
+      <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <DialogContent
+          className="sm:max-w-106.25"
+          overlayZIndex={260}
+          contentZIndex={270}
+        >
+          <DialogHeader>
+            <DialogTitle>删除模型配置</DialogTitle>
+            <DialogDescription>
+              确定要删除 &quot;
+              {(modelToDelete && modelRegistry[modelToDelete]?.name) ||
+                modelToDelete}
+              &quot; 的配置吗？
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground">
+              此操作将清除该模型的所有自定义配置：
+            </p>
+            <ul className="mt-2 text-sm text-muted-foreground list-disc list-inside space-y-1">
+              <li>Base URL</li>
+              <li>API Key</li>
+              <li>Model ID</li>
+              <li>Endpoint</li>
+            </ul>
+            <p className="mt-3 text-muted-foreground">
+              <strong>注意：</strong>
+              模型本身不会被删除，您可以随时重新配置。
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setDeleteConfirmOpen(false);
+                setModelToDelete(null);
+              }}
+            >
+              取消
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={confirmDeleteConfig}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              删除配置
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

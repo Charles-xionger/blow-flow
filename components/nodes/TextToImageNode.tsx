@@ -1,19 +1,12 @@
 "use client";
 
-import { memo, useCallback } from "react";
+import { memo, useCallback, useState, useEffect } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { Handle, Position } from "@xyflow/react";
 import { useCanvasStore } from "@/store/useCanvasStore";
 import { Image, Sparkles, Wand2, Loader2 } from "lucide-react";
 import type { NodeData } from "@/types";
-
-const imageModels = [
-  { value: "BananaPro", label: "Banana Pro" },
-  { value: "Banana", label: "Banana" },
-  { value: "Flux2", label: "Flux 2" },
-  { value: "即梦 4.5", label: "即梦 4.5" },
-  { value: "MJ", label: "Midjourney" },
-];
+import { getImageModels } from "@/lib/model-registry";
 
 const aspectRatios = [
   { value: "1:1", label: "1:1 方形" },
@@ -31,6 +24,14 @@ const resolutions = [
 
 const TextToImageNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
+  const [imageModels, setImageModels] = useState<
+    Array<{ value: string; label: string }>
+  >([]);
+
+  // 加载图片模型列表
+  useEffect(() => {
+    setImageModels(getImageModels());
+  }, []);
 
   const handleGenerate = useCallback(async () => {
     if (!data.prompt) return;
@@ -129,7 +130,7 @@ const TextToImageNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
         >
           <div className="bg-[#1a1a1a]/95 backdrop-blur-xl border border-zinc-700/50 rounded-2xl p-4 flex flex-col gap-3">
             <textarea
-              className="w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/20 min-h-18 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-blue-500 text-white placeholder-zinc-500 transition-all"
+              className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/20 min-h-18 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-blue-500 text-white placeholder-zinc-500 transition-all"
               placeholder="描述你想要生成的图片..."
               value={data.prompt || ""}
               onChange={(e) => updateNodeData(id, { prompt: e.target.value })}
@@ -138,7 +139,7 @@ const TextToImageNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
 
             <div className="flex items-center gap-2">
               <select
-                value={data.model || "BananaPro"}
+                value={data.model || imageModels[0]?.value || ""}
                 onChange={(e) => updateNodeData(id, { model: e.target.value })}
                 className="h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
               >

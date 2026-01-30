@@ -5,7 +5,7 @@ export interface FetchOptions {
 }
 
 export const constructUrl = (baseUrl: string, endpointPath: string): string => {
-  let base = baseUrl ? baseUrl.replace(/\/$/, "") : "";
+  const base = baseUrl ? baseUrl.replace(/\/$/, "") : "";
   let path = endpointPath.replace(/^\//, "");
 
   if (base.endsWith("/v1") && path.startsWith("v1/")) {
@@ -30,9 +30,17 @@ export const fetchThirdParty = async (
     throw new Error("API Key missing. Please configure it in settings.");
   }
 
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${apiKey}`,
-  };
+  const headers: Record<string, string> = {};
+
+  // 根据不同平台设置认证头
+  if (url.includes("dashscope.aliyuncs.com")) {
+    // 阿里云 DashScope 使用专用的 API Key 头
+    headers["Authorization"] = `Bearer ${apiKey}`;
+    headers["X-DashScope-SSE"] = "disable"; // 禁用 SSE
+  } else {
+    // 其他平台使用标准 Bearer token
+    headers["Authorization"] = `Bearer ${apiKey}`;
+  }
 
   if (!isFormData && method.toUpperCase() !== "GET") {
     headers["Content-Type"] = "application/json";

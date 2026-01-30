@@ -1,19 +1,12 @@
 "use client";
 
-import { memo, useCallback } from "react";
+import { memo, useCallback, useState, useEffect } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { Handle, Position } from "@xyflow/react";
 import { useCanvasStore } from "@/store/useCanvasStore";
 import { Video, Sparkles, Wand2, Loader2 } from "lucide-react";
 import type { NodeData } from "@/types";
-
-const videoModels = [
-  { value: "Sora 2", label: "Sora 2" },
-  { value: "Veo 3.1", label: "Veo 3.1" },
-  { value: "Kling", label: "Kling" },
-  { value: "即梦", label: "即梦" },
-  { value: "海螺", label: "海螺" },
-];
+import { getVideoModels } from "@/lib/model-registry";
 
 const durations = [
   { value: "5s", label: "5秒" },
@@ -30,50 +23,62 @@ const aspectRatios = [
 
 const TextToVideoNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
+  const [videoModels, setVideoModels] = useState<
+    Array<{ value: string; label: string }>
+  >([]);
 
-  const handleGenerate = useCallback(async () => {
-    if (!data.prompt) return;
+  // 加载视频模型列表
+  useEffect(() => {
+    setVideoModels(getVideoModels());
+  }, []);
 
-    updateNodeData(id, { isLoading: true, error: undefined });
+  const handleGenerate = useCallback(
+    async (skipCache = false) => {
+      if (!data.prompt) return;
 
-    try {
-      const response = await fetch("/api/generate/video", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt: data.prompt,
-          model: data.model || "Sora 2",
-          aspectRatio: data.aspectRatio || "16:9",
-          duration: data.duration || "5s",
-          promptOptimize: data.promptOptimize || false,
-        }),
-      });
+      updateNodeData(id, { isLoading: true, error: undefined });
 
-      const result = await response.json();
+      try {
+        const response = await fetch("/api/generate/video", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt: data.prompt,
+            model: data.model || "Sora 2",
+            aspectRatio: data.aspectRatio || "16:9",
+            duration: data.duration || "5s",
+            promptOptimize: data.promptOptimize || false,
+            skipCache, // 传递 skipCache 参数
+          }),
+        });
 
-      if (result.success && result.data) {
+        const result = await response.json();
+
+        if (result.success && result.data) {
+          updateNodeData(id, {
+            isLoading: false,
+            videoSrc: result.data,
+          });
+        } else {
+          throw new Error(result.error || "生成失败");
+        }
+      } catch (error) {
         updateNodeData(id, {
           isLoading: false,
-          videoSrc: result.data,
+          error: error instanceof Error ? error.message : "生成失败",
         });
-      } else {
-        throw new Error(result.error || "生成失败");
       }
-    } catch (error) {
-      updateNodeData(id, {
-        isLoading: false,
-        error: error instanceof Error ? error.message : "生成失败",
-      });
-    }
-  }, [
-    id,
-    data.prompt,
-    data.model,
-    data.aspectRatio,
-    data.duration,
-    data.promptOptimize,
-    updateNodeData,
-  ]);
+    },
+    [
+      id,
+      data.prompt,
+      data.model,
+      data.aspectRatio,
+      data.duration,
+      data.promptOptimize,
+      updateNodeData,
+    ],
+  );
 
   const hasResult = !!data.videoSrc && !data.isLoading;
 
@@ -127,7 +132,7 @@ const TextToVideoNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
           <div className="bg-[#1a1a1a]/95 backdrop-blur-xl border-zinc-700/50 rounded-2xl p-4 flex flex-col gap-3 border">
             {/* 提示词输入 */}
             <textarea
-              className="w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-green-500/20 min-h-18 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-green-500 text-white placeholder-zinc-500 transition-all"
+              className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-green-500/20 min-h-18 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-green-500 text-white placeholder-zinc-500 transition-all"
               placeholder="描述你想要生成的视频..."
               value={data.prompt || ""}
               onChange={(e) => updateNodeData(id, { prompt: e.target.value })}
@@ -138,7 +143,7 @@ const TextToVideoNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
             <div className="flex items-center gap-2">
               {/* 模型选择 */}
               <select
-                value={data.model || "Sora 2"}
+                value={data.model || videoModels[0]?.value || ""}
                 onChange={(e) => updateNodeData(id, { model: e.target.value })}
                 className="h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-green-500/20"
               >
@@ -201,7 +206,7 @@ const TextToVideoNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
 
               {/* 生成按钮 */}
               <button
-                onClick={handleGenerate}
+                onClick={() => handleGenerate()}
                 disabled={data.isLoading || !data.prompt}
                 className={`shrink-0 h-8 px-4 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 whitespace-nowrap transition-all active:scale-[0.98] ${
                   data.isLoading || !data.prompt
