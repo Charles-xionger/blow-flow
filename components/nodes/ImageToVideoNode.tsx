@@ -37,7 +37,7 @@ const ImageToVideoNode = ({
   );
 
   const [videoModels, setVideoModels] = useState<
-    Array<{ value: string; label: string }>
+    Array<{ id: string; value: string; label: string }>
   >([]);
 
   // 加载视频模型列表
@@ -182,7 +182,7 @@ const ImageToVideoNode = ({
                 className="h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
               >
                 {videoModels.map((m) => (
-                  <option key={m.value} value={m.value}>
+                  <option key={m.value} value={m.id}>
                     {m.label}
                   </option>
                 ))}

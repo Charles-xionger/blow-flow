@@ -4,6 +4,7 @@ import { generateFluxImage } from "@/lib/ai-services/image/flux";
 import { generateGenericImage } from "@/lib/ai-services/image/generic";
 import { getModelConfig as getModelConfigFromDb } from "@/lib/db/model-configs";
 import { getCacheKey, getCache, setCache } from "@/lib/db/cache";
+import { getOSSClient } from "@/services/ossService";
 import type { ModelConfig } from "@/types";
 
 interface ImageToImageRequest {
@@ -105,9 +106,29 @@ export async function POST(request: NextRequest) {
       generateFn = generateGenericImage;
     }
 
-    const imageUrl = await generateFn(config, finalPrompt, aspectRatio, "1k", [
-      inputImage,
-    ]);
+    const tempImageUrl = await generateFn(
+      config,
+      finalPrompt,
+      aspectRatio,
+      "1k",
+      [inputImage],
+    );
+
+    // 下载并上传到自己的 OSS
+    let imageUrl = tempImageUrl;
+    try {
+      const ossClient = getOSSClient();
+      const result = await ossClient.downloadAndUpload(
+        tempImageUrl,
+        "images",
+        `i2i-${Date.now()}.png`,
+      );
+      imageUrl = result.url;
+      console.log("[API] Image-to-image uploaded to OSS:", imageUrl);
+    } catch (ossError) {
+      console.error("[API] Failed to upload image-to-image to OSS:", ossError);
+      // 降级使用临时 URL
+    }
 
     // 保存到缓存（图生图使用较短的缓存时间，因为用户通常期望每次生成都是新的）
     if (!skipCache) {

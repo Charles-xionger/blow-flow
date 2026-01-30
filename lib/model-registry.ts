@@ -90,15 +90,46 @@ export function getImageModels(): Array<{ value: string; label: string }> {
 
 /**
  * 获取视频模型列表（用于下拉选择）
+ * 优先从数据库读取配置的模型
  */
-export function getVideoModels(): Array<{ value: string; label: string }> {
-  const allModels = getAllModels();
-  return Object.entries(allModels)
-    .filter(([, model]) => model.category === "VIDEO")
-    .map(([key, model]) => ({
-      value: model.id,
-      label: model.name,
-    }));
+export function getVideoModels(): Array<{
+  value: string;
+  label: string;
+  id: string;
+}> {
+  const models: Array<{ value: string; label: string; id: string }> = [];
+
+  // 1. 从数据库读取已配置的模型
+  if (typeof window === "undefined") {
+    // 服务端：只返回内置模型
+    const allModels = getAllModels();
+    return Object.entries(allModels)
+      .filter(([, model]) => model.category === "VIDEO")
+      .map(([key, model]) => ({
+        id: model.id,
+        value: key,
+        label: model.name,
+      }));
+  }
+
+  try {
+    // 客户端：从数据库API获取配置的模型
+    // 注意：这是同步调用，需要在组件中异步获取
+    const allModels = getAllModels();
+    Object.entries(allModels)
+      .filter(([, model]) => model.category === "VIDEO")
+      .forEach(([key, model]) => {
+        models.push({
+          value: key,
+          label: model.name,
+          id: model.id,
+        });
+      });
+  } catch (error) {
+    console.error("Failed to load video models:", error);
+  }
+
+  return models;
 }
 
 /**

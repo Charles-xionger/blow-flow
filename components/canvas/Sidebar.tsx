@@ -194,6 +194,17 @@ export function Sidebar() {
             }
           />
           <NodeButton
+            icon={Video}
+            label="首尾帧生成视频"
+            description="首尾两图生成视频"
+            type={NodeType.START_END_TO_VIDEO}
+            color={
+              isDark
+                ? "bg-pink-500/15 text-pink-400"
+                : "bg-pink-100 text-pink-600"
+            }
+          />
+          <NodeButton
             icon={Sparkles}
             label="创意描述"
             description="AI增强提示词"

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateGenericVideo } from "@/lib/ai-services/video/generic";
 import { getModelConfig as getModelConfigFromDb } from "@/lib/db/model-configs";
 import { getCacheKey, getCache, setCache } from "@/lib/db/cache";
+import { getOSSClient } from "@/services/ossService";
 import type { ModelConfig } from "@/types";
 
 interface GenerateVideoRequest {
@@ -95,7 +96,7 @@ export async function POST(request: NextRequest) {
     // 批量生成
     const results: string[] = [];
     for (let i = 0; i < count; i++) {
-      const videoUrl = await generateGenericVideo(
+      const tempVideoUrl = await generateGenericVideo(
         config,
         finalPrompt,
         aspectRatio,
@@ -104,6 +105,23 @@ export async function POST(request: NextRequest) {
         inputImages,
         isStartEndMode,
       );
+
+      // 下载并上传到自己的 OSS
+      let videoUrl = tempVideoUrl;
+      try {
+        const ossClient = getOSSClient();
+        const result = await ossClient.downloadAndUpload(
+          tempVideoUrl,
+          "videos",
+          `text-video-${Date.now()}-${i}.mp4`,
+        );
+        videoUrl = result.url;
+        console.log(`[API] Video ${i + 1}/${count} uploaded to OSS:`, videoUrl);
+      } catch (ossError) {
+        console.error(`[API] Failed to upload video ${i + 1} to OSS:`, ossError);
+        // 降级使用临时 URL
+      }
+
       results.push(videoUrl);
     }
 

@@ -47,6 +47,7 @@ function initializeTables(db: Database.Database) {
       endpoint TEXT NOT NULL,
       query_endpoint TEXT,
       download_endpoint TEXT,
+      category TEXT DEFAULT 'VIDEO' CHECK(category IN ('IMAGE', 'VIDEO')),
       updated_at INTEGER NOT NULL
     );
   `);

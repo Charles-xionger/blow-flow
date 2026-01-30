@@ -70,6 +70,7 @@ export interface ModelConfig {
   endpoint: string;
   queryEndpoint?: string;
   downloadEndpoint?: string;
+  category?: "IMAGE" | "VIDEO";
 }
 
 // 模型定义

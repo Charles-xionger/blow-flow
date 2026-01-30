@@ -20,38 +20,87 @@ const durations = [
   { value: "10", label: "10秒" },
 ];
 
+const resolutions = [
+  { value: "480P", label: "480P" },
+  { value: "720P", label: "720P" },
+  { value: "1080P", label: "1080P" },
+];
+
 const StartEndToVideoNode = ({
   id,
   data,
   selected,
 }: NodeProps<Node<NodeData>>) => {
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
+  const nodes = useCanvasStore((state) => state.nodes);
+  const edges = useCanvasStore((state) => state.edges);
 
-  // 优化：只订阅与此节点相关的数据，避免不必要的重新渲染
-  const inputImages = useCanvasStore(
-    useCallback(
-      (state) => {
-        const inputEdges = state.edges.filter((edge) => edge.target === id);
-        const images = inputEdges
-          .map((edge) => {
-            const sourceNode = state.nodes.find((n) => n.id === edge.source);
-            return sourceNode?.data.imageSrc;
-          })
-          .filter(Boolean) as string[];
+  // 计算输入图片
+  const inputImages = useMemo(() => {
+    const inputEdges = edges.filter((edge) => edge.target === id);
+    const images = inputEdges
+      .map((edge) => {
+        const sourceNode = nodes.find((n) => n.id === edge.source);
+        return sourceNode?.data.imageSrc;
+      })
+      .filter(Boolean) as string[];
 
-        return images.slice(0, 2); // 只取前两张
-      },
-      [id],
-    ),
-  );
+    return images.slice(0, 2); // 只取前两张
+  }, [edges, nodes, id]);
 
   const [videoModels, setVideoModels] = useState<
     Array<{ value: string; label: string }>
   >([]);
 
-  // 加载视频模型列表
+  // 加载视频模型列表 - 从数据库API异步获取
   useEffect(() => {
-    setVideoModels(getVideoModels());
+    const loadModels = async () => {
+      try {
+        // 先加载内置模型
+        const builtinModels = getVideoModels();
+
+        // 然后从数据库API获取配置的模型
+        const response = await fetch("/api/model-config");
+        if (response.ok) {
+          const result = await response.json();
+          if (result.success && result.data) {
+            // 根据 category 字段过滤视频模型
+            const dbModels = Object.entries(result.data)
+              .filter(([name, config]: [string, any]) => {
+                return config.category === "VIDEO";
+              })
+              .map(([name, config]: [string, any]) => ({
+                value: name, // 使用数据库中的 model_name 作为 value
+                label: name, // 显示完整的模型名称
+              }));
+
+            console.log(
+              "[StartEndToVideoNode] Loaded video models from database:",
+              dbModels,
+            );
+
+            // 合并并去重
+            const allModels = [...dbModels, ...builtinModels];
+            const uniqueModels = allModels.filter(
+              (model, index, self) =>
+                index === self.findIndex((m) => m.value === model.value),
+            );
+
+            setVideoModels(uniqueModels);
+            return;
+          }
+        }
+
+        // 如果获取失败，使用内置模型
+        setVideoModels(builtinModels);
+      } catch (error) {
+        console.error("[StartEndToVideoNode] Failed to load models:", error);
+        // 降级到内置模型
+        setVideoModels(getVideoModels());
+      }
+    };
+
+    loadModels();
   }, []);
 
   const [startImage, endImage] = data.swapFrames
@@ -63,21 +112,33 @@ const StartEndToVideoNode = ({
 
     updateNodeData(id, { isLoading: true, error: undefined });
 
+    const requestPayload = {
+      prompt: data.prompt,
+      startImage,
+      endImage,
+      model:
+        data.model ||
+        videoModels[0]?.value ||
+        "wan2.2-kf2v-flash-首尾帧生成视频模型",
+      duration: parseInt(data.duration || "5"),
+      resolution: data.resolution || "720P",
+      promptOptimize: data.promptOptimize || false,
+    };
+
+    console.log(
+      "[StartEndToVideoNode] Generating video with payload:",
+      requestPayload,
+    );
+
     try {
       const response = await fetch("/api/generate/start-end-to-video", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt: data.prompt,
-          startImage,
-          endImage,
-          model: data.model || "wan2.6-i2v-flash",
-          duration: parseInt(data.duration || "5"),
-          promptOptimize: data.promptOptimize || false,
-        }),
+        body: JSON.stringify(requestPayload),
       });
 
       const result = await response.json();
+      console.log("[StartEndToVideoNode] API response:", result);
 
       if (result.success && result.data) {
         updateNodeData(id, {
@@ -89,6 +150,7 @@ const StartEndToVideoNode = ({
         throw new Error(result.error || "生成失败");
       }
     } catch (error) {
+      console.error("[StartEndToVideoNode] Generation error:", error);
       updateNodeData(id, {
         isLoading: false,
         error: error instanceof Error ? error.message : "生成失败",
@@ -227,6 +289,20 @@ const StartEndToVideoNode = ({
                 {videoModels.map((m) => (
                   <option key={m.value} value={m.value}>
                     {m.label}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={data.resolution || "720P"}
+                onChange={(e) =>
+                  updateNodeData(id, { resolution: e.target.value })
+                }
+                className="h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-pink-500/20"
+              >
+                {resolutions.map((r) => (
+                  <option key={r.value} value={r.value}>
+                    {r.label}
                   </option>
                 ))}
               </select>

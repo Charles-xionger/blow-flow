@@ -109,14 +109,21 @@ export async function POST(request: NextRequest) {
 
     let videoUrl: string;
 
-    // 判断是否是阿里云万相模型
+    // 判断是否是阿里云万相模型（检查 modelId 而不是 model 名称）
     const isAliyunWanx =
-      model.startsWith("wan") ||
-      model.includes("wanx") ||
-      model.includes("aliyun");
+      config.modelId.startsWith("wan") ||
+      config.modelId.includes("wanx") ||
+      config.modelId.includes("aliyun");
+
+    console.log("[API] Model detection:", {
+      model,
+      modelId: config.modelId,
+      isAliyunWanx,
+    });
 
     if (isAliyunWanx) {
       // 使用阿里云万相 API
+      console.log("[API] Using Aliyun Wanx service for i2v");
       const durationNum =
         typeof duration === "string" ? parseInt(duration) : duration;
 

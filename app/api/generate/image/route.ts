@@ -4,6 +4,7 @@ import { generateFluxImage } from "@/lib/ai-services/image/flux";
 import { generateGenericImage } from "@/lib/ai-services/image/generic";
 import { getModelConfig as getModelConfigFromDb } from "@/lib/db/model-configs";
 import { getCacheKey, getCache, setCache } from "@/lib/db/cache";
+import { getOSSClient } from "@/services/ossService";
 import type { ModelConfig } from "@/types";
 
 interface GenerateImageRequest {
@@ -133,13 +134,33 @@ export async function POST(request: NextRequest) {
     // 批量生成
     const results: string[] = [];
     for (let i = 0; i < count; i++) {
-      const imageUrl = await generateFn(
+      const tempImageUrl = await generateFn(
         config,
         finalPrompt,
         aspectRatio,
         resolution,
         inputImages,
       );
+
+      // 下载并上传到自己的 OSS
+      let imageUrl = tempImageUrl;
+      try {
+        const ossClient = getOSSClient();
+        const result = await ossClient.downloadAndUpload(
+          tempImageUrl,
+          "images",
+          `image-${Date.now()}-${i}.png`,
+        );
+        imageUrl = result.url;
+        console.log(`[API] Image ${i + 1}/${count} uploaded to OSS:`, imageUrl);
+      } catch (ossError) {
+        console.error(
+          `[API] Failed to upload image ${i + 1} to OSS:`,
+          ossError,
+        );
+        // 降级使用临时 URL
+      }
+
       results.push(imageUrl);
     }
 

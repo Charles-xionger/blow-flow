@@ -106,7 +106,12 @@ export async function generateAliyunWanxVideo(
   }
 
   // 创建任务
-  console.log("[AliyunWanx] Creating video generation task...");
+  console.log("[AliyunWanx] Creating video generation task...", {
+    model: config.modelId,
+    resolution,
+    duration,
+    endpoint: createUrl,
+  });
 
   // 为阿里云 API 添加特殊请求头
   const createHeaders: Record<string, string> = {
@@ -114,6 +119,11 @@ export async function generateAliyunWanxVideo(
     "X-DashScope-Async": "enable",
     "Content-Type": "application/json",
   };
+
+  console.log(
+    "[AliyunWanx] Request payload:",
+    JSON.stringify(payload, null, 2),
+  );
 
   const createRes = await fetch(createUrl, {
     method: "POST",
@@ -123,6 +133,7 @@ export async function generateAliyunWanxVideo(
 
   if (!createRes.ok) {
     const errorText = await createRes.text();
+    console.error("[AliyunWanx] Create task failed:", errorText);
     throw new Error(`Failed to create task: ${errorText}`);
   }
 
