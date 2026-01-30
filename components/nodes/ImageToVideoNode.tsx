@@ -130,7 +130,7 @@ const ImageToVideoNode = ({
       {/* 控制面板 */}
       {selected && (
         <div
-          className="absolute top-full left-1/2 -translate-x-1/2 min-w-[400px] pt-4 z-[70] pointer-events-auto"
+          className="absolute top-full left-1/2 -translate-x-1/2 min-w-100 pt-4 z-70 pointer-events-auto"
           onMouseDown={(e) => e.stopPropagation()}
         >
           <div className="bg-[#1a1a1a]/95 backdrop-blur-xl border border-zinc-700/50 rounded-2xl p-4 flex flex-col gap-3">
@@ -156,7 +156,7 @@ const ImageToVideoNode = ({
             )}
 
             <textarea
-              className="w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500/20 min-h-[72px] bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-indigo-500 text-white placeholder-zinc-500 transition-all"
+              className="w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500/20 min-h-18 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-indigo-500 text-white placeholder-zinc-500 transition-all"
               placeholder="描述视频的运动和变化..."
               value={data.prompt || ""}
               onChange={(e) => updateNodeData(id, { prompt: e.target.value })}
@@ -215,7 +215,7 @@ const ImageToVideoNode = ({
                 className={`shrink-0 h-8 px-4 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 whitespace-nowrap transition-all active:scale-[0.98] ${
                   data.isLoading || !data.prompt || !inputImage
                     ? "bg-gray-400 text-white cursor-not-allowed"
-                    : "bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40"
+                    : "bg-linear-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40"
                 }`}
               >
                 {data.isLoading ? (

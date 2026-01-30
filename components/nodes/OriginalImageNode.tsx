@@ -99,7 +99,7 @@ const OriginalImageNode = ({
       {/* 控制面板 */}
       {selected && (
         <div
-          className="absolute top-full left-1/2 -translate-x-1/2 min-w-[400px] pt-4 z-[70] pointer-events-auto"
+          className="absolute top-full left-1/2 -translate-x-1/2 min-w-100 pt-4 z-70 pointer-events-auto"
           onMouseDown={(e) => e.stopPropagation()}
         >
           <div className="bg-[#1a1a1a]/95 backdrop-blur-xl border border-zinc-700/50 rounded-2xl p-4 flex flex-col gap-3">
