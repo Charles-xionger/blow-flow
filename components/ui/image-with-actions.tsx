@@ -149,7 +149,7 @@ export function ImageWithActions({
         typeof document !== "undefined" &&
         createPortal(
           <div
-            className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/90 backdrop-blur-sm"
+            className="fixed inset-0 z-10000 flex items-center justify-center bg-black/90 backdrop-blur-sm"
             onClick={() => setShowPreview(false)}
           >
             {/* 关闭按钮 */}

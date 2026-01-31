@@ -4,7 +4,7 @@ import { memo, useCallback, useRef, useEffect } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { Handle, Position } from "@xyflow/react";
 import { useCanvasStore } from "@/store/useCanvasStore";
-import { Image, Upload, X } from "lucide-react";
+import { Image as ImageIcon, Upload, X } from "lucide-react";
 import type { NodeData } from "@/types";
 import { EditableTitle } from "./shared/EditableTitle";
 import { QuickAddNode } from "../canvas/QuickAddNode";
@@ -166,20 +166,17 @@ const OriginalImageNode = ({
             <span className="text-xs opacity-40 mt-1">{data.error}</span>
           </div>
         ) : hasResult ? (
-          <div
-            className="relative w-full h-full cursor-pointer"
-            onClick={() => setShowPreview(true)}
-          >
-            <img
-              src={data.imageSrc}
-              alt="Uploaded"
+          <div className="relative w-full h-full cursor-pointer">
+            <ImageWithActions
+              src={data.imageSrc || ""}
+              alt="Uploaded image"
               className="w-full h-full object-contain"
             />
           </div>
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center text-zinc-500">
             <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 bg-zinc-800/50 text-zinc-500">
-              <Image size={28} className="opacity-60" />
+              <ImageIcon size={28} className="opacity-60" />
             </div>
             <span className="text-sm font-medium opacity-60">原图</span>
             <span className="text-xs opacity-40 mt-1">选中节点上传图片</span>

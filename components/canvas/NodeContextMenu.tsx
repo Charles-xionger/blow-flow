@@ -177,7 +177,7 @@ export function NodeContextMenu({
     <>
       {/* 背景遮罩 */}
       <div
-        className="fixed inset-0 z-[9998]"
+        className="fixed inset-0 z-9998"
         onClick={onClose}
         onContextMenu={(e) => {
           e.preventDefault();
@@ -188,7 +188,7 @@ export function NodeContextMenu({
       {/* 菜单内容 */}
       <div
         style={menuStyle}
-        className="min-w-[200px] rounded-lg border border-gray-700 bg-[#1a1a1a] shadow-2xl"
+        className="min-w-50 rounded-lg border border-gray-700 bg-[#1a1a1a] shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="py-1">
@@ -278,7 +278,7 @@ export function NodeContextMenu({
                 </button>
 
                 {/* 子菜单 */}
-                <div className="absolute left-full top-0 ml-1 hidden min-w-[180px] rounded-lg border border-gray-700 bg-[#1a1a1a] shadow-2xl group-hover:block">
+                <div className="absolute left-full top-0 ml-1 hidden min-w-45 rounded-lg border border-gray-700 bg-[#1a1a1a] shadow-2xl group-hover:block">
                   <div className="py-1">
                     <button
                       onClick={() =>

@@ -36,7 +36,15 @@ export const fetchThirdParty = async (
   if (url.includes("dashscope.aliyuncs.com")) {
     // 阿里云 DashScope 使用专用的 API Key 头
     headers["Authorization"] = `Bearer ${apiKey}`;
-    headers["X-DashScope-Async"] = "enable"; // 启用异步模式
+
+    // 只为视频生成 API 启用异步模式，图片生成不支持异步
+    if (
+      url.includes("/video-generation/") ||
+      url.includes("/video-synthesis")
+    ) {
+      headers["X-DashScope-Async"] = "enable"; // 启用异步模式
+    }
+
     headers["X-DashScope-SSE"] = "disable"; // 禁用 SSE
   } else {
     // 其他平台使用标准 Bearer token
