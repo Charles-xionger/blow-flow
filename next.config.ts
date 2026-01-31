@@ -29,7 +29,9 @@ const nextConfig: NextConfig = {
   },
 
   // Turbopack 配置 (Next.js 16+ 默认使用)
-  turbopack: {},
+  turbopack: {
+    root: __dirname,
+  },
 };
 
 export default nextConfig;
