@@ -30,6 +30,8 @@ export function TopBar() {
     clearCanvas,
     setNodes,
     setEdges,
+    currentWorkflowId,
+    setCurrentWorkflowId,
   } = useCanvasStore();
 
   const [isEditingProjectName, setIsEditingProjectName] = useState(false);
@@ -60,8 +62,14 @@ export function TopBar() {
         viewport,
       };
 
-      const response = await fetch("/api/workflow", {
-        method: "POST",
+      // 如果有 currentWorkflowId，使用 PUT 更新；否则使用 POST 创建
+      const url = currentWorkflowId
+        ? `/api/workflow/${currentWorkflowId}`
+        : "/api/workflow";
+      const method = currentWorkflowId ? "PUT" : "POST";
+
+      const response = await fetch(url, {
+        method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(workflow),
       });
@@ -69,6 +77,10 @@ export function TopBar() {
       const result = await response.json();
 
       if (result.success) {
+        // 如果是新建项目（POST），保存返回的 ID
+        if (!currentWorkflowId && result.data?.id) {
+          setCurrentWorkflowId(result.data.id);
+        }
         toast.success("保存成功", {
           description: `工作流 "${projectName}" 已保存`,
         });
@@ -319,23 +331,6 @@ export function TopBar() {
           >
             <Trash2 size={15} />
             <span>清空</span>
-          </button>
-
-          <div
-            className={`w-px h-5 ${isDark ? "bg-zinc-700" : "bg-gray-200"}`}
-          />
-
-          {/* 存储（暂未实现） */}
-          <button
-            onClick={() => toast.info("存储功能开发中")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium transition-all ${
-              isDark
-                ? "text-gray-400 hover:text-white hover:bg-white/5"
-                : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
-            }`}
-          >
-            <FolderOpen size={15} />
-            <span>存储</span>
           </button>
 
           {/* API 设置 */}

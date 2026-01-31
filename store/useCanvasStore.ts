@@ -74,6 +74,7 @@ interface CanvasState {
 
   // 工作流
   setProjectName: (name: string) => void;
+  setCurrentWorkflowId: (id: string | null) => void;
   loadWorkflow: (workflow: WorkflowData) => void;
   clearWorkflow: () => void;
   clearCanvas: () => void; // 别名，与原项目保持一致
@@ -443,6 +444,10 @@ export const useCanvasStore = create<CanvasState>()(
         // 工作流管理
         setProjectName: (name: string) => {
           set({ projectName: name });
+        },
+
+        setCurrentWorkflowId: (id: string | null) => {
+          set({ currentWorkflowId: id });
         },
 
         loadWorkflow: (workflow: WorkflowData) => {

@@ -26,6 +26,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 
 // 侧边栏按钮组件 - 移到组件外部
 interface SidebarButtonProps {
@@ -71,7 +72,13 @@ const SidebarButton: React.FC<SidebarButtonProps> = ({
 };
 
 export function Sidebar() {
-  const { addNode, isDarkMode, loadWorkflow } = useCanvasStore();
+  const {
+    addNode,
+    isDarkMode,
+    loadWorkflow,
+    currentWorkflowId,
+    clearWorkflow,
+  } = useCanvasStore();
   const [activePanel, setActivePanel] = useState<
     "ADD" | "HISTORY" | "PROJECT" | null
   >(null);
@@ -169,11 +176,27 @@ export function Sidebar() {
       });
       const result = await response.json();
       if (result.success) {
+        // 如果删除的是当前正在编辑的项目，清空画布
+        if (workflowToDelete === currentWorkflowId) {
+          clearWorkflow();
+          toast.success("项目已删除", {
+            description: "已清空画布，可以开始新项目",
+          });
+        } else {
+          toast.success("项目已删除");
+        }
         // 重新加载项目列表
         loadWorkflowList();
+      } else {
+        toast.error("删除失败", {
+          description: result.error || "未知错误",
+        });
       }
     } catch (error) {
       console.error("Failed to delete workflow:", error);
+      toast.error("删除失败", {
+        description: "网络错误，请重试",
+      });
     } finally {
       setDeleteDialogOpen(false);
       setWorkflowToDelete(null);
@@ -306,8 +329,11 @@ export function Sidebar() {
     <div className="space-y-3">
       <button
         onClick={() => {
-          // TODO: 新建工作流
+          clearWorkflow();
           setActivePanel(null);
+          toast.success("新建项目", {
+            description: "已清空画布，可以开始创作",
+          });
         }}
         className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${hoverBg}`}
       >

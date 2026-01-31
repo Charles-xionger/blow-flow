@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useRef, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ReactFlow,
   Background,
@@ -50,6 +51,8 @@ const nodeTypes = {
 function CanvasInner() {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const { screenToFlowPosition, getViewport } = useReactFlow();
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
   const {
     nodes,
@@ -66,7 +69,56 @@ function CanvasInner() {
     contextMenu,
     showContextMenu,
     hideContextMenu,
+    loadWorkflow,
   } = useCanvasStore();
+
+  const setCurrentWorkflowId = useCanvasStore(
+    (state) => state.setCurrentWorkflowId,
+  );
+
+  // 从 URL 加载项目
+  useEffect(() => {
+    const projectId = searchParams.get("project");
+    console.log(
+      "[URL Load] projectId from URL:",
+      projectId,
+      "currentWorkflowId:",
+      currentWorkflowId,
+    );
+    if (projectId && projectId !== currentWorkflowId) {
+      console.log("[URL Load] Loading project from URL:", projectId);
+      // 从 API 加载项目
+      fetch(`/api/workflow/${projectId}`)
+        .then((res) => res.json())
+        .then((result) => {
+          if (result.success && result.data) {
+            loadWorkflow(result.data);
+          }
+        })
+        .catch((err) =>
+          console.error("Failed to load workflow from URL:", err),
+        );
+    }
+  }, [searchParams, currentWorkflowId, loadWorkflow]);
+
+  // 同步 currentWorkflowId 到 URL
+  useEffect(() => {
+    const currentProjectId = searchParams.get("project");
+    console.log(
+      "[URL Sync] currentWorkflowId:",
+      currentWorkflowId,
+      "URL projectId:",
+      currentProjectId,
+    );
+
+    if (currentWorkflowId && currentProjectId !== currentWorkflowId) {
+      console.log("[URL Sync] Updating URL to:", currentWorkflowId);
+      router.push(`/?project=${currentWorkflowId}`, { scroll: false });
+    } else if (!currentWorkflowId && currentProjectId) {
+      console.log("[URL Sync] Clearing URL");
+      router.push("/", { scroll: false });
+    }
+  }, [currentWorkflowId, router, searchParams]);
 
   // 同步主题到 DOM
   useEffect(() => {
@@ -84,6 +136,8 @@ function CanvasInner() {
       return;
     }
 
+    console.log("[Save] Current workflowId:", currentWorkflowId);
+
     try {
       const workflow = {
         name: projectName,
@@ -98,6 +152,8 @@ function CanvasInner() {
         : "/api/workflow";
       const method = currentWorkflowId ? "PUT" : "POST";
 
+      console.log("[Save] Using method:", method, "URL:", url);
+
       const response = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
@@ -107,6 +163,12 @@ function CanvasInner() {
       const result = await response.json();
 
       if (result.success) {
+        console.log("[Save] Success, result:", result.data);
+        // 如果是新建项目（POST），保存返回的 ID
+        if (!currentWorkflowId && result.data?.id) {
+          console.log("[Save] Setting new workflowId:", result.data.id);
+          setCurrentWorkflowId(result.data.id);
+        }
         toast.success("保存成功", {
           description: `工作流 "${projectName}" 已保存`,
         });
@@ -118,7 +180,14 @@ function CanvasInner() {
         description: error instanceof Error ? error.message : "未知错误",
       });
     }
-  }, [nodes, edges, projectName, currentWorkflowId, getViewport]);
+  }, [
+    nodes,
+    edges,
+    projectName,
+    currentWorkflowId,
+    getViewport,
+    setCurrentWorkflowId,
+  ]);
 
   useKeyboardShortcuts(handleSave);
 
