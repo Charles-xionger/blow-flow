@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useMemo, useState, useEffect } from "react";
+import { memo, useCallback, useState, useEffect } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { Handle, Position } from "@xyflow/react";
 import { useCanvasStore } from "@/store/useCanvasStore";
@@ -14,7 +14,19 @@ import { ImageWithActions } from "@/components/ui/image-with-actions";
 
 const durations = [
   { value: "5", label: "5秒" },
+  { value: "8", label: "8秒" },
   { value: "10", label: "10秒" },
+];
+
+const resolutions = [
+  { value: "720P", label: "720P" },
+  { value: "1080P", label: "1080P" },
+  { value: "4K", label: "4K" },
+];
+
+const aspectRatios = [
+  { value: "16:9", label: "横屏 (16:9)" },
+  { value: "9:16", label: "竖屏 (9:16)" },
 ];
 
 const ImageToVideoNode = ({
@@ -85,6 +97,8 @@ const ImageToVideoNode = ({
             inputImage,
             model: data.model || "wan2.6-i2v-flash",
             duration: parseInt(data.duration || "5"),
+            resolution: data.resolution || "720P",
+            aspectRatio: data.aspectRatio || "16:9",
             promptOptimize: data.promptOptimize || false,
             skipCache, // 传递 skipCache 参数
           }),
@@ -108,7 +122,7 @@ const ImageToVideoNode = ({
         });
       }
     },
-    [id, data, localPrompt, inputImage, updateNodeData],
+    [id, data, inputImage, updateNodeData],
   );
 
   const hasResult = !!data.videoSrc && !data.isLoading;
@@ -206,67 +220,106 @@ const ImageToVideoNode = ({
               rows={3}
             />
 
-            <div className="flex items-center gap-2">
-              <select
-                value={data.model || videoModels[0]?.value || ""}
-                onChange={(e) => updateNodeData(id, { model: e.target.value })}
-                className="h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-              >
-                {videoModels.map((m) => (
-                  <option key={m.value} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
+            <div className="flex flex-col gap-2">
+              {/* 第一行：模型和时长 */}
+              <div className="flex items-center gap-2">
+                <select
+                  value={data.model || videoModels[0]?.value || ""}
+                  onChange={(e) =>
+                    updateNodeData(id, { model: e.target.value })
+                  }
+                  className="flex-1 h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                >
+                  {videoModels.map((m) => (
+                    <option key={m.value} value={m.id}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
 
-              <select
-                value={data.duration || "5"}
-                onChange={(e) =>
-                  updateNodeData(id, { duration: e.target.value })
-                }
-                className="h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-              >
-                {durations.map((d) => (
-                  <option key={d.value} value={d.value}>
-                    {d.label}
-                  </option>
-                ))}
-              </select>
+                <select
+                  value={data.duration || "5"}
+                  onChange={(e) =>
+                    updateNodeData(id, { duration: e.target.value })
+                  }
+                  className="h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                >
+                  {durations.map((d) => (
+                    <option key={d.value} value={d.value}>
+                      {d.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-              <button
-                className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-all border ${
-                  data.promptOptimize
-                    ? "text-indigo-400 bg-indigo-500/20 border-indigo-500/30"
-                    : "text-zinc-400 hover:text-white border-zinc-700 hover:border-zinc-600 hover:bg-zinc-700"
-                }`}
-                onClick={() =>
-                  updateNodeData(id, { promptOptimize: !data.promptOptimize })
-                }
-              >
-                <Sparkles
-                  size={15}
-                  fill={data.promptOptimize ? "currentColor" : "none"}
-                />
-              </button>
+              {/* 第二行：分辨率和宽高比 */}
+              <div className="flex items-center gap-2">
+                <select
+                  value={data.resolution || "720P"}
+                  onChange={(e) =>
+                    updateNodeData(id, { resolution: e.target.value })
+                  }
+                  className="flex-1 h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                >
+                  {resolutions.map((r) => (
+                    <option key={r.value} value={r.value}>
+                      {r.label}
+                    </option>
+                  ))}
+                </select>
 
-              <div className="flex-1" />
+                <select
+                  value={data.aspectRatio || "16:9"}
+                  onChange={(e) =>
+                    updateNodeData(id, { aspectRatio: e.target.value })
+                  }
+                  className="flex-1 h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                >
+                  {aspectRatios.map((a) => (
+                    <option key={a.value} value={a.value}>
+                      {a.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-              <button
-                onClick={() => handleGenerate()}
-                disabled={data.isLoading || !localPrompt || !inputImage}
-                className={`shrink-0 h-8 px-4 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 whitespace-nowrap transition-all active:scale-[0.98] ${
-                  data.isLoading || !localPrompt || !inputImage
-                    ? "bg-gray-400 text-white cursor-not-allowed"
-                    : "bg-linear-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40"
-                }`}
-              >
-                {data.isLoading ? (
-                  <Loader2 className="animate-spin" size={15} />
-                ) : (
-                  <Wand2 size={15} />
-                )}
-                <span>{data.isLoading ? "生成中" : "生成"}</span>
-              </button>
+              {/* 第三行：按钮组 */}
+              <div className="flex items-center gap-2">
+                <button
+                  className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-all border ${
+                    data.promptOptimize
+                      ? "text-indigo-400 bg-indigo-500/20 border-indigo-500/30"
+                      : "text-zinc-400 hover:text-white border-zinc-700 hover:border-zinc-600 hover:bg-zinc-700"
+                  }`}
+                  onClick={() =>
+                    updateNodeData(id, { promptOptimize: !data.promptOptimize })
+                  }
+                >
+                  <Sparkles
+                    size={15}
+                    fill={data.promptOptimize ? "currentColor" : "none"}
+                  />
+                </button>
+
+                <div className="flex-1" />
+
+                <button
+                  onClick={() => handleGenerate()}
+                  disabled={data.isLoading || !localPrompt || !inputImage}
+                  className={`shrink-0 h-8 px-4 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 whitespace-nowrap transition-all active:scale-[0.98] ${
+                    data.isLoading || !localPrompt || !inputImage
+                      ? "bg-gray-400 text-white cursor-not-allowed"
+                      : "bg-linear-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40"
+                  }`}
+                >
+                  {data.isLoading ? (
+                    <Loader2 className="animate-spin" size={15} />
+                  ) : (
+                    <Wand2 size={15} />
+                  )}
+                  <span>{data.isLoading ? "生成中" : "生成"}</span>
+                </button>
+              </div>
             </div>
 
             {data.error && (

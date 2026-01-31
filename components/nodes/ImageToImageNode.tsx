@@ -31,29 +31,35 @@ const ImageToImageNode = ({
   selected,
 }: NodeProps<Node<NodeData>>) => {
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
-  const nodes = useCanvasStore((state) => state.nodes);
   const selectedNodeIds = useCanvasStore((state) => state.selectedNodeIds);
+
+  // 获取输入边和节点
+  const edges = useCanvasStore((state) => state.edges);
+  const nodes = useCanvasStore((state) => state.nodes);
+
   const currentNode = nodes.find((n) => n.id === id);
   const nodePosition = currentNode?.position || { x: 0, y: 0 };
 
   // 只有在单选状态下才显示控制面板
   const shouldShowPanel = selected && selectedNodeIds.length === 1;
 
-  // 优化：只订阅与此节点相关的数据，避免不必要的重新渲染
-  const inputImage = useCanvasStore(
-    useCallback(
-      (state) => {
-        const inputEdges = state.edges.filter((edge) => edge.target === id);
-        if (inputEdges.length === 0) return null;
+  // 计算输入图片（使用 useMemo 稳定引用）
+  const inputImages = useMemo(() => {
+    const inputEdges = edges.filter((edge) => edge.target === id);
+    if (inputEdges.length === 0) return [];
 
-        const sourceNode = state.nodes.find(
-          (n) => n.id === inputEdges[0].source,
-        );
+    const images = inputEdges
+      .map((edge) => {
+        const sourceNode = nodes.find((n) => n.id === edge.source);
         return sourceNode?.data.imageSrc;
-      },
-      [id],
-    ),
-  );
+      })
+      .filter(Boolean) as string[];
+
+    return images;
+  }, [edges, nodes, id]);
+
+  // 兼容旧代码，第一张图片作为主输入
+  const inputImage = inputImages[0] || null;
 
   const [imageModels, setImageModels] = useState<
     Array<{ value: string; label: string }>
@@ -89,7 +95,8 @@ const ImageToImageNode = ({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             prompt: localPrompt,
-            inputImage,
+            inputImage, // 保持第一张作为主输入（兼容性）
+            inputImages, // 传递所有输入图片
             model: data.model || "BananaPro",
             aspectRatio: data.aspectRatio || "1:1",
             promptOptimize: data.promptOptimize || false,
@@ -122,6 +129,8 @@ const ImageToImageNode = ({
       data.aspectRatio,
       data.promptOptimize,
       inputImage,
+      inputImages,
+      data.prompt,
       updateNodeData,
     ],
   );
@@ -189,23 +198,38 @@ const ImageToImageNode = ({
         >
           <div className="bg-[#1a1a1a]/95 backdrop-blur-xl border border-zinc-700/50 rounded-2xl p-4 flex flex-col gap-3">
             {/* 输入图片预览 */}
-            {inputImage ? (
+            {inputImages.length > 0 ? (
               <div>
                 <label className="text-xs font-medium text-zinc-400 mb-2 block">
-                  输入图片
+                  输入图片 ({inputImages.length}张)
+                  {inputImages.length > 1 && (
+                    <span className="ml-2 text-green-400">✓ 支持多图参考</span>
+                  )}
                 </label>
-                <div className="relative rounded-lg overflow-hidden h-32 bg-zinc-800/50">
-                  <ImageWithActions
-                    src={inputImage}
-                    alt="Input"
-                    className="w-full h-full object-contain"
-                  />
+                <div
+                  className={`grid gap-2 ${inputImages.length > 1 ? "grid-cols-2" : "grid-cols-1"}`}
+                >
+                  {inputImages.map((img, idx) => (
+                    <div
+                      key={idx}
+                      className="relative rounded-lg overflow-hidden h-32 bg-zinc-800/50"
+                    >
+                      <ImageWithActions
+                        src={img}
+                        alt={`Input ${idx + 1}`}
+                        className="w-full h-full object-contain"
+                      />
+                      <span className="absolute top-1 left-1 bg-purple-500 text-white text-xs px-1.5 py-0.5 rounded z-20">
+                        {idx + 1}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               </div>
             ) : (
               <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/10 px-3 py-2 rounded-lg border border-amber-500/20">
                 <AlertCircle size={16} />
-                <span>请连接一个图片节点作为输入</span>
+                <span>请连接图片节点（支持多张图片参考）</span>
               </div>
             )}
 

@@ -3,7 +3,6 @@
  * 支持 Veo 3.1 Generate Preview
  */
 import { GoogleGenAI } from "@google/genai";
-import { readFileSync, unlinkSync } from "fs";
 
 // 从环境变量获取 API Key
 const getApiKey = () => {
@@ -60,13 +59,11 @@ async function pollOperation(ai: any, operation: any): Promise<any> {
  * 生成视频 - Veo 3.1
  * @param model 模型 ID (veo-3.1-generate-preview)
  * @param prompt 提示词
- * @param _duration 时长（秒，保留参数兼容性）
- * @returns 视频 URL 或 base64
+ * @returns 本地临时文件路径
  */
 export async function generateGeminiVideo(
   model: string,
   prompt: string,
-  _duration: number = 5,
 ): Promise<string> {
   const apiKey = getApiKey();
 
@@ -102,35 +99,21 @@ export async function generateGeminiVideo(
         throw new Error("未返回视频数据");
       }
 
-      // 如果有 videoBytes，直接使用
-      if (video.videoBytes) {
-        return `data:video/mp4;base64,${Buffer.from(video.videoBytes).toString("base64")}`;
-      }
+      // 使用 SDK 下载视频文件到本地临时路径
+      console.log("[Gemini Veo] Downloading video using SDK...");
+      const tempPath = `/tmp/gemini-video-${Date.now()}.mp4`;
 
-      // 如果有 URI，使用 SDK 下载
-      if (video.uri) {
-        console.log("[Gemini Veo] Downloading video from URI...");
-        const tempPath = `/tmp/gemini-video-${Date.now()}.mp4`;
+      try {
+        await ai.files.download({ file: video, downloadPath: tempPath });
+        console.log("[Gemini Veo] Video downloaded successfully to:", tempPath);
 
-        try {
-          await ai.files.download({ file: video, downloadPath: tempPath });
-
-          // 读取下载的文件
-          const videoBuffer = readFileSync(tempPath);
-          const base64Video = videoBuffer.toString("base64");
-
-          // 清理临时文件
-          unlinkSync(tempPath);
-
-          return `data:video/mp4;base64,${base64Video}`;
-        } catch (downloadError) {
-          console.error("[Gemini Veo] Download failed:", downloadError);
-          // 如果下载失败，尝试使用 videoBytes
-          if (video.videoBytes) {
-            return `data:video/mp4;base64,${Buffer.from(video.videoBytes).toString("base64")}`;
-          }
-          throw downloadError;
-        }
+        // 返回本地文件路径，让上层通过 OSS 上传
+        return tempPath;
+      } catch (downloadError) {
+        console.error("[Gemini Veo] SDK download failed:", downloadError);
+        throw new Error(
+          `Failed to download video: ${downloadError instanceof Error ? downloadError.message : "Unknown error"}`,
+        );
       }
     }
 
@@ -146,14 +129,18 @@ export async function generateGeminiVideo(
  * @param model 模型 ID
  * @param prompt 提示词
  * @param inputImage 输入图片 (base64, data URL, or HTTP URL)
- * @param _duration 时长（秒，保留参数兼容性）
+ * @param duration 时长（秒）
+ * @param resolution 分辨率 (720P, 1080P, 4K)
+ * @param aspectRatio 宽高比 (16:9, 9:16)
  * @returns 视频 URL 或 base64
  */
 export async function generateGeminiImageToVideo(
   model: string,
   prompt: string,
   inputImage: string,
-  _duration: number = 5,
+  duration: number = 5,
+  resolution: string = "720P",
+  aspectRatio: string = "16:9",
 ): Promise<string> {
   const apiKey = getApiKey();
 
@@ -195,17 +182,42 @@ export async function generateGeminiImageToVideo(
     console.log(
       "[Gemini I2V] Starting image-to-video generation with model:",
       model,
+      "Duration:",
+      duration,
+      "Resolution:",
+      resolution,
+      "Aspect Ratio:",
+      aspectRatio,
     );
 
-    // 启动图片到视频生成操作
-    let operation = await ai.models.generateVideos({
+    // 构建配置对象
+    const config: any = {
       model: model,
       prompt: prompt,
       image: {
         imageBytes: imageBytes.toString("base64"),
         mimeType: "image/jpeg",
       },
-    });
+    };
+
+    // 添加 Veo 3.1 配置
+    if (duration) {
+      config.duration = `${duration}s`;
+    }
+    if (resolution) {
+      config.resolution = resolution;
+    }
+    if (aspectRatio) {
+      config.aspectRatio = aspectRatio;
+    }
+
+    console.log(
+      "[Gemini I2V] Request config:",
+      JSON.stringify(config, null, 2),
+    );
+
+    // 启动图片到视频生成操作
+    let operation = await ai.models.generateVideos(config);
 
     // 轮询直到完成
     operation = await pollOperation(ai, operation);
@@ -224,35 +236,21 @@ export async function generateGeminiImageToVideo(
         throw new Error("未返回视频数据");
       }
 
-      // 如果有 videoBytes，直接使用
-      if (video.videoBytes) {
-        return `data:video/mp4;base64,${Buffer.from(video.videoBytes).toString("base64")}`;
-      }
+      // 使用 SDK 下载视频文件到本地临时路径
+      console.log("[Gemini I2V] Downloading video using SDK...");
+      const tempPath = `/tmp/gemini-i2v-${Date.now()}.mp4`;
 
-      // 如果有 URI，使用 SDK 下载
-      if (video.uri) {
-        console.log("[Gemini I2V] Downloading video from URI...");
-        const tempPath = `/tmp/gemini-i2v-${Date.now()}.mp4`;
+      try {
+        await ai.files.download({ file: video, downloadPath: tempPath });
+        console.log("[Gemini I2V] Video downloaded successfully to:", tempPath);
 
-        try {
-          await ai.files.download({ file: video, downloadPath: tempPath });
-
-          // 读取下载的文件
-          const videoBuffer = readFileSync(tempPath);
-          const base64Video = videoBuffer.toString("base64");
-
-          // 清理临时文件
-          unlinkSync(tempPath);
-
-          return `data:video/mp4;base64,${base64Video}`;
-        } catch (downloadError) {
-          console.error("[Gemini I2V] Download failed:", downloadError);
-          // 如果下载失败，尝试使用 videoBytes
-          if (video.videoBytes) {
-            return `data:video/mp4;base64,${Buffer.from(video.videoBytes).toString("base64")}`;
-          }
-          throw downloadError;
-        }
+        // 返回本地文件路径，让上层通过 OSS 上传
+        return tempPath;
+      } catch (downloadError) {
+        console.error("[Gemini I2V] SDK download failed:", downloadError);
+        throw new Error(
+          `Failed to download video: ${downloadError instanceof Error ? downloadError.message : "Unknown error"}`,
+        );
       }
     }
 

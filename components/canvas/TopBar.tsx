@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useReactFlow, useViewport } from "@xyflow/react";
 import { useCanvasStore } from "@/store/useCanvasStore";
 import {
@@ -37,6 +37,12 @@ export function TopBar() {
   const [isEditingProjectName, setIsEditingProjectName] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  // 等待客户端挂载完成，避免 hydration 错误
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // 从 viewport hook 获取实时缩放值
   const zoom = Math.round(viewport.zoom * 100);
@@ -315,9 +321,16 @@ export function TopBar() {
                 ? "text-gray-400 hover:text-white hover:bg-white/5"
                 : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
             }`}
+            suppressHydrationWarning
           >
-            {isDark ? <Moon size={15} /> : <Sun size={15} />}
-            <span>{isDark ? "暗色" : "亮色"}</span>
+            {mounted ? (
+              <>
+                {isDark ? <Moon size={15} /> : <Sun size={15} />}
+                <span>{isDark ? "暗色" : "亮色"}</span>
+              </>
+            ) : (
+              <span className="w-16 h-4" />
+            )}
           </button>
 
           {/* 清空 */}

@@ -87,11 +87,17 @@ export function Sidebar() {
   const [isLoadingWorkflows, setIsLoadingWorkflows] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [workflowToDelete, setWorkflowToDelete] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
+  // 等待客户端挂载完成
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   // 主题样式
-  const isDark = isDarkMode;
+  const isDark = mounted ? isDarkMode : false;
   const bgMain = isDark ? "bg-[#18181b]/95" : "bg-white/95";
   const borderColor = isDark ? "border-zinc-800" : "border-gray-200";
   const textMain = isDark ? "text-white" : "text-gray-900";

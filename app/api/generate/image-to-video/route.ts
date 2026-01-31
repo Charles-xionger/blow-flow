@@ -14,6 +14,7 @@ interface ImageToVideoRequest {
   model?: string;
   duration?: string | number;
   resolution?: string;
+  aspectRatio?: string;
   promptOptimize?: boolean;
   audioUrl?: string;
   negativePrompt?: string;
@@ -59,6 +60,7 @@ export async function POST(request: NextRequest) {
       model = "wan2.6-i2v-flash",
       duration = 10,
       resolution = "720P",
+      aspectRatio = "16:9",
       promptOptimize = false,
       audioUrl,
       negativePrompt = "",
@@ -101,6 +103,8 @@ export async function POST(request: NextRequest) {
         const cacheKey = getCacheKey(model, prompt, {
           inputImage,
           duration,
+          resolution,
+          aspectRatio,
         });
 
         const cached = getCache(cacheKey);
@@ -120,25 +124,43 @@ export async function POST(request: NextRequest) {
           ? duration
           : parseInt(String(duration).replace("s", "")) || 10;
 
-      // 生成视频
-      const tempVideoUrl = await generateGeminiImageToVideo(
+      // 生成视频（返回本地文件路径）
+      const tempVideoPath = await generateGeminiImageToVideo(
         modelDef.id,
         prompt,
         inputImage,
         durationSeconds,
+        resolution,
+        aspectRatio,
       );
 
-      // 下载并上传到 OSS
-      let videoUrl = tempVideoUrl;
+      // 上传到 OSS
+      let videoUrl = "";
       try {
         const ossClient = getOSSClient();
-        const result = await ossClient.downloadAndUpload(
-          tempVideoUrl,
-          `generated/${Date.now()}.mp4`,
+        const fs = await import("fs");
+        const videoBuffer = fs.readFileSync(tempVideoPath);
+
+        // 生成 OSS 对象键
+        const objectKey = `generated/video-${Date.now()}.mp4`;
+
+        // 上传视频
+        const result = await ossClient.uploadObject(
+          objectKey,
+          videoBuffer,
+          "video/mp4",
         );
         videoUrl = result.url;
+
+        // 清理临时文件
+        fs.unlinkSync(tempVideoPath);
+
+        console.log("[API] Video uploaded to OSS successfully:", videoUrl);
       } catch (ossError) {
-        console.warn("[API] OSS upload failed, using original URL:", ossError);
+        console.error("[API] OSS upload failed:", ossError);
+        throw new Error(
+          `Failed to upload video to OSS: ${ossError instanceof Error ? ossError.message : "Unknown error"}`,
+        );
       }
 
       // 缓存结果
@@ -146,8 +168,16 @@ export async function POST(request: NextRequest) {
         const cacheKey = getCacheKey(model, prompt, {
           inputImage,
           duration,
+          resolution,
+          aspectRatio,
         });
-        setCache(cacheKey, model, prompt, { inputImage, duration }, [videoUrl]);
+        setCache(
+          cacheKey,
+          model,
+          prompt,
+          { inputImage, duration, resolution, aspectRatio },
+          [videoUrl],
+        );
       }
 
       return NextResponse.json({

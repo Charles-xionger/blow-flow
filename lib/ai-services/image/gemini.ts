@@ -88,16 +88,16 @@ export async function generateGeminiImage(
 }
 
 /**
- * 图片转图片 - 基于输入图片生成新图片
+ * 图片转图片 - 基于输入图片生成新图片（支持多张图片）
  * @param model 模型 ID
  * @param prompt 提示词
- * @param inputImage 输入图片（URL 或 base64）
+ * @param inputImages 输入图片数组（URL 或 base64）
  * @returns 生成的图片 base64 URL
  */
 export async function generateGeminiImageToImage(
   model: string,
   prompt: string,
-  inputImage: string,
+  inputImages: string | string[],
 ): Promise<string> {
   const apiKey = getApiKey();
 
@@ -108,30 +108,41 @@ export async function generateGeminiImageToImage(
   try {
     const ai = new GoogleGenAI({ apiKey });
 
-    // 判断输入是 URL 还是 base64
-    let base64Data: string;
-    if (inputImage.startsWith("http://") || inputImage.startsWith("https://")) {
-      // 如果是 URL，先下载并转换为 base64
-      console.log("[Gemini] Downloading image from URL:", inputImage);
-      base64Data = await downloadImageAsBase64(inputImage);
-    } else {
-      // 如果是 base64，提取纯数据部分
-      base64Data = inputImage.includes(",")
-        ? inputImage.split(",")[1]
-        : inputImage;
-    }
+    // 兼容单张或多张图片
+    const imageArray = Array.isArray(inputImages) ? inputImages : [inputImages];
+
+    console.log(`[Gemini] Processing ${imageArray.length} input image(s)`);
+
+    // 处理所有输入图片
+    const imageDataPromises = imageArray.map(async (img) => {
+      let base64Data: string;
+      if (img.startsWith("http://") || img.startsWith("https://")) {
+        // 如果是 URL，先下载并转换为 base64
+        console.log("[Gemini] Downloading image from URL:", img);
+        base64Data = await downloadImageAsBase64(img);
+      } else {
+        // 如果是 base64，提取纯数据部分
+        base64Data = img.includes(",") ? img.split(",")[1] : img;
+      }
+      return base64Data;
+    });
+
+    const base64DataArray = await Promise.all(imageDataPromises);
+
+    // 构建 contents 数组：先文本，然后所有图片
+    const contents: any[] = [
+      { text: prompt },
+      ...base64DataArray.map((data) => ({
+        inlineData: {
+          mimeType: "image/jpeg",
+          data: data,
+        },
+      })),
+    ];
 
     const response = await ai.models.generateContent({
       model: model,
-      contents: [
-        { text: prompt },
-        {
-          inlineData: {
-            mimeType: "image/jpeg",
-            data: base64Data,
-          },
-        },
-      ],
+      contents: contents,
       config: {
         responseModalities: ["image"] as any,
       } as any,

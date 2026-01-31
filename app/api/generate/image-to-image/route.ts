@@ -11,7 +11,8 @@ import type { ModelConfig } from "@/types";
 
 interface ImageToImageRequest {
   prompt: string;
-  inputImage: string;
+  inputImage: string; // 保持兼容性
+  inputImages?: string[]; // 支持多张输入图片
   model?: string;
   aspectRatio?: string;
   promptOptimize?: boolean;
@@ -40,11 +41,16 @@ export async function POST(request: NextRequest) {
     const {
       prompt,
       inputImage,
+      inputImages,
       model = "BananaPro",
       aspectRatio = "1:1",
       promptOptimize = false,
       skipCache = false,
     } = body;
+
+    // 使用多张图片或单张图片
+    const imagesToUse =
+      inputImages && inputImages.length > 0 ? inputImages : [inputImage];
 
     if (!prompt || !inputImage) {
       return NextResponse.json(
@@ -102,7 +108,7 @@ export async function POST(request: NextRequest) {
       const tempImageUrl = await generateGeminiImageToImage(
         modelDef.id,
         finalPrompt,
-        inputImage,
+        imagesToUse,
       );
 
       // 下载并上传到 OSS
