@@ -79,10 +79,24 @@ export function QuickAddNode({ nodePosition }: QuickAddNodeProps) {
               </button>
 
               <button
+                onClick={() => handleAddNode(NodeType.START_END_TO_VIDEO)}
+                className="flex w-full items-center px-3 py-2 text-sm text-gray-200 hover:bg-gray-800"
+              >
+                首尾帧生视频
+              </button>
+
+              <button
                 onClick={() => handleAddNode(NodeType.CREATIVE_DESC)}
                 className="flex w-full items-center px-3 py-2 text-sm text-gray-200 hover:bg-gray-800"
               >
                 创意描述
+              </button>
+
+              <button
+                onClick={() => handleAddNode(NodeType.ORIGINAL_IMAGE)}
+                className="flex w-full items-center px-3 py-2 text-sm text-gray-200 hover:bg-gray-800"
+              >
+                原始图片
               </button>
             </div>
           </div>

@@ -21,6 +21,7 @@ import { ImageWithActions } from "@/components/ui/image-with-actions";
 
 const durations = [
   { value: "5", label: "5秒" },
+  { value: "8", label: "8秒" },
   { value: "10", label: "10秒" },
 ];
 
@@ -28,6 +29,11 @@ const resolutions = [
   { value: "480P", label: "480P" },
   { value: "720P", label: "720P" },
   { value: "1080P", label: "1080P" },
+];
+
+const aspectRatios = [
+  { value: "16:9", label: "横屏 (16:9)" },
+  { value: "9:16", label: "竖屏 (9:16)" },
 ];
 
 const StartEndToVideoNode = ({
@@ -64,6 +70,8 @@ const StartEndToVideoNode = ({
 
   // 本地状态用于输入框，防止中文输入法问题
   const [localPrompt, setLocalPrompt] = useState(data.prompt || "");
+  const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
+  const [promptError, setPromptError] = useState<string | undefined>();
 
   // 同步外部数据变化到本地状态
   useEffect(() => {
@@ -84,10 +92,10 @@ const StartEndToVideoNode = ({
           if (result.success && result.data) {
             // 根据 category 字段过滤视频模型
             const dbModels = Object.entries(result.data)
-              .filter(([name, config]: [string, any]) => {
+              .filter(([, config]: [string, any]) => {
                 return config.category === "VIDEO";
               })
-              .map(([name, config]: [string, any]) => ({
+              .map(([name]: [string, any]) => ({
                 value: name, // 使用数据库中的 model_name 作为 value
                 label: name, // 显示完整的模型名称
               }));
@@ -125,6 +133,60 @@ const StartEndToVideoNode = ({
     ? [inputImages[1], inputImages[0]]
     : inputImages;
 
+  const handleGeneratePrompt = useCallback(async () => {
+    if (inputImages.length < 2) {
+      setPromptError("需要连接两个图片节点");
+      return;
+    }
+
+    setIsGeneratingPrompt(true);
+    setPromptError(undefined);
+
+    try {
+      const response = await fetch("/api/generate-prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nodeType: "startEndToVideo",
+          currentPrompt: localPrompt,
+          context: {
+            startImage,
+            endImage,
+            duration: data.duration || "5",
+            resolution: data.resolution || "720P",
+            aspectRatio: data.aspectRatio || "16:9",
+            model: data.model,
+          },
+        }),
+      });
+
+      const result = await response.json();
+      console.log("[StartEndToVideoNode] Prompt generation result:", result);
+
+      if (result.success && result.data) {
+        setLocalPrompt(result.data);
+        updateNodeData(id, { prompt: result.data });
+      } else {
+        throw new Error(result.error || "生成失败");
+      }
+    } catch (error) {
+      console.error("[StartEndToVideoNode] Prompt generation error:", error);
+      setPromptError(error instanceof Error ? error.message : "生成提示词失败");
+    } finally {
+      setIsGeneratingPrompt(false);
+    }
+  }, [
+    id,
+    localPrompt,
+    inputImages,
+    startImage,
+    endImage,
+    data.duration,
+    data.resolution,
+    data.model,
+    updateNodeData,
+  ]);
+
   const handleGenerate = useCallback(async () => {
     // 先同步本地输入到 store
     if (localPrompt !== data.prompt) {
@@ -145,6 +207,7 @@ const StartEndToVideoNode = ({
         "wan2.2-kf2v-flash-首尾帧生成视频模型",
       duration: parseInt(data.duration || "5"),
       resolution: data.resolution || "720P",
+      aspectRatio: data.aspectRatio || "16:9",
       promptOptimize: data.promptOptimize || false,
     };
 
@@ -182,13 +245,16 @@ const StartEndToVideoNode = ({
   }, [
     id,
     localPrompt,
+    data.prompt,
     data.model,
     data.duration,
+    data.resolution,
     data.promptOptimize,
     inputImages,
     startImage,
     endImage,
     updateNodeData,
+    videoModels,
   ]);
 
   const hasResult = !!data.videoSrc && !data.isLoading;
@@ -329,6 +395,20 @@ const StartEndToVideoNode = ({
               </select>
 
               <select
+                value={data.aspectRatio || "16:9"}
+                onChange={(e) =>
+                  updateNodeData(id, { aspectRatio: e.target.value })
+                }
+                className="h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-pink-500/20"
+              >
+                {aspectRatios.map((a) => (
+                  <option key={a.value} value={a.value}>
+                    {a.label}
+                  </option>
+                ))}
+              </select>
+
+              <select
                 value={data.resolution || "720P"}
                 onChange={(e) =>
                   updateNodeData(id, { resolution: e.target.value })
@@ -358,18 +438,19 @@ const StartEndToVideoNode = ({
 
               <button
                 className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-all border ${
-                  data.promptOptimize
-                    ? "text-pink-400 bg-pink-500/20 border-pink-500/30"
-                    : "text-zinc-400 hover:text-white border-zinc-700 hover:border-zinc-600 hover:bg-zinc-700"
+                  isGeneratingPrompt
+                    ? "text-pink-400 bg-pink-500/20 border-pink-500/30 cursor-wait"
+                    : "text-zinc-400 hover:text-pink-400 border-zinc-700 hover:border-pink-500/30 hover:bg-pink-500/10"
                 }`}
-                onClick={() =>
-                  updateNodeData(id, { promptOptimize: !data.promptOptimize })
-                }
+                onClick={handleGeneratePrompt}
+                disabled={isGeneratingPrompt || inputImages.length < 2}
+                title={"AI生成提示词"}
               >
-                <Sparkles
-                  size={15}
-                  fill={data.promptOptimize ? "currentColor" : "none"}
-                />
+                {isGeneratingPrompt ? (
+                  <Loader2 size={15} className="animate-spin" />
+                ) : (
+                  <Sparkles size={15} />
+                )}
               </button>
 
               <div className="flex-1" />
@@ -397,6 +478,12 @@ const StartEndToVideoNode = ({
             {data.error && (
               <div className="text-xs text-red-400 bg-red-500/10 px-3 py-2 rounded-lg border border-red-500/20">
                 {data.error}
+              </div>
+            )}
+
+            {promptError && (
+              <div className="text-xs text-amber-400 bg-amber-500/10 px-3 py-2 rounded-lg border border-amber-500/20">
+                {promptError}
               </div>
             )}
           </div>
