@@ -124,6 +124,18 @@ function CanvasInner() {
     [showContextMenu],
   );
 
+  // 处理多选右键菜单
+  const onSelectionContextMenu = useCallback(
+    (event: React.MouseEvent, nodes: any[]) => {
+      event.preventDefault();
+      if (nodes.length > 0) {
+        // 使用第一个节点的 ID 来显示菜单
+        showContextMenu(event.clientX, event.clientY, "node", nodes[0].id);
+      }
+    },
+    [showContextMenu],
+  );
+
   // 处理画布右键菜单
   const onPaneContextMenu = useCallback(
     (event: React.MouseEvent) => {
@@ -191,6 +203,7 @@ function CanvasInner() {
         onDrop={onDrop}
         onDragOver={onDragOver}
         onNodeContextMenu={onNodeContextMenu}
+        onSelectionContextMenu={onSelectionContextMenu}
         onPaneContextMenu={onPaneContextMenu}
         nodeTypes={nodeTypes}
         connectionMode={ConnectionMode.Loose}
@@ -203,6 +216,12 @@ function CanvasInner() {
         panOnDrag={[1, 2]}
         selectionMode="partial"
         multiSelectionKeyCode="Shift"
+        minZoom={0.1}
+        maxZoom={4}
+        fitViewOptions={{ padding: 0.2 }}
+        nodesDraggable={true}
+        nodesConnectable={true}
+        elementsSelectable={true}
       >
         <Background
           variant={BackgroundVariant.Dots}

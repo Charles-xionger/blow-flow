@@ -342,7 +342,7 @@ export const useCanvasStore = create<CanvasState>()(
             ),
           );
 
-          const padding = 20;
+          const padding = 40;
           const groupId = nanoid();
 
           // 创建分组节点
@@ -357,8 +357,8 @@ export const useCanvasStore = create<CanvasState>()(
             style: {
               width: maxX - minX + padding * 2,
               height: maxY - minY + padding * 2,
-              zIndex: -1,
             },
+            draggable: true,
           };
 
           // 更新子节点的位置和父节点关系
@@ -367,10 +367,10 @@ export const useCanvasStore = create<CanvasState>()(
               return {
                 ...node,
                 position: {
-                  x: node.position.x - (minX - padding),
-                  y: node.position.y - (minY - padding),
+                  x: node.position.x - minX + padding,
+                  y: node.position.y - minY + padding,
                 },
-                parentNode: groupId,
+                parentId: groupId,
                 extent: "parent" as const,
               };
             }
@@ -391,14 +391,14 @@ export const useCanvasStore = create<CanvasState>()(
           const updatedNodes = get()
             .nodes.filter((n) => n.id !== groupId)
             .map((node) => {
-              if (node.parentNode === groupId) {
+              if (node.parentId === groupId) {
                 return {
                   ...node,
                   position: {
                     x: node.position.x + groupNode.position.x,
                     y: node.position.y + groupNode.position.y,
                   },
-                  parentNode: undefined,
+                  parentId: undefined,
                   extent: undefined,
                 };
               }
