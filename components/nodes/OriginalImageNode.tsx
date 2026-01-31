@@ -165,7 +165,10 @@ const OriginalImageNode = ({
             <span className="text-xs opacity-40 mt-1">{data.error}</span>
           </div>
         ) : hasResult ? (
-          <div className="relative w-full h-full">
+          <div
+            className="relative w-full h-full cursor-pointer"
+            onClick={() => setShowPreview(true)}
+          >
             <img
               src={data.imageSrc}
               alt="Uploaded"

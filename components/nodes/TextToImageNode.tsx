@@ -10,7 +10,6 @@ import { getImageModels } from "@/lib/model-registry";
 import { EditableTitle } from "./shared/EditableTitle";
 import { QuickAddNode } from "../canvas/QuickAddNode";
 import { Textarea } from "@/components/ui/textarea";
-
 const aspectRatios = [
   { value: "1:1", label: "1:1 方形" },
   { value: "16:9", label: "16:9 横屏" },
@@ -132,7 +131,10 @@ const TextToImageNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
         } bg-[#1a1a1a] overflow-hidden shadow-xl group transition-all duration-200`}
       >
         {hasResult ? (
-          <div className="relative w-full h-full">
+          <div
+            className="relative w-full h-full cursor-pointer"
+            onClick={() => setShowPreview(true)}
+          >
             <img
               src={data.imageSrc}
               alt="Generated"
