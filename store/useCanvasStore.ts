@@ -26,6 +26,7 @@ interface CanvasState {
   selectedNodeIds: string[];
   isDarkMode: boolean;
   projectName: string;
+  currentWorkflowId: string | null;
   contextMenu: {
     show: boolean;
     x: number;
@@ -106,6 +107,7 @@ export const useCanvasStore = create<CanvasState>()(
         selectedNodeIds: [],
         isDarkMode: getInitialTheme(),
         projectName: "未命名项目",
+        currentWorkflowId: null,
         contextMenu: null,
 
         // 节点和边的变化处理
@@ -448,6 +450,8 @@ export const useCanvasStore = create<CanvasState>()(
             nodes: workflow.nodes,
             edges: workflow.edges,
             projectName: workflow.name,
+            currentWorkflowId: workflow.id,
+            viewport: workflow.viewport || { x: 0, y: 0, zoom: 0.8 },
           });
         },
 
@@ -457,6 +461,7 @@ export const useCanvasStore = create<CanvasState>()(
             edges: [],
             selectedNodeIds: [],
             projectName: "未命名项目",
+            currentWorkflowId: null,
           });
         },
 
@@ -485,6 +490,8 @@ export const useCanvasStore = create<CanvasState>()(
           isDarkMode: state.isDarkMode,
           nodes: state.nodes,
           edges: state.edges,
+          viewport: state.viewport,
+          currentWorkflowId: state.currentWorkflowId,
         }),
       },
     ),

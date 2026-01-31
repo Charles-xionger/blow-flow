@@ -13,7 +13,19 @@ import {
   X,
   ChevronRight,
   FilePlus,
+  Loader2,
+  FileText,
+  Trash2,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 // 侧边栏按钮组件 - 移到组件外部
 interface SidebarButtonProps {
@@ -59,10 +71,14 @@ const SidebarButton: React.FC<SidebarButtonProps> = ({
 };
 
 export function Sidebar() {
-  const { addNode, isDarkMode } = useCanvasStore();
+  const { addNode, isDarkMode, loadWorkflow } = useCanvasStore();
   const [activePanel, setActivePanel] = useState<
     "ADD" | "HISTORY" | "PROJECT" | null
   >(null);
+  const [workflows, setWorkflows] = useState<any[]>([]);
+  const [isLoadingWorkflows, setIsLoadingWorkflows] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [workflowToDelete, setWorkflowToDelete] = useState<string | null>(null);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -97,6 +113,71 @@ export function Sidebar() {
 
   const togglePanel = (panel: "ADD" | "HISTORY" | "PROJECT" | null) => {
     setActivePanel((prev) => (prev === panel ? null : panel));
+    // 当打开项目面板时，加载项目列表
+    if (panel === "PROJECT") {
+      loadWorkflowList();
+    }
+  };
+
+  // 加载项目列表
+  const loadWorkflowList = async () => {
+    setIsLoadingWorkflows(true);
+    try {
+      const response = await fetch("/api/workflow");
+      const result = await response.json();
+      if (result.success) {
+        setWorkflows(result.data || []);
+      }
+    } catch (error) {
+      console.error("Failed to load workflows:", error);
+    } finally {
+      setIsLoadingWorkflows(false);
+    }
+  };
+
+  // 加载项目
+  const handleLoadWorkflow = async (workflowId: string) => {
+    try {
+      const response = await fetch(`/api/workflow/${workflowId}`);
+      const result = await response.json();
+      if (result.success && result.data) {
+        loadWorkflow(result.data);
+        setActivePanel(null);
+      }
+    } catch (error) {
+      console.error("Failed to load workflow:", error);
+    }
+  };
+
+  // 删除项目
+  const handleDeleteWorkflow = async (
+    workflowId: string,
+    e: React.MouseEvent,
+  ) => {
+    e.stopPropagation();
+    setWorkflowToDelete(workflowId);
+    setDeleteDialogOpen(true);
+  };
+
+  // 确认删除
+  const confirmDelete = async () => {
+    if (!workflowToDelete) return;
+
+    try {
+      const response = await fetch(`/api/workflow/${workflowToDelete}`, {
+        method: "DELETE",
+      });
+      const result = await response.json();
+      if (result.success) {
+        // 重新加载项目列表
+        loadWorkflowList();
+      }
+    } catch (error) {
+      console.error("Failed to delete workflow:", error);
+    } finally {
+      setDeleteDialogOpen(false);
+      setWorkflowToDelete(null);
+    }
   };
 
   // 添加节点面板
@@ -222,7 +303,7 @@ export function Sidebar() {
 
   // 项目面板
   const renderProjectPanel = () => (
-    <div className="space-y-2">
+    <div className="space-y-3">
       <button
         onClick={() => {
           // TODO: 新建工作流
@@ -264,6 +345,77 @@ export function Sidebar() {
           <div className={`text-[11px] ${textMuted}`}>项目文件管理</div>
         </div>
       </button>
+
+      {/* 分隔线 */}
+      <div className={`border-t ${borderColor} pt-3`}>
+        <div
+          className={`text-[10px] font-bold uppercase tracking-wider ${textMuted} mb-2 px-1`}
+        >
+          项目列表
+        </div>
+
+        {/* 加载状态 */}
+        {isLoadingWorkflows ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 size={24} className={`${textMuted} animate-spin`} />
+          </div>
+        ) : workflows.length === 0 ? (
+          <div className={`text-center py-8 ${textMuted}`}>
+            <div
+              className={`w-12 h-12 rounded-xl flex items-center justify-center mx-auto mb-2 ${
+                isDark ? "bg-zinc-800" : "bg-gray-100"
+              }`}
+            >
+              <FileText size={20} className="opacity-40" />
+            </div>
+            <p className="text-xs">暂无项目</p>
+          </div>
+        ) : (
+          <div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar">
+            {workflows.map((workflow) => (
+              <div
+                key={workflow.id}
+                className={`relative w-full rounded-xl transition-all group ${hoverBg}`}
+              >
+                <button
+                  onClick={() => handleLoadWorkflow(workflow.id)}
+                  className="w-full flex items-center gap-3 p-3 pr-10 text-left"
+                >
+                  <div
+                    className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
+                      isDark
+                        ? "bg-zinc-800 text-zinc-400"
+                        : "bg-gray-100 text-gray-600"
+                    }`}
+                  >
+                    <FileText size={16} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className={`text-sm font-medium ${textMain} truncate`}>
+                      {workflow.name}
+                    </div>
+                    <div className={`text-[11px] ${textMuted}`}>
+                      {workflow.nodes?.length || 0} 节点 ·{" "}
+                      {new Date(workflow.updatedAt).toLocaleDateString("zh-CN")}
+                    </div>
+                  </div>
+                </button>
+                <button
+                  onClick={(e) => handleDeleteWorkflow(workflow.id, e)}
+                  className={`absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-lg opacity-0 group-hover:opacity-100 transition-all z-10 ${
+                    isDark
+                      ? "hover:bg-red-500/20 text-red-400"
+                      : "hover:bg-red-50 text-red-600"
+                  }`}
+                  title="删除项目"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 
@@ -388,6 +540,39 @@ export function Sidebar() {
 
       {/* 面板 */}
       {renderPanel()}
+
+      {/* 删除确认对话框 */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <div
+                className={`p-2 rounded-lg ${isDark ? "bg-red-500/10" : "bg-red-50"}`}
+              >
+                <Trash2
+                  size={20}
+                  className={isDark ? "text-red-400" : "text-red-600"}
+                />
+              </div>
+              删除项目
+            </DialogTitle>
+            <DialogDescription>
+              确定要删除这个项目吗？此操作无法撤销。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setDeleteDialogOpen(false)}
+            >
+              取消
+            </Button>
+            <Button variant="destructive" onClick={confirmDelete}>
+              删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

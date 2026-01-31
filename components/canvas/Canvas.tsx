@@ -62,6 +62,7 @@ function CanvasInner() {
     addNode,
     isDarkMode,
     projectName,
+    currentWorkflowId,
     contextMenu,
     showContextMenu,
     hideContextMenu,
@@ -91,8 +92,14 @@ function CanvasInner() {
         viewport: getViewport(),
       };
 
-      const response = await fetch("/api/workflow", {
-        method: "POST",
+      // 如果有 currentWorkflowId，使用 PUT 更新；否则使用 POST 创建
+      const url = currentWorkflowId
+        ? `/api/workflow/${currentWorkflowId}`
+        : "/api/workflow";
+      const method = currentWorkflowId ? "PUT" : "POST";
+
+      const response = await fetch(url, {
+        method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(workflow),
       });
@@ -111,7 +118,7 @@ function CanvasInner() {
         description: error instanceof Error ? error.message : "未知错误",
       });
     }
-  }, [nodes, edges, projectName, getViewport]);
+  }, [nodes, edges, projectName, currentWorkflowId, getViewport]);
 
   useKeyboardShortcuts(handleSave);
 
@@ -208,7 +215,7 @@ function CanvasInner() {
         nodeTypes={nodeTypes}
         connectionMode={ConnectionMode.Loose}
         defaultEdgeOptions={defaultEdgeOptions}
-        defaultViewport={viewport}
+        viewport={viewport}
         onViewportChange={(newViewport) => setViewport(newViewport)}
         fitView={nodes.length === 0}
         className={isDarkMode ? "dark" : ""}

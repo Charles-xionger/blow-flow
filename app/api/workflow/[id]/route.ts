@@ -8,10 +8,11 @@ import {
 // GET: 获取单个工作流
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const workflow = getWorkflowById(params.id);
+    const { id } = await params;
+    const workflow = getWorkflowById(id);
 
     if (!workflow) {
       return NextResponse.json(
@@ -37,11 +38,12 @@ export async function GET(
 // PUT: 更新工作流
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const { id } = await params;
     const body = await request.json();
-    const success = updateWorkflow(params.id, body);
+    const success = updateWorkflow(id, body);
 
     if (!success) {
       return NextResponse.json(
@@ -50,7 +52,7 @@ export async function PUT(
       );
     }
 
-    const workflow = getWorkflowById(params.id);
+    const workflow = getWorkflowById(id);
     return NextResponse.json({ success: true, data: workflow });
   } catch (error) {
     console.error("[API] Update workflow error:", error);
@@ -68,10 +70,11 @@ export async function PUT(
 // DELETE: 删除工作流
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const success = deleteWorkflow(params.id);
+    const { id } = await params;
+    const success = deleteWorkflow(id);
 
     if (!success) {
       return NextResponse.json(
