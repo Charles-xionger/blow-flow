@@ -10,6 +10,7 @@ import { getVideoModels } from "@/lib/model-registry";
 import { EditableTitle } from "./shared/EditableTitle";
 import { QuickAddNode } from "../canvas/QuickAddNode";
 import { Textarea } from "@/components/ui/textarea";
+import { ImageWithActions } from "@/components/ui/image-with-actions";
 
 const durations = [
   { value: "5", label: "5秒" },
@@ -180,7 +181,7 @@ const ImageToVideoNode = ({
                   输入图片
                 </label>
                 <div className="relative rounded-lg overflow-hidden h-32 bg-zinc-800/50">
-                  <img
+                  <ImageWithActions
                     src={inputImage}
                     alt="Input"
                     className="w-full h-full object-contain"

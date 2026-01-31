@@ -17,6 +17,7 @@ import { getVideoModels } from "@/lib/model-registry";
 import { EditableTitle } from "./shared/EditableTitle";
 import { QuickAddNode } from "../canvas/QuickAddNode";
 import { Textarea } from "@/components/ui/textarea";
+import { ImageWithActions } from "@/components/ui/image-with-actions";
 
 const durations = [
   { value: "5", label: "5秒" },
@@ -273,22 +274,22 @@ const StartEndToVideoNode = ({
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div className="relative rounded-lg overflow-hidden border-2 border-green-500/50 h-24 bg-zinc-800/50">
-                    <img
+                    <ImageWithActions
                       src={startImage}
                       alt="Start Frame"
                       className="w-full h-full object-contain"
                     />
-                    <span className="absolute top-1 left-1 bg-green-500 text-white text-xs px-1.5 py-0.5 rounded">
+                    <span className="absolute top-1 left-1 bg-green-500 text-white text-xs px-1.5 py-0.5 rounded z-20">
                       首帧
                     </span>
                   </div>
                   <div className="relative rounded-lg overflow-hidden border-2 border-red-500/50 h-24 bg-zinc-800/50">
-                    <img
+                    <ImageWithActions
                       src={endImage}
                       alt="End Frame"
                       className="w-full h-full object-contain"
                     />
-                    <span className="absolute top-1 left-1 bg-red-500 text-white text-xs px-1.5 py-0.5 rounded">
+                    <span className="absolute top-1 left-1 bg-red-500 text-white text-xs px-1.5 py-0.5 rounded z-20">
                       尾帧
                     </span>
                   </div>

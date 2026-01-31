@@ -8,6 +8,7 @@ import { Image, Upload, X } from "lucide-react";
 import type { NodeData } from "@/types";
 import { EditableTitle } from "./shared/EditableTitle";
 import { QuickAddNode } from "../canvas/QuickAddNode";
+import { ImageWithActions } from "@/components/ui/image-with-actions";
 
 const OriginalImageNode = ({
   id,

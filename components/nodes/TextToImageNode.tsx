@@ -10,6 +10,7 @@ import { getImageModels } from "@/lib/model-registry";
 import { EditableTitle } from "./shared/EditableTitle";
 import { QuickAddNode } from "../canvas/QuickAddNode";
 import { Textarea } from "@/components/ui/textarea";
+import { ImageWithActions } from "@/components/ui/image-with-actions";
 const aspectRatios = [
   { value: "1:1", label: "1:1 方形" },
   { value: "16:9", label: "16:9 横屏" },

@@ -10,6 +10,7 @@ import { getImageModels } from "@/lib/model-registry";
 import { EditableTitle } from "./shared/EditableTitle";
 import { QuickAddNode } from "../canvas/QuickAddNode";
 import { Textarea } from "@/components/ui/textarea";
+import { ImageWithActions } from "@/components/ui/image-with-actions";
 
 const aspectRatios = [
   { value: "1:1", label: "1:1 方形" },
@@ -149,7 +150,7 @@ const ImageToImageNode = ({
       >
         {hasResult ? (
           <div className="relative w-full h-full">
-            <img
+            <ImageWithActions
               src={data.imageSrc}
               alt="Generated"
               className="w-full h-full object-contain"
@@ -187,7 +188,7 @@ const ImageToImageNode = ({
                   输入图片
                 </label>
                 <div className="relative rounded-lg overflow-hidden h-32 bg-zinc-800/50">
-                  <img
+                  <ImageWithActions
                     src={inputImage}
                     alt="Input"
                     className="w-full h-full object-contain"
