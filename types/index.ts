@@ -9,6 +9,7 @@ export enum NodeType {
   START_END_TO_VIDEO = "startEndToVideo",
   CREATIVE_DESC = "creativeDesc",
   ORIGINAL_IMAGE = "originalImage",
+  GROUP = "group",
 }
 
 // 节点数据接口
@@ -16,6 +17,7 @@ export interface NodeData extends Record<string, unknown> {
   // 基础信息
   label: string;
   type: NodeType;
+  customTitle?: string; // 用户自定义标题
 
   // 输入
   prompt?: string;

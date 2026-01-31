@@ -14,6 +14,8 @@ import {
 } from "lucide-react";
 import type { NodeData } from "@/types";
 import { getVideoModels } from "@/lib/model-registry";
+import { EditableTitle } from "./shared/EditableTitle";
+import { QuickAddNode } from "../canvas/QuickAddNode";
 
 const durations = [
   { value: "5", label: "5秒" },
@@ -33,6 +35,12 @@ const StartEndToVideoNode = ({
 }: NodeProps<Node<NodeData>>) => {
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
   const nodes = useCanvasStore((state) => state.nodes);
+  const selectedNodeIds = useCanvasStore((state) => state.selectedNodeIds);
+  const currentNode = nodes.find((n) => n.id === id);
+  const nodePosition = currentNode?.position || { x: 0, y: 0 };
+
+  // 只有在单选状态下才显示控制面板
+  const shouldShowPanel = selected && selectedNodeIds.length === 1;
   const edges = useCanvasStore((state) => state.edges);
 
   // 计算输入图片
@@ -175,8 +183,18 @@ const StartEndToVideoNode = ({
       {/* 输入句柄 */}
       <Handle type="target" position={Position.Left} id="input" />
 
+      {/* 可编辑标题 */}
+      <EditableTitle
+        nodeId={id}
+        defaultTitle={data.label}
+        customTitle={data.customTitle}
+      />
+
       {/* 输出句柄 */}
-      <Handle type="source" position={Position.Right} id="output" />
+      <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center">
+        <QuickAddNode nodeId={id} nodePosition={nodePosition} />
+        <Handle type="source" position={Position.Right} id="output" />
+      </div>
 
       {/* 节点显示区域 */}
       <div
@@ -215,7 +233,7 @@ const StartEndToVideoNode = ({
       </div>
 
       {/* 控制面板 */}
-      {selected && (
+      {shouldShowPanel && (
         <div
           className="absolute top-full left-1/2 -translate-x-1/2 min-w-100 pt-4 z-70 pointer-events-auto"
           onMouseDown={(e) => e.stopPropagation()}

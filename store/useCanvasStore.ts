@@ -26,6 +26,13 @@ interface CanvasState {
   selectedNodeIds: string[];
   isDarkMode: boolean;
   projectName: string;
+  contextMenu: {
+    show: boolean;
+    x: number;
+    y: number;
+    type: "node" | "pane";
+    nodeId?: string;
+  } | null;
 
   // Actions
   setNodes: (nodes: CanvasNode[]) => void;
@@ -40,9 +47,21 @@ interface CanvasState {
   deleteNode: (nodeId: string) => void;
   updateNodeData: (nodeId: string, data: Partial<NodeData>) => void;
   duplicateNode: (nodeId: string) => void;
+  deleteSelectedNodes: () => void;
+  groupNodes: (nodeIds: string[]) => void;
+  ungroupNodes: (groupId: string) => void;
 
   // 选择
   setSelectedNodeIds: (ids: string[]) => void;
+
+  // 右键菜单
+  showContextMenu: (
+    x: number,
+    y: number,
+    type: "node" | "pane",
+    nodeId?: string,
+  ) => void;
+  hideContextMenu: () => void;
 
   // 主题
   toggleTheme: () => void;
@@ -82,6 +101,7 @@ export const useCanvasStore = create<CanvasState>()(
         selectedNodeIds: [],
         isDarkMode: getInitialTheme(),
         projectName: "未命名项目",
+        contextMenu: null,
 
         // 节点和边的变化处理
         setNodes: (nodes) => set({ nodes }),
@@ -89,8 +109,19 @@ export const useCanvasStore = create<CanvasState>()(
         setViewport: (viewport) => set({ viewport }),
 
         onNodesChange: (changes: NodeChange[]) => {
+          const updatedNodes = applyNodeChanges(
+            changes,
+            get().nodes,
+          ) as CanvasNode[];
+
+          // 更新选中的节点ID列表
+          const selectedIds = updatedNodes
+            .filter((node) => node.selected)
+            .map((node) => node.id);
+
           set({
-            nodes: applyNodeChanges(changes, get().nodes) as CanvasNode[],
+            nodes: updatedNodes,
+            selectedNodeIds: selectedIds,
           });
         },
 
@@ -169,6 +200,10 @@ export const useCanvasStore = create<CanvasState>()(
               label: "Original Image",
               data: {},
             },
+            [NodeType.GROUP]: {
+              label: "Group",
+              data: {},
+            },
           };
 
           const config = nodeTypeMap[type];
@@ -240,6 +275,128 @@ export const useCanvasStore = create<CanvasState>()(
         // 选择
         setSelectedNodeIds: (ids: string[]) => {
           set({ selectedNodeIds: ids });
+        },
+
+        // 删除选中的节点
+        deleteSelectedNodes: () => {
+          const selectedIds = get().selectedNodeIds;
+          if (selectedIds.length === 0) return;
+
+          set({
+            nodes: get().nodes.filter((node) => !selectedIds.includes(node.id)),
+            edges: get().edges.filter(
+              (edge) =>
+                !selectedIds.includes(edge.source) &&
+                !selectedIds.includes(edge.target),
+            ),
+            selectedNodeIds: [],
+          });
+        },
+
+        // 分组节点
+        groupNodes: (nodeIds: string[]) => {
+          if (nodeIds.length === 0) return;
+
+          const nodesToGroup = get().nodes.filter((n) =>
+            nodeIds.includes(n.id),
+          );
+          if (nodesToGroup.length === 0) return;
+
+          // 计算包围盒
+          const minX = Math.min(...nodesToGroup.map((n) => n.position.x));
+          const minY = Math.min(...nodesToGroup.map((n) => n.position.y));
+          const maxX = Math.max(
+            ...nodesToGroup.map(
+              (n) => n.position.x + (n.style?.width || DEFAULT_NODE_WIDTH),
+            ),
+          );
+          const maxY = Math.max(
+            ...nodesToGroup.map(
+              (n) => n.position.y + (n.style?.height || DEFAULT_NODE_HEIGHT),
+            ),
+          );
+
+          const padding = 20;
+          const groupId = nanoid();
+
+          // 创建分组节点
+          const groupNode: CanvasNode = {
+            id: groupId,
+            type: NodeType.GROUP,
+            position: { x: minX - padding, y: minY - padding },
+            data: {
+              label: "Group",
+              type: NodeType.GROUP,
+            },
+            style: {
+              width: maxX - minX + padding * 2,
+              height: maxY - minY + padding * 2,
+              zIndex: -1,
+            },
+          };
+
+          // 更新子节点的位置和父节点关系
+          const updatedNodes = get().nodes.map((node) => {
+            if (nodeIds.includes(node.id)) {
+              return {
+                ...node,
+                position: {
+                  x: node.position.x - (minX - padding),
+                  y: node.position.y - (minY - padding),
+                },
+                parentNode: groupId,
+                extent: "parent" as const,
+              };
+            }
+            return node;
+          });
+
+          set({
+            nodes: [groupNode, ...updatedNodes],
+          });
+        },
+
+        // 取消分组
+        ungroupNodes: (groupId: string) => {
+          const groupNode = get().nodes.find((n) => n.id === groupId);
+          if (!groupNode) return;
+
+          // 更新子节点的位置，移除父节点关系
+          const updatedNodes = get()
+            .nodes.filter((n) => n.id !== groupId)
+            .map((node) => {
+              if (node.parentNode === groupId) {
+                return {
+                  ...node,
+                  position: {
+                    x: node.position.x + groupNode.position.x,
+                    y: node.position.y + groupNode.position.y,
+                  },
+                  parentNode: undefined,
+                  extent: undefined,
+                };
+              }
+              return node;
+            });
+
+          set({ nodes: updatedNodes });
+        },
+
+        // 显示右键菜单
+        showContextMenu: (
+          x: number,
+          y: number,
+          type: "node" | "pane",
+          nodeId?: string,
+        ) => {
+          set({
+            contextMenu: { show: true, x, y, type, nodeId },
+          });
+        },
+
+        // 隐藏右键菜单
+        hideContextMenu: () => {
+          set({ contextMenu: null });
         },
 
         // 主题切换

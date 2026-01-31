@@ -29,6 +29,11 @@ import ImageToVideoNode from "@/components/nodes/ImageToVideoNode";
 import StartEndToVideoNode from "@/components/nodes/StartEndToVideoNode";
 import CreativeDescNode from "@/components/nodes/CreativeDescNode";
 import OriginalImageNode from "@/components/nodes/OriginalImageNode";
+import { GroupNode } from "@/components/nodes/GroupNode";
+
+// 导入右键菜单组件
+import { NodeContextMenu } from "./NodeContextMenu";
+import { PaneContextMenu } from "./PaneContextMenu";
 
 // 定义节点类型映射
 const nodeTypes = {
@@ -39,6 +44,7 @@ const nodeTypes = {
   [NodeType.START_END_TO_VIDEO]: StartEndToVideoNode,
   [NodeType.CREATIVE_DESC]: CreativeDescNode,
   [NodeType.ORIGINAL_IMAGE]: OriginalImageNode,
+  [NodeType.GROUP]: GroupNode,
 };
 
 function CanvasInner() {
@@ -56,6 +62,9 @@ function CanvasInner() {
     addNode,
     isDarkMode,
     projectName,
+    contextMenu,
+    showContextMenu,
+    hideContextMenu,
   } = useCanvasStore();
 
   // 同步主题到 DOM
@@ -105,6 +114,24 @@ function CanvasInner() {
   }, [nodes, edges, projectName, getViewport]);
 
   useKeyboardShortcuts(handleSave);
+
+  // 处理节点右键菜单
+  const onNodeContextMenu = useCallback(
+    (event: React.MouseEvent, node: any) => {
+      event.preventDefault();
+      showContextMenu(event.clientX, event.clientY, "node", node.id);
+    },
+    [showContextMenu],
+  );
+
+  // 处理画布右键菜单
+  const onPaneContextMenu = useCallback(
+    (event: React.MouseEvent) => {
+      event.preventDefault();
+      showContextMenu(event.clientX, event.clientY, "pane");
+    },
+    [showContextMenu],
+  );
 
   // 处理画布点击（添加节点）
   const onPaneClick = useCallback(() => {
@@ -163,6 +190,8 @@ function CanvasInner() {
         onPaneClick={onPaneClick}
         onDrop={onDrop}
         onDragOver={onDragOver}
+        onNodeContextMenu={onNodeContextMenu}
+        onPaneContextMenu={onPaneContextMenu}
         nodeTypes={nodeTypes}
         connectionMode={ConnectionMode.Loose}
         defaultEdgeOptions={defaultEdgeOptions}
@@ -170,6 +199,10 @@ function CanvasInner() {
         onViewportChange={(newViewport) => setViewport(newViewport)}
         fitView={nodes.length === 0}
         className={isDarkMode ? "dark" : ""}
+        selectionOnDrag={true}
+        panOnDrag={[1, 2]}
+        selectionMode="partial"
+        multiSelectionKeyCode="Shift"
       >
         <Background
           variant={BackgroundVariant.Dots}
@@ -192,6 +225,8 @@ function CanvasInner() {
                 return "#10b981"; // green
               case NodeType.ORIGINAL_IMAGE:
                 return "#f59e0b"; // amber
+              case NodeType.GROUP:
+                return "#6b7280"; // gray
               default:
                 return "#6b7280"; // gray
             }
@@ -202,6 +237,27 @@ function CanvasInner() {
         {/* 保留原工具栏（在底部） - 可选删除 */}
         {/* <Toolbar /> */}
       </ReactFlow>
+
+      {/* 右键菜单 */}
+      {contextMenu?.show && (
+        <>
+          {contextMenu.type === "node" && contextMenu.nodeId && (
+            <NodeContextMenu
+              nodeId={contextMenu.nodeId}
+              x={contextMenu.x}
+              y={contextMenu.y}
+              onClose={hideContextMenu}
+            />
+          )}
+          {contextMenu.type === "pane" && (
+            <PaneContextMenu
+              x={contextMenu.x}
+              y={contextMenu.y}
+              onClose={hideContextMenu}
+            />
+          )}
+        </>
+      )}
 
       {/* 侧边栏 */}
       <Sidebar />

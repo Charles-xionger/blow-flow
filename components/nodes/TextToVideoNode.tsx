@@ -7,6 +7,8 @@ import { useCanvasStore } from "@/store/useCanvasStore";
 import { Video, Sparkles, Wand2, Loader2 } from "lucide-react";
 import type { NodeData } from "@/types";
 import { getVideoModels } from "@/lib/model-registry";
+import { EditableTitle } from "./shared/EditableTitle";
+import { QuickAddNode } from "../canvas/QuickAddNode";
 
 const durations = [
   { value: "5s", label: "5秒" },
@@ -23,9 +25,16 @@ const aspectRatios = [
 
 const TextToVideoNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
+  const nodes = useCanvasStore((state) => state.nodes);
+  const selectedNodeIds = useCanvasStore((state) => state.selectedNodeIds);
+  const currentNode = nodes.find((n) => n.id === id);
+  const nodePosition = currentNode?.position || { x: 0, y: 0 };
   const [videoModels, setVideoModels] = useState<
     Array<{ value: string; label: string }>
   >([]);
+
+  // 只有在单选状态下才显示控制面板
+  const shouldShowPanel = selected && selectedNodeIds.length === 1;
 
   // 加载视频模型列表
   useEffect(() => {
@@ -84,8 +93,18 @@ const TextToVideoNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
 
   return (
     <>
+      {/* 可编辑标题 */}
+      <EditableTitle
+        nodeId={id}
+        defaultTitle={data.label}
+        customTitle={data.customTitle}
+      />
+
       {/* 输出句柄 */}
-      <Handle type="source" position={Position.Right} id="output" />
+      <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center">
+        <QuickAddNode nodeId={id} nodePosition={nodePosition} />
+        <Handle type="source" position={Position.Right} id="output" />
+      </div>
 
       {/* 节点显示区域 - 只显示结果或空状态 */}
       <div
@@ -124,7 +143,7 @@ const TextToVideoNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
       </div>
 
       {/* 控制面板 - 选中时显示 */}
-      {selected && (
+      {shouldShowPanel && (
         <div
           className="absolute top-full left-1/2 -translate-x-1/2 min-w-130 pt-4 z-70 pointer-events-auto"
           onMouseDown={(e) => e.stopPropagation()}
