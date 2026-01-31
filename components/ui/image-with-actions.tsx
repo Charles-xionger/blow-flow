@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, Expand, X } from "lucide-react";
+import { Download, Expand, X, ZoomIn, ZoomOut } from "lucide-react";
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 
@@ -17,6 +17,7 @@ export function ImageWithActions({
 }: ImageWithActionsProps) {
   const [showPreview, setShowPreview] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
+  const [scale, setScale] = useState(1);
 
   useEffect(() => {
     if (showPreview) {
@@ -27,6 +28,13 @@ export function ImageWithActions({
       };
       window.addEventListener("keydown", handleEscape);
       return () => window.removeEventListener("keydown", handleEscape);
+    }
+  }, [showPreview]);
+
+  // 重置缩放比例当关闭预览时
+  useEffect(() => {
+    if (!showPreview) {
+      setScale(1);
     }
   }, [showPreview]);
 
@@ -90,6 +98,16 @@ export function ImageWithActions({
     setShowPreview(true);
   };
 
+  const handleZoomIn = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setScale((prev) => Math.min(prev + 0.25, 3)); // 最大3倍
+  };
+
+  const handleZoomOut = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setScale((prev) => Math.max(prev - 0.25, 0.1)); // 最小0.1倍
+  };
+
   return (
     <>
       <div
@@ -134,20 +152,44 @@ export function ImageWithActions({
             className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/90 backdrop-blur-sm"
             onClick={() => setShowPreview(false)}
           >
+            {/* 关闭按钮 */}
             <button
               onClick={() => setShowPreview(false)}
               className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors z-10"
             >
               <X size={24} />
             </button>
+
+            {/* 缩放控制按钮 */}
+            <div className="absolute bottom-4 right-4 flex flex-col gap-2 z-10">
+              <button
+                onClick={handleZoomIn}
+                className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+                title="放大"
+              >
+                <ZoomIn size={20} />
+              </button>
+              <div className="px-3 py-1 rounded-full bg-white/10 text-white text-sm text-center">
+                {Math.round(scale * 100)}%
+              </div>
+              <button
+                onClick={handleZoomOut}
+                className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+                title="缩小"
+              >
+                <ZoomOut size={20} />
+              </button>
+            </div>
+
             <div
-              className="max-w-[90vw] max-h-[90vh] relative"
+              className="max-w-[90vw] max-h-[90vh] overflow-auto relative"
               onClick={(e) => e.stopPropagation()}
             >
               <img
                 src={src}
                 alt={alt}
-                className="w-full h-full object-contain"
+                className="w-full h-full object-contain transition-transform duration-200"
+                style={{ transform: `scale(${scale})` }}
               />
             </div>
           </div>,

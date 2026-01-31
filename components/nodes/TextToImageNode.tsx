@@ -132,11 +132,8 @@ const TextToImageNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
         } bg-[#1a1a1a] overflow-hidden shadow-xl group transition-all duration-200`}
       >
         {hasResult ? (
-          <div
-            className="relative w-full h-full cursor-pointer"
-            onClick={() => setShowPreview(true)}
-          >
-            <img
+          <div className="relative w-full h-full">
+            <ImageWithActions
               src={data.imageSrc}
               alt="Generated"
               className="w-full h-full object-contain"
