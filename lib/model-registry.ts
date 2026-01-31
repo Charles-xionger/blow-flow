@@ -5,12 +5,51 @@
 export interface ModelDefinition {
   id: string;
   name: string;
-  category: "IMAGE" | "VIDEO";
+  category: "IMAGE" | "VIDEO" | "TEXT";
   defaultEndpoint: string;
+  provider?: "gemini" | "other"; // 用于标识是否使用 Gemini SDK
 }
 
 // 内置模型配置
 const BUILTIN_MODELS: Record<string, ModelDefinition> = {
+  // === 文本模型 (Gemini) ===
+  "Gemini 2.5 Pro": {
+    id: "gemini-2.5-pro",
+    name: "Gemini 2.5 Pro",
+    category: "TEXT",
+    defaultEndpoint: "",
+    provider: "gemini",
+  },
+  "Gemini 3 Flash Preview": {
+    id: "gemini-3-flash-preview",
+    name: "Gemini 3 Flash Preview",
+    category: "TEXT",
+    defaultEndpoint: "",
+    provider: "gemini",
+  },
+  "Gemini 3 Pro Preview": {
+    id: "gemini-3-pro-preview",
+    name: "Gemini 3 Pro Preview",
+    category: "TEXT",
+    defaultEndpoint: "",
+    provider: "gemini",
+  },
+
+  // === 图片模型 ===
+  "Nano Banana": {
+    id: "gemini-2.5-flash-image",
+    name: "Nano Banana",
+    category: "IMAGE",
+    defaultEndpoint: "",
+    provider: "gemini",
+  },
+  "Nano Banana Pro": {
+    id: "gemini-3-pro-image-preview",
+    name: "Nano Banana Pro",
+    category: "IMAGE",
+    defaultEndpoint: "",
+    provider: "gemini",
+  },
   BananaPro: {
     id: "banana-pro",
     name: "Banana Pro",
@@ -23,15 +62,18 @@ const BUILTIN_MODELS: Record<string, ModelDefinition> = {
     category: "IMAGE",
     defaultEndpoint: "/v1/images/generations",
   },
+
+  // === 视频模型 ===
+  "Veo 3.1 Generate Preview": {
+    id: "veo-3.1-generate-preview",
+    name: "Veo 3.1 Generate Preview",
+    category: "VIDEO",
+    defaultEndpoint: "",
+    provider: "gemini",
+  },
   "Sora 2": {
     id: "sora-2",
     name: "Sora 2",
-    category: "VIDEO",
-    defaultEndpoint: "/v1/videos",
-  },
-  "Veo 3.1 Fast": {
-    id: "veo-3.1-fast",
-    name: "Veo 3.1 Fast",
     category: "VIDEO",
     defaultEndpoint: "/v1/videos",
   },
@@ -73,6 +115,18 @@ function loadCustomModels(): Record<string, ModelDefinition> {
 export function getAllModels(): Record<string, ModelDefinition> {
   const customModels = loadCustomModels();
   return { ...BUILTIN_MODELS, ...customModels };
+}
+
+/**
+ * 根据类别获取模型列表
+ */
+export function getModelsByCategory(
+  category: "IMAGE" | "VIDEO" | "TEXT",
+): ModelDefinition[] {
+  const allModels = getAllModels();
+  return Object.values(allModels).filter(
+    (model) => model.category === category,
+  );
 }
 
 /**

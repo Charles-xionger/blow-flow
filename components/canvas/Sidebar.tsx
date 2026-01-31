@@ -10,6 +10,7 @@ import {
   Image,
   Video,
   Sparkles,
+  Film,
   X,
   ChevronRight,
   FilePlus,
@@ -317,6 +318,17 @@ export function Sidebar() {
               isDark
                 ? "bg-emerald-500/15 text-emerald-400"
                 : "bg-emerald-100 text-emerald-600"
+            }
+          />
+          <NodeButton
+            icon={Film}
+            label="AI 分镜师"
+            description="故事分镜拆分"
+            type={NodeType.STORYBOARD}
+            color={
+              isDark
+                ? "bg-purple-500/15 text-purple-400"
+                : "bg-purple-100 text-purple-600"
             }
           />
         </div>

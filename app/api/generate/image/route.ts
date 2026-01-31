@@ -2,9 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateBananaImage } from "@/lib/ai-services/image/banana";
 import { generateFluxImage } from "@/lib/ai-services/image/flux";
 import { generateGenericImage } from "@/lib/ai-services/image/generic";
+import {
+  generateGeminiImage,
+  generateGeminiImageToImage,
+} from "@/lib/ai-services/image/gemini";
 import { getModelConfig as getModelConfigFromDb } from "@/lib/db/model-configs";
 import { getCacheKey, getCache, setCache } from "@/lib/db/cache";
 import { getOSSClient } from "@/services/ossService";
+import { getAllModels } from "@/lib/model-registry";
 import type { ModelConfig } from "@/types";
 
 interface GenerateImageRequest {
@@ -64,6 +69,107 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 检查是否是 Gemini 模型
+    const allModels = getAllModels();
+    let modelDef = allModels[model]; // 首先用 key 查找
+
+    // 如果用 key 找不到，尝试用 id 查找
+    if (!modelDef) {
+      modelDef = Object.values(allModels).find((m) => m.id === model);
+    }
+
+    const isGeminiModel = modelDef?.provider === "gemini";
+
+    console.log("[API] Model check:", {
+      model,
+      modelDef: modelDef?.id,
+      isGeminiModel,
+    });
+
+    // Gemini 模型直接使用 SDK，不需要配置
+    if (isGeminiModel && modelDef) {
+      console.log("[API] Using Gemini SDK for model:", modelDef.id);
+
+      // 检查缓存
+      const cacheKey = getCacheKey(model, prompt, {
+        aspectRatio,
+        resolution,
+        inputImages,
+      });
+
+      const cached = getCache(cacheKey);
+      if (cached) {
+        console.log("[API] Cache hit for image generation");
+        return NextResponse.json({
+          success: true,
+          data: cached,
+          cached: true,
+        });
+      }
+
+      // 提示词优化
+      const finalPrompt = prompt;
+      if (promptOptimize && prompt) {
+        // TODO: 调用提示词优化服务
+      }
+
+      // 批量生成
+      const results: string[] = [];
+      for (let i = 0; i < count; i++) {
+        let tempImageUrl: string;
+
+        if (inputImages.length > 0) {
+          // 图片转图片
+          tempImageUrl = await generateGeminiImageToImage(
+            modelDef.id,
+            finalPrompt,
+            inputImages[0],
+          );
+        } else {
+          // 文本生成图片
+          tempImageUrl = await generateGeminiImage(
+            modelDef.id,
+            finalPrompt,
+            aspectRatio,
+            resolution,
+          );
+        }
+
+        // 下载并上传到 OSS
+        let imageUrl = tempImageUrl;
+        try {
+          const ossClient = getOSSClient();
+          const result = await ossClient.downloadAndUpload(
+            tempImageUrl,
+            `generated/${Date.now()}_${i}.png`,
+          );
+          imageUrl = result.url;
+        } catch (ossError) {
+          console.warn(
+            "[API] OSS upload failed, using original URL:",
+            ossError,
+          );
+        }
+
+        results.push(imageUrl);
+      }
+
+      // 缓存结果
+      setCache(
+        cacheKey,
+        model,
+        finalPrompt,
+        { aspectRatio, resolution, inputImages },
+        results,
+      );
+
+      return NextResponse.json({
+        success: true,
+        data: results,
+      });
+    }
+
+    // 非 Gemini 模型，需要从数据库获取配置
     const config = await getModelConfig(model);
 
     console.log("[API] Image generation config:", {
@@ -117,8 +223,8 @@ export async function POST(request: NextRequest) {
     // 智能选择生成函数
     const baseUrl = config.baseUrl.toLowerCase();
 
-    if (model.includes("Banana")) {
-      // Banana 系列模型使用专用函数
+    if (model.includes("Banana") && !isGeminiModel) {
+      // Banana 系列模型使用专用函数（排除 Nano Banana）
       generateFn = generateBananaImage;
     } else if (baseUrl.includes("dashscope.aliyuncs.com")) {
       // 阿里云使用通用函数

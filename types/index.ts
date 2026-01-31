@@ -2,12 +2,14 @@ import { Edge, Node } from "@xyflow/react";
 
 // 节点类型枚举
 export enum NodeType {
+  TEXT = "text",
   TEXT_TO_IMAGE = "textToImage",
   TEXT_TO_VIDEO = "textToVideo",
   IMAGE_TO_IMAGE = "imageToImage",
   IMAGE_TO_VIDEO = "imageToVideo",
   START_END_TO_VIDEO = "startEndToVideo",
   CREATIVE_DESC = "creativeDesc",
+  STORYBOARD = "storyboard",
   ORIGINAL_IMAGE = "originalImage",
   GROUP = "group",
 }
@@ -44,6 +46,16 @@ export interface NodeData extends Record<string, unknown> {
 
   // Creative Desc 专用
   optimizedPrompt?: string;
+
+  // Storyboard 专用
+  storyboardShots?: Array<{
+    shotNumber: number;
+    title: string;
+    description: string;
+    duration?: string;
+    cameraMovement?: string;
+  }>;
+  shotCount?: number;
 
   // UI 状态
   activeToolbarItem?: string;

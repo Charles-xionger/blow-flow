@@ -4,7 +4,7 @@ import { memo, useCallback, useState, useEffect } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { Handle, Position } from "@xyflow/react";
 import { useCanvasStore } from "@/store/useCanvasStore";
-import { Video, Sparkles, Wand2, Loader2 } from "lucide-react";
+import { Video, Sparkles, Wand2, Loader2, Link2 } from "lucide-react";
 import type { NodeData } from "@/types";
 import { getVideoModels } from "@/lib/model-registry";
 import { EditableTitle } from "./shared/EditableTitle";
@@ -37,6 +37,22 @@ const TextToVideoNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
   // 只有在单选状态下才显示控制面板
   const shouldShowPanel = selected && selectedNodeIds.length === 1;
 
+  // 从连接的文本节点读取 prompt
+  const inputPrompt = useCanvasStore(
+    useCallback(
+      (state) => {
+        const inputEdges = state.edges.filter((edge) => edge.target === id);
+        if (inputEdges.length === 0) return null;
+
+        const sourceNode = state.nodes.find(
+          (n) => n.id === inputEdges[0].source,
+        );
+        return sourceNode?.data.prompt;
+      },
+      [id],
+    ),
+  );
+
   // 本地状态用于输入框，防止中文输入法问题
   const [localPrompt, setLocalPrompt] = useState(data.prompt || "");
 
@@ -50,6 +66,9 @@ const TextToVideoNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
     setLocalPrompt(data.prompt || "");
   }, [data.prompt]);
 
+  // 优先使用连接节点的 prompt，否则使用本地 prompt
+  const effectivePrompt = inputPrompt || localPrompt;
+
   const handleGenerate = useCallback(
     async (skipCache = false) => {
       // 先同步本地输入到 store
@@ -57,7 +76,8 @@ const TextToVideoNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
         updateNodeData(id, { prompt: localPrompt });
       }
 
-      if (!localPrompt) return;
+      const promptToUse = inputPrompt || localPrompt;
+      if (!promptToUse) return;
 
       updateNodeData(id, { isLoading: true, error: undefined });
 
@@ -66,7 +86,7 @@ const TextToVideoNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            prompt: localPrompt,
+            prompt: promptToUse,
             model: data.model || "Sora 2",
             aspectRatio: data.aspectRatio || "16:9",
             duration: data.duration || "5s",
@@ -94,6 +114,7 @@ const TextToVideoNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
     },
     [
       id,
+      inputPrompt,
       localPrompt,
       data.model,
       data.aspectRatio,
@@ -114,13 +135,16 @@ const TextToVideoNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
         customTitle={data.customTitle}
       />
 
+      {/* 输入句柄 */}
+      <Handle type="target" position={Position.Left} id="input" />
+
       {/* 输出句柄 */}
       <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center">
         <QuickAddNode nodeId={id} nodePosition={nodePosition} />
         <Handle type="source" position={Position.Right} id="output" />
       </div>
 
-      {/* 节点显示区域 - 只显示结果或空状态 */}
+      {/* 节点显示区域 */}
       <div
         style={{ width: "320px", height: "240px" }}
         className={`relative rounded-2xl border ${
@@ -156,14 +180,22 @@ const TextToVideoNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
         )}
       </div>
 
-      {/* 控制面板 - 选中时显示 */}
+      {/* 控制面板 */}
       {shouldShowPanel && (
         <div
           className="absolute top-full left-1/2 -translate-x-1/2 min-w-130 pt-4 z-70 pointer-events-auto"
           onMouseDown={(e) => e.stopPropagation()}
         >
           <div className="bg-[#1a1a1a]/95 backdrop-blur-xl border-zinc-700/50 rounded-2xl p-4 flex flex-col gap-3 border">
-            {/* 提示词输入 */}
+            {/* 连接提示卡片 */}
+            {inputPrompt && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-green-500/10 border border-green-500/30 text-green-400 text-sm">
+                <Link2 size={16} className="shrink-0" />
+                <span className="flex-1 truncate">使用连接节点的内容</span>
+              </div>
+            )}
+
+            {/* Prompt 输入框 */}
             <Textarea
               className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none min-h-18 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-green-500 text-white placeholder-zinc-500"
               placeholder="描述你想要生成的视频..."
@@ -242,9 +274,9 @@ const TextToVideoNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
               {/* 生成按钮 */}
               <button
                 onClick={() => handleGenerate()}
-                disabled={data.isLoading || !localPrompt}
+                disabled={data.isLoading || (!inputPrompt && !localPrompt)}
                 className={`shrink-0 h-8 px-4 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 whitespace-nowrap transition-all active:scale-[0.98] ${
-                  data.isLoading || !localPrompt
+                  data.isLoading || (!inputPrompt && !localPrompt)
                     ? "bg-gray-400 text-white cursor-not-allowed"
                     : "bg-linear-to-r from-green-600 to-green-500 hover:from-green-500 hover:to-green-400 text-white shadow-lg shadow-green-500/25 hover:shadow-green-500/40"
                 }`}

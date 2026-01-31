@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateGenericVideo } from "@/lib/ai-services/video/generic";
 import { generateAliyunKf2v } from "@/lib/ai-services/video/aliyun-wanx-kf2v";
+import { generateGeminiStartEndVideo } from "@/lib/ai-services/video/gemini";
 import { getModelConfig as getModelConfigFromDb } from "@/lib/db/model-configs";
 import { getCacheKey, getCache, setCache } from "@/lib/db/cache";
 import { getOSSClient } from "@/services/ossService";
+import { getAllModels } from "@/lib/model-registry";
 import type { ModelConfig } from "@/types";
 
 interface StartEndToVideoRequest {
@@ -91,6 +93,95 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 生成缓存键（在检查 Gemini 模型之前）
+    const cacheKey = getCacheKey(model, prompt, {
+      startImage,
+      endImage,
+      duration,
+      resolution,
+    });
+
+    // 检查是否是 Gemini 模型
+    const allModels = getAllModels();
+    let modelDef = allModels[model];
+    if (!modelDef) {
+      modelDef = Object.values(allModels).find((m) => m.id === model);
+    }
+
+    const isGeminiModel = modelDef?.provider === "gemini";
+
+    // 如果是 Gemini 模型，使用 SDK 直接生成
+    if (isGeminiModel && modelDef) {
+      console.log("[API] Using Gemini Veo SDK for model:", modelDef.id);
+
+      try {
+        // 调用 Gemini Veo SDK 生成视频（返回 Buffer）
+        const videoBuffer = await generateGeminiStartEndVideo(
+          modelDef.id,
+          prompt,
+          startImage,
+          endImage,
+          {
+            aspectRatio: "16:9",
+            duration: typeof duration === "number" ? `${duration}s` : duration,
+          },
+        );
+
+        console.log("[API] Gemini Veo video generated, uploading to OSS...");
+
+        // 上传到 OSS
+        try {
+          const ossClient = getOSSClient();
+          const fileName = `veo-${Date.now()}.mp4`;
+          const result = await ossClient.uploadBuffer(
+            videoBuffer,
+            "videos",
+            fileName,
+          );
+
+          console.log("[API] Video uploaded to OSS successfully:", result.url);
+
+          // 保存到缓存
+          setCache(
+            cacheKey,
+            model,
+            prompt,
+            { startImage, endImage, duration, resolution },
+            result.url,
+            { ttl: 7200 },
+          );
+
+          return NextResponse.json({
+            success: true,
+            data: result.url,
+            cached: false,
+            provider: "gemini",
+          });
+        } catch (ossError) {
+          console.error("[API] Failed to upload to OSS:", ossError);
+          return NextResponse.json(
+            {
+              success: false,
+              error: `Failed to upload video to OSS: ${ossError instanceof Error ? ossError.message : "Unknown error"}`,
+            },
+            { status: 500 },
+          );
+        }
+      } catch (geminiError) {
+        console.error("[API] Gemini Veo generation failed:", geminiError);
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              geminiError instanceof Error
+                ? geminiError.message
+                : "Gemini Veo video generation failed",
+          },
+          { status: 500 },
+        );
+      }
+    }
+
     console.log("[API] Fetching model config for:", model);
     const config = await getModelConfig(model);
 
@@ -117,13 +208,6 @@ export async function POST(request: NextRequest) {
     }
 
     // 检查缓存
-    const cacheKey = getCacheKey(model, prompt, {
-      startImage,
-      endImage,
-      duration,
-      resolution,
-    });
-
     const cached = getCache(cacheKey);
     if (cached) {
       console.log("[API] Cache hit for start-end-to-video generation");

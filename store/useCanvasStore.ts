@@ -50,6 +50,11 @@ interface CanvasState {
     sourceNodeId: string,
     position?: { x: number; y: number },
   ) => void;
+  addMultipleConnectedNodes: (
+    nodes: Array<{ type: NodeType; data: Partial<NodeData> }>,
+    sourceNodeId: string,
+    startPosition: { x: number; y: number },
+  ) => string[];
   deleteNode: (nodeId: string) => void;
   updateNodeData: (nodeId: string, data: Partial<NodeData>) => void;
   duplicateNode: (nodeId: string) => void;
@@ -204,6 +209,10 @@ export const useCanvasStore = create<CanvasState>()(
               label: "Creative Description",
               data: { model: "BananaPro" },
             },
+            [NodeType.STORYBOARD]: {
+              label: "Storyboard",
+              data: {},
+            },
             [NodeType.ORIGINAL_IMAGE]: {
               label: "Original Image",
               data: {},
@@ -252,6 +261,127 @@ export const useCanvasStore = create<CanvasState>()(
           };
 
           set({ edges: [...get().edges, newEdge] });
+        },
+
+        // 批量添加连接节点
+        addMultipleConnectedNodes: (nodes, sourceNodeId, startPosition) => {
+          const newNodeIds: string[] = [];
+          const verticalSpacing = 300; // 节点间距
+
+          const nodeTypeMap: Record<
+            NodeType,
+            { label: string; data: Partial<NodeData> }
+          > = {
+            [NodeType.TEXT]: {
+              label: "Text",
+              data: {},
+            },
+            [NodeType.TEXT_TO_IMAGE]: {
+              label: "Text to Image",
+              data: {
+                model: "BananaPro",
+                aspectRatio: "1:1",
+                resolution: "1k",
+                count: 1,
+              },
+            },
+            [NodeType.TEXT_TO_VIDEO]: {
+              label: "Text to Video",
+              data: {
+                model: "Sora 2",
+                aspectRatio: "16:9",
+                resolution: "720p",
+                duration: "5s",
+                count: 1,
+              },
+            },
+            [NodeType.IMAGE_TO_IMAGE]: {
+              label: "Image to Image",
+              data: {
+                model: "BananaPro",
+                aspectRatio: "1:1",
+                resolution: "1k",
+                count: 1,
+              },
+            },
+            [NodeType.IMAGE_TO_VIDEO]: {
+              label: "Image to Video",
+              data: {
+                model: "Sora 2",
+                aspectRatio: "16:9",
+                resolution: "720p",
+                duration: "5s",
+                count: 1,
+              },
+            },
+            [NodeType.START_END_TO_VIDEO]: {
+              label: "Start-End to Video",
+              data: {
+                model: "Sora 2",
+                aspectRatio: "16:9",
+                resolution: "720p",
+                duration: "5s",
+                count: 1,
+                swapFrames: false,
+              },
+            },
+            [NodeType.CREATIVE_DESC]: {
+              label: "Creative Description",
+              data: { model: "BananaPro" },
+            },
+            [NodeType.STORYBOARD]: {
+              label: "Storyboard",
+              data: {},
+            },
+            [NodeType.ORIGINAL_IMAGE]: {
+              label: "Original Image",
+              data: {},
+            },
+            [NodeType.GROUP]: {
+              label: "Group",
+              data: {},
+            },
+          };
+
+          nodes.forEach((nodeConfig, index) => {
+            const position = {
+              x: startPosition.x,
+              y: startPosition.y + index * verticalSpacing,
+            };
+
+            const config = nodeTypeMap[nodeConfig.type];
+            const newNode: CanvasNode = {
+              id: nanoid(),
+              type: nodeConfig.type,
+              position,
+              data: {
+                label: config.label,
+                type: nodeConfig.type,
+                ...config.data,
+                ...nodeConfig.data,
+              },
+              style: {
+                width: DEFAULT_NODE_WIDTH,
+                height: DEFAULT_NODE_HEIGHT,
+              },
+            };
+
+            set({ nodes: [...get().nodes, newNode] });
+            newNodeIds.push(newNode.id);
+
+            // 创建连接边
+            const newEdge = {
+              id: `edge-${sourceNodeId}-${newNode.id}`,
+              source: sourceNodeId,
+              target: newNode.id,
+              sourceHandle: "output",
+              targetHandle: null,
+            };
+
+            set({ edges: [...get().edges, newEdge] });
+          });
+
+          return newNodeIds;
         },
 
         // 删除节点

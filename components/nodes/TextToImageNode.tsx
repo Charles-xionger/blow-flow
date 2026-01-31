@@ -4,7 +4,7 @@ import { memo, useCallback, useState, useEffect } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { Handle, Position } from "@xyflow/react";
 import { useCanvasStore } from "@/store/useCanvasStore";
-import { Image, Sparkles, Wand2, Loader2 } from "lucide-react";
+import { Image, Sparkles, Wand2, Loader2, Link2 } from "lucide-react";
 import type { NodeData } from "@/types";
 import { getImageModels } from "@/lib/model-registry";
 import { EditableTitle } from "./shared/EditableTitle";
@@ -40,6 +40,22 @@ const TextToImageNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
   // 只有在单选状态下才显示控制面板
   const shouldShowPanel = selected && selectedNodeIds.length === 1;
 
+  // 从连接的文本节点读取 prompt
+  const inputPrompt = useCanvasStore(
+    useCallback(
+      (state) => {
+        const inputEdges = state.edges.filter((edge) => edge.target === id);
+        if (inputEdges.length === 0) return null;
+
+        const sourceNode = state.nodes.find(
+          (n) => n.id === inputEdges[0].source,
+        );
+        return sourceNode?.data.prompt;
+      },
+      [id],
+    ),
+  );
+
   // 本地状态用于输入框，防止中文输入法问题
   const [localPrompt, setLocalPrompt] = useState(data.prompt || "");
 
@@ -53,13 +69,17 @@ const TextToImageNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
     setLocalPrompt(data.prompt || "");
   }, [data.prompt]);
 
+  // 优先使用连接节点的 prompt，否则使用本地 prompt
+  const effectivePrompt = inputPrompt || localPrompt;
+
   const handleGenerate = useCallback(async () => {
     // 先同步本地输入到 store
     if (localPrompt !== data.prompt) {
       updateNodeData(id, { prompt: localPrompt });
     }
 
-    if (!localPrompt) return;
+    const promptToUse = inputPrompt || localPrompt;
+    if (!promptToUse) return;
 
     updateNodeData(id, { isLoading: true, error: undefined });
 
@@ -68,7 +88,7 @@ const TextToImageNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          prompt: localPrompt,
+          prompt: promptToUse,
           model: data.model || "BananaPro",
           aspectRatio: data.aspectRatio || "1:1",
           resolution: data.resolution || "1k",
@@ -96,6 +116,8 @@ const TextToImageNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
     }
   }, [
     id,
+    inputPrompt,
+    localPrompt,
     data.prompt,
     data.model,
     data.aspectRatio,
@@ -115,6 +137,9 @@ const TextToImageNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
         defaultTitle={data.label}
         customTitle={data.customTitle}
       />
+
+      {/* 输入句柄 */}
+      <Handle type="target" position={Position.Left} id="input" />
 
       {/* 输出句柄 */}
       <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center">
@@ -164,6 +189,15 @@ const TextToImageNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
           onMouseDown={(e) => e.stopPropagation()}
         >
           <div className="bg-[#1a1a1a]/95 backdrop-blur-xl border border-zinc-700/50 rounded-2xl p-4 flex flex-col gap-3">
+            {/* 连接提示卡片 */}
+            {inputPrompt && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 text-sm">
+                <Link2 size={16} className="shrink-0" />
+                <span className="flex-1 truncate">使用连接节点的内容</span>
+              </div>
+            )}
+
+            {/* Prompt 输入框 */}
             <Textarea
               className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none min-h-18 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-blue-500 text-white placeholder-zinc-500"
               placeholder="描述你想要生成的图片..."
@@ -235,9 +269,9 @@ const TextToImageNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
 
               <button
                 onClick={handleGenerate}
-                disabled={data.isLoading || !localPrompt}
+                disabled={data.isLoading || (!inputPrompt && !localPrompt)}
                 className={`shrink-0 h-8 px-4 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 whitespace-nowrap transition-all active:scale-[0.98] ${
-                  data.isLoading || !localPrompt
+                  data.isLoading || (!inputPrompt && !localPrompt)
                     ? "bg-gray-400 text-white cursor-not-allowed"
                     : "bg-linear-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40"
                 }`}

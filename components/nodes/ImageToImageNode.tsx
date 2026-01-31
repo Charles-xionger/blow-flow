@@ -4,7 +4,14 @@ import { memo, useCallback, useMemo, useState, useEffect } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { Handle, Position } from "@xyflow/react";
 import { useCanvasStore } from "@/store/useCanvasStore";
-import { Image, Sparkles, AlertCircle, Loader2, Wand2 } from "lucide-react";
+import {
+  Image,
+  Sparkles,
+  AlertCircle,
+  Loader2,
+  Wand2,
+  RefreshCw,
+} from "lucide-react";
 import type { NodeData } from "@/types";
 import { getImageModels } from "@/lib/model-registry";
 import { EditableTitle } from "./shared/EditableTitle";
@@ -203,7 +210,7 @@ const ImageToImageNode = ({
             )}
 
             <Textarea
-              className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none min-h-18 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-purple-500 text-white placeholder-zinc-500"
+              className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none min-h-18 max-h-32 overflow-y-auto bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-purple-500 text-white placeholder-zinc-500"
               placeholder="描述你想要的变化..."
               value={localPrompt}
               onChange={(e) => setLocalPrompt(e.target.value)}
@@ -259,7 +266,7 @@ const ImageToImageNode = ({
               <div className="flex-1" />
 
               <button
-                onClick={() => handleGenerate()}
+                onClick={() => handleGenerate(false)}
                 disabled={data.isLoading || !localPrompt || !inputImage}
                 className={`shrink-0 h-8 px-4 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 whitespace-nowrap transition-all active:scale-[0.98] ${
                   data.isLoading || !localPrompt || !inputImage
@@ -274,6 +281,16 @@ const ImageToImageNode = ({
                 )}
                 <span>{data.isLoading ? "生成中" : "生成"}</span>
               </button>
+
+              {hasResult && !data.isLoading && (
+                <button
+                  onClick={() => handleGenerate(true)}
+                  className="shrink-0 h-8 w-8 rounded-lg text-sm font-semibold flex items-center justify-center transition-all active:scale-[0.98] bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white border border-zinc-700 hover:border-zinc-600"
+                  title="重新生成（跳过缓存）"
+                >
+                  <RefreshCw size={15} />
+                </button>
+              )}
             </div>
 
             {data.error && (

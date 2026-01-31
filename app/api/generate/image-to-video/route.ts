@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateGenericVideo } from "@/lib/ai-services/video/generic";
 import { generateAliyunWanxVideo } from "@/lib/ai-services/video/aliyun-wanx";
+import { generateGeminiImageToVideo } from "@/lib/ai-services/video/gemini-veo";
 import { getModelConfig as getModelConfigFromDb } from "@/lib/db/model-configs";
 import { getCacheKey, getCache, setCache } from "@/lib/db/cache";
 import { getOSSClient } from "@/services/ossService";
+import { getAllModels } from "@/lib/model-registry";
 import type { ModelConfig } from "@/types";
 
 interface ImageToVideoRequest {
@@ -72,6 +74,89 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 检查是否是 Gemini 模型
+    const allModels = getAllModels();
+    let modelDef = allModels[model]; // 首先用 key 查找
+
+    // 如果用 key 找不到，尝试用 id 查找
+    if (!modelDef) {
+      modelDef = Object.values(allModels).find((m) => m.id === model);
+    }
+
+    const isGeminiModel = modelDef?.provider === "gemini";
+
+    console.log("[API Image-to-Video] Model check:", {
+      model,
+      hasModelDef: !!modelDef,
+      modelDefId: modelDef?.id,
+      isGeminiModel,
+    });
+
+    // Gemini 模型直接使用 SDK，不需要配置
+    if (isGeminiModel && modelDef) {
+      console.log("[API] Using Gemini SDK for image-to-video:", modelDef.id);
+
+      // 检查缓存
+      if (!skipCache) {
+        const cacheKey = getCacheKey(model, prompt, {
+          inputImage,
+          duration,
+        });
+
+        const cached = getCache(cacheKey);
+        if (cached) {
+          console.log("[API] Cache hit for image-to-video generation");
+          return NextResponse.json({
+            success: true,
+            data: cached,
+            cached: true,
+          });
+        }
+      }
+
+      // 解析时长
+      const durationSeconds =
+        typeof duration === "number"
+          ? duration
+          : parseInt(String(duration).replace("s", "")) || 10;
+
+      // 生成视频
+      const tempVideoUrl = await generateGeminiImageToVideo(
+        modelDef.id,
+        prompt,
+        inputImage,
+        durationSeconds,
+      );
+
+      // 下载并上传到 OSS
+      let videoUrl = tempVideoUrl;
+      try {
+        const ossClient = getOSSClient();
+        const result = await ossClient.downloadAndUpload(
+          tempVideoUrl,
+          `generated/${Date.now()}.mp4`,
+        );
+        videoUrl = result.url;
+      } catch (ossError) {
+        console.warn("[API] OSS upload failed, using original URL:", ossError);
+      }
+
+      // 缓存结果
+      if (!skipCache) {
+        const cacheKey = getCacheKey(model, prompt, {
+          inputImage,
+          duration,
+        });
+        setCache(cacheKey, model, prompt, { inputImage, duration }, [videoUrl]);
+      }
+
+      return NextResponse.json({
+        success: true,
+        data: [videoUrl],
+      });
+    }
+
+    // 非 Gemini 模型，使用原有逻辑
     const config = await getModelConfig(model);
 
     if (!config.key) {

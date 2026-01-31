@@ -196,7 +196,7 @@ const ImageToVideoNode = ({
             )}
 
             <Textarea
-              className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none min-h-18 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-pink-500 text-white placeholder-zinc-500"
+              className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none min-h-18 max-h-32 overflow-y-auto bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-purple-500 text-white placeholder-zinc-500"
               placeholder="描述你想要的视频内容..."
               value={localPrompt}
               onChange={(e) => setLocalPrompt(e.target.value)}

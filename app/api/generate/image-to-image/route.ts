@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateBananaImage } from "@/lib/ai-services/image/banana";
 import { generateFluxImage } from "@/lib/ai-services/image/flux";
 import { generateGenericImage } from "@/lib/ai-services/image/generic";
+import { generateGeminiImageToImage } from "@/lib/ai-services/image/gemini";
 import { getModelConfig as getModelConfigFromDb } from "@/lib/db/model-configs";
 import { getCacheKey, getCache, setCache } from "@/lib/db/cache";
 import { getOSSClient } from "@/services/ossService";
+import { getAllModels } from "@/lib/model-registry";
 import type { ModelConfig } from "@/types";
 
 interface ImageToImageRequest {
@@ -51,6 +53,103 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 检查是否是 Gemini 模型
+    const allModels = getAllModels();
+    let modelDef = allModels[model]; // 首先用 key 查找
+
+    // 如果用 key 找不到，尝试用 id 查找
+    if (!modelDef) {
+      modelDef = Object.values(allModels).find((m) => m.id === model);
+    }
+
+    const isGeminiModel = modelDef?.provider === "gemini";
+
+    console.log("[API] Model check for image-to-image:", {
+      model,
+      modelDef: modelDef?.id,
+      isGeminiModel,
+    });
+
+    // Gemini 模型直接使用 SDK，不需要配置
+    if (isGeminiModel && modelDef) {
+      console.log("[API] Using Gemini SDK for image-to-image:", modelDef.id);
+
+      // 检查缓存（除非明确跳过）
+      if (!skipCache) {
+        const cacheKey = getCacheKey(model, prompt, {
+          inputImage,
+          aspectRatio,
+        });
+
+        const cached = getCache(cacheKey);
+        if (cached) {
+          console.log("[API] Cache hit for image-to-image generation");
+          return NextResponse.json({
+            success: true,
+            data: cached,
+            cached: true,
+          });
+        }
+      }
+
+      // 提示词优化
+      const finalPrompt = prompt;
+      if (promptOptimize && prompt) {
+        // TODO: 调用提示词优化服务
+      }
+
+      // 使用 Gemini SDK 进行图生图
+      const tempImageUrl = await generateGeminiImageToImage(
+        modelDef.id,
+        finalPrompt,
+        inputImage,
+      );
+
+      // 下载并上传到 OSS
+      let imageUrl = tempImageUrl;
+      try {
+        const ossClient = getOSSClient();
+        const result = await ossClient.downloadAndUpload(
+          tempImageUrl,
+          "images",
+          `i2i-${Date.now()}.png`,
+        );
+        imageUrl = result.url;
+        console.log("[API] Image-to-image uploaded to OSS:", imageUrl);
+      } catch (ossError) {
+        console.error(
+          "[API] Failed to upload image-to-image to OSS:",
+          ossError,
+        );
+        // 降级使用临时 URL
+      }
+
+      // 保存到缓存
+      if (!skipCache) {
+        const cacheKey = getCacheKey(model, prompt, {
+          inputImage,
+          aspectRatio,
+        });
+        setCache(
+          cacheKey,
+          model,
+          prompt,
+          { inputImage, aspectRatio },
+          imageUrl,
+          {
+            ttl: 300, // 5分钟缓存
+          },
+        );
+      }
+
+      return NextResponse.json({
+        success: true,
+        data: imageUrl,
+        cached: false,
+      });
+    }
+
+    // 非 Gemini 模型，需要从数据库获取配置
     const config = await getModelConfig(model);
 
     if (!config.key) {

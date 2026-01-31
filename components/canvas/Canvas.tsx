@@ -23,6 +23,7 @@ import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { toast } from "sonner";
 
 // 导入节点组件（下一步创建）
+import TextNode from "@/components/nodes/TextNode";
 import TextToImageNode from "@/components/nodes/TextToImageNode";
 import TextToVideoNode from "@/components/nodes/TextToVideoNode";
 import ImageToImageNode from "@/components/nodes/ImageToImageNode";
@@ -38,12 +39,14 @@ import { PaneContextMenu } from "./PaneContextMenu";
 
 // 定义节点类型映射
 const nodeTypes = {
+  [NodeType.TEXT]: TextNode,
   [NodeType.TEXT_TO_IMAGE]: TextToImageNode,
   [NodeType.TEXT_TO_VIDEO]: TextToVideoNode,
   [NodeType.IMAGE_TO_IMAGE]: ImageToImageNode,
   [NodeType.IMAGE_TO_VIDEO]: ImageToVideoNode,
   [NodeType.START_END_TO_VIDEO]: StartEndToVideoNode,
   [NodeType.CREATIVE_DESC]: CreativeDescNode,
+  [NodeType.STORYBOARD]: CreativeDescNode, // 使用同一个组件
   [NodeType.ORIGINAL_IMAGE]: OriginalImageNode,
   [NodeType.GROUP]: GroupNode,
 };
@@ -76,7 +79,7 @@ function CanvasInner() {
     (state) => state.setCurrentWorkflowId,
   );
 
-  // 从 URL 加载项目
+  // 从 URL 加载项目（只在 URL 变化时触发，不依赖 currentWorkflowId）
   useEffect(() => {
     const projectId = searchParams.get("project");
     console.log(
@@ -85,6 +88,9 @@ function CanvasInner() {
       "currentWorkflowId:",
       currentWorkflowId,
     );
+
+    // 只有当 URL 中有 project ID，且与当前不同时才加载
+    // 使用 ref 记住上次加载的 ID，避免重复加载
     if (projectId && projectId !== currentWorkflowId) {
       console.log("[URL Load] Loading project from URL:", projectId);
       // 从 API 加载项目
@@ -99,11 +105,18 @@ function CanvasInner() {
           console.error("Failed to load workflow from URL:", err),
         );
     }
-  }, [searchParams, currentWorkflowId, loadWorkflow]);
+  }, [searchParams]); // 只依赖 searchParams，避免循环
 
-  // 同步 currentWorkflowId 到 URL
+  // 同步 currentWorkflowId 到 URL（使用 ref 防止循环更新）
+  const lastSyncedIdRef = useRef<string | null>(null);
   useEffect(() => {
     const currentProjectId = searchParams.get("project");
+
+    // 如果已经同步过这个 ID，跳过
+    if (lastSyncedIdRef.current === currentWorkflowId) {
+      return;
+    }
+
     console.log(
       "[URL Sync] currentWorkflowId:",
       currentWorkflowId,
@@ -113,12 +126,14 @@ function CanvasInner() {
 
     if (currentWorkflowId && currentProjectId !== currentWorkflowId) {
       console.log("[URL Sync] Updating URL to:", currentWorkflowId);
+      lastSyncedIdRef.current = currentWorkflowId;
       router.push(`/?project=${currentWorkflowId}`, { scroll: false });
     } else if (!currentWorkflowId && currentProjectId) {
       console.log("[URL Sync] Clearing URL");
+      lastSyncedIdRef.current = null;
       router.push("/", { scroll: false });
     }
-  }, [currentWorkflowId, router, searchParams]);
+  }, [currentWorkflowId, router]);
 
   // 同步主题到 DOM
   useEffect(() => {

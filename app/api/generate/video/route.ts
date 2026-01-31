@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateGenericVideo } from "@/lib/ai-services/video/generic";
+import { generateGeminiVideo, generateGeminiImageToVideo } from "@/lib/ai-services/video/gemini-veo";
 import { getModelConfig as getModelConfigFromDb } from "@/lib/db/model-configs";
 import { getCacheKey, getCache, setCache } from "@/lib/db/cache";
 import { getOSSClient } from "@/services/ossService";
+import { getAllModels } from "@/lib/model-registry";
 import type { ModelConfig } from "@/types";
 
 interface GenerateVideoRequest {
@@ -58,6 +60,121 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 检查是否是 Gemini 模型
+    const allModels = getAllModels();
+    let modelDef = allModels[model]; // 首先用 key 查找
+    
+    // 如果用 key 找不到，尝试用 id 查找
+    if (!modelDef) {
+      modelDef = Object.values(allModels).find((m) => m.id === model);
+    }
+    
+    const isGeminiModel = modelDef?.provider === "gemini";
+
+    console.log("[API Video] Model check:", {
+      model,
+      hasModelDef: !!modelDef,
+      modelDefId: modelDef?.id,
+      isGeminiModel,
+    });
+
+    // Gemini 模型直接使用 SDK，不需要配置
+    if (isGeminiModel && modelDef) {
+      console.log("[API] Using Gemini SDK for video model:", modelDef.id);
+
+      // 检查缓存
+      if (!skipCache) {
+        const cacheKey = getCacheKey(model, prompt, {
+          aspectRatio,
+          resolution,
+          duration,
+          inputImages,
+          isStartEndMode,
+        });
+
+        const cached = getCache(cacheKey);
+        if (cached) {
+          console.log("[API] Cache hit for video generation");
+          return NextResponse.json({
+            success: true,
+            data: cached,
+            cached: true,
+          });
+        }
+      }
+
+      // 提示词优化
+      const finalPrompt = prompt;
+      if (promptOptimize && prompt) {
+        // TODO: 调用提示词优化服务
+      }
+
+      // 解析时长
+      const durationSeconds = parseInt(duration.replace("s", "")) || 5;
+
+      // 批量生成
+      const results: string[] = [];
+      for (let i = 0; i < count; i++) {
+        let tempVideoUrl: string;
+
+        if (inputImages.length > 0) {
+          // 图片转视频
+          tempVideoUrl = await generateGeminiImageToVideo(
+            modelDef.id,
+            finalPrompt,
+            inputImages[0],
+            durationSeconds,
+          );
+        } else {
+          // 文本生成视频
+          tempVideoUrl = await generateGeminiVideo(
+            modelDef.id,
+            finalPrompt,
+            durationSeconds,
+          );
+        }
+
+        // 下载并上传到 OSS
+        let videoUrl = tempVideoUrl;
+        try {
+          const ossClient = getOSSClient();
+          const result = await ossClient.downloadAndUpload(
+            tempVideoUrl,
+            `generated/${Date.now()}_${i}.mp4`,
+          );
+          videoUrl = result.url;
+        } catch (ossError) {
+          console.warn("[API] OSS upload failed, using original URL:", ossError);
+        }
+
+        results.push(videoUrl);
+      }
+
+      // 缓存结果
+      if (!skipCache) {
+        const cacheKey = getCacheKey(model, prompt, {
+          aspectRatio,
+          resolution,
+          duration,
+          inputImages,
+          isStartEndMode,
+        });
+        setCache(
+          cacheKey,
+          model,
+          finalPrompt,
+          { aspectRatio, resolution, duration, inputImages, isStartEndMode },
+          results,
+        );
+      }
+
+      return NextResponse.json({
+        success: true,
+        data: results,
+      });
+    }
+
+    // 非 Gemini 模型，使用原有逻辑
     const config = await getModelConfig(model);
 
     if (!config.key) {

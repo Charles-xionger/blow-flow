@@ -10,6 +10,7 @@
     "test:db": "node scripts/test-db.js"
   },
   "dependencies": {
+    "@google/genai": "^1.39.0",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-slot": "^1.2.4",
     "@xyflow/react": "^12.10.0",

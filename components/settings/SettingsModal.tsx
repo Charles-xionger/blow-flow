@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   X,
   Search,
@@ -60,6 +60,113 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [modelToDelete, setModelToDelete] = useState<string | null>(null);
   const [savingModels, setSavingModels] = useState<Set<string>>(new Set());
 
+  // 从数据库和 localStorage 加载配置（使用 useCallback 避免重复创建）
+  const loadConfigs = useCallback(
+    async (allModels: Record<string, ModelDefinition>) => {
+      try {
+        // 首先从数据库加载
+        console.log("[Settings] Loading configs from database...");
+        const response = await fetch("/api/model-config");
+        const result = await response.json();
+
+        const newConfigs: Record<string, ModelConfig> = {};
+        let dbConfigCount = 0;
+        let localConfigCount = 0;
+
+        if (result.success && result.data) {
+          console.log("[Settings] Database response:", result);
+
+          // 使用数据库中的配置
+          Object.keys(allModels).forEach((key) => {
+            const dbConfig = result.data[key];
+            if (dbConfig && (dbConfig.baseUrl || dbConfig.key)) {
+              // 数据库中有配置，使用数据库配置并同步到 localStorage
+              newConfigs[key] = {
+                baseUrl: dbConfig.baseUrl,
+                key: dbConfig.key,
+                modelId: dbConfig.modelId,
+                endpoint: dbConfig.endpoint,
+              };
+
+              // 同步回 localStorage，确保数据一致性
+              if (typeof window !== "undefined") {
+                localStorage.setItem(
+                  `API_CONFIG_MODEL_${key}`,
+                  JSON.stringify(newConfigs[key]),
+                );
+              }
+
+              dbConfigCount++;
+              console.log(`[Settings] Loaded config for ${key} from database`);
+            } else {
+              // 如果数据库中没有，尝试从 localStorage 加载
+              const stored = localStorage.getItem(`API_CONFIG_MODEL_${key}`);
+              if (stored) {
+                try {
+                  const localConfig = JSON.parse(stored);
+                  if (localConfig.baseUrl || localConfig.key) {
+                    newConfigs[key] = localConfig;
+                    localConfigCount++;
+                    console.log(
+                      `[Settings] Loaded config for ${key} from localStorage`,
+                    );
+                  } else {
+                    newConfigs[key] = {};
+                  }
+                } catch {
+                  newConfigs[key] = {};
+                }
+              } else {
+                newConfigs[key] = {};
+              }
+            }
+          });
+
+          console.log(
+            `[Settings] Loaded ${dbConfigCount} configs from database, ${localConfigCount} from localStorage`,
+          );
+        } else {
+          console.log(
+            "[Settings] Database load failed, falling back to localStorage",
+          );
+          // 如果数据库加载失败，从 localStorage 加载
+          Object.keys(allModels).forEach((key) => {
+            const stored = localStorage.getItem(`API_CONFIG_MODEL_${key}`);
+            if (stored) {
+              try {
+                newConfigs[key] = JSON.parse(stored);
+              } catch {
+                newConfigs[key] = {};
+              }
+            } else {
+              newConfigs[key] = {};
+            }
+          });
+        }
+
+        setConfigs(newConfigs);
+      } catch (error) {
+        console.error("[Settings] Failed to load configs:", error);
+        // 降级到 localStorage
+        const newConfigs: Record<string, ModelConfig> = {};
+        Object.keys(allModels).forEach((key) => {
+          const stored = localStorage.getItem(`API_CONFIG_MODEL_${key}`);
+          if (stored) {
+            try {
+              newConfigs[key] = JSON.parse(stored);
+            } catch {
+              newConfigs[key] = {};
+            }
+          } else {
+            newConfigs[key] = {};
+          }
+        });
+        setConfigs(newConfigs);
+      }
+    },
+    [],
+  );
+
   // 加载配置
   useEffect(() => {
     if (isOpen && typeof window !== "undefined") {
@@ -73,111 +180,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       // 从数据库和 localStorage 加载配置
       loadConfigs(allModels);
     }
-  }, [isOpen]);
-
-  // 从数据库和 localStorage 加载配置
-  const loadConfigs = async (allModels: Record<string, ModelDefinition>) => {
-    try {
-      // 首先从数据库加载
-      console.log("[Settings] Loading configs from database...");
-      const response = await fetch("/api/model-config");
-      const result = await response.json();
-
-      const newConfigs: Record<string, ModelConfig> = {};
-      let dbConfigCount = 0;
-      let localConfigCount = 0;
-
-      if (result.success && result.data) {
-        console.log("[Settings] Database response:", result);
-
-        // 使用数据库中的配置
-        Object.keys(allModels).forEach((key) => {
-          const dbConfig = result.data[key];
-          if (dbConfig && (dbConfig.baseUrl || dbConfig.key)) {
-            // 数据库中有配置，使用数据库配置并同步到 localStorage
-            newConfigs[key] = {
-              baseUrl: dbConfig.baseUrl,
-              key: dbConfig.key,
-              modelId: dbConfig.modelId,
-              endpoint: dbConfig.endpoint,
-            };
-
-            // 同步回 localStorage，确保数据一致性
-            if (typeof window !== "undefined") {
-              localStorage.setItem(
-                `API_CONFIG_MODEL_${key}`,
-                JSON.stringify(newConfigs[key]),
-              );
-            }
-
-            dbConfigCount++;
-            console.log(`[Settings] Loaded config for ${key} from database`);
-          } else {
-            // 如果数据库中没有，尝试从 localStorage 加载
-            const stored = localStorage.getItem(`API_CONFIG_MODEL_${key}`);
-            if (stored) {
-              try {
-                const localConfig = JSON.parse(stored);
-                if (localConfig.baseUrl || localConfig.key) {
-                  newConfigs[key] = localConfig;
-                  localConfigCount++;
-                  console.log(
-                    `[Settings] Loaded config for ${key} from localStorage`,
-                  );
-                } else {
-                  newConfigs[key] = {};
-                }
-              } catch {
-                newConfigs[key] = {};
-              }
-            } else {
-              newConfigs[key] = {};
-            }
-          }
-        });
-
-        console.log(
-          `[Settings] Loaded ${dbConfigCount} configs from database, ${localConfigCount} from localStorage`,
-        );
-      } else {
-        console.log(
-          "[Settings] Database load failed, falling back to localStorage",
-        );
-        // 如果数据库加载失败，从 localStorage 加载
-        Object.keys(allModels).forEach((key) => {
-          const stored = localStorage.getItem(`API_CONFIG_MODEL_${key}`);
-          if (stored) {
-            try {
-              newConfigs[key] = JSON.parse(stored);
-            } catch {
-              newConfigs[key] = {};
-            }
-          } else {
-            newConfigs[key] = {};
-          }
-        });
-      }
-
-      setConfigs(newConfigs);
-    } catch (error) {
-      console.error("[Settings] Failed to load configs:", error);
-      // 降级到 localStorage
-      const newConfigs: Record<string, ModelConfig> = {};
-      Object.keys(allModels).forEach((key) => {
-        const stored = localStorage.getItem(`API_CONFIG_MODEL_${key}`);
-        if (stored) {
-          try {
-            newConfigs[key] = JSON.parse(stored);
-          } catch {
-            newConfigs[key] = {};
-          }
-        } else {
-          newConfigs[key] = {};
-        }
-      });
-      setConfigs(newConfigs);
-    }
-  };
+  }, [isOpen, loadConfigs]);
 
   // 保存全局配置
   const saveGlobalConfig = async () => {

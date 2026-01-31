@@ -1,21 +1,15 @@
 "use client";
 
-import { memo, useCallback, useState } from "react";
+import { memo, useCallback, useState, useEffect, useMemo } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { Handle, Position } from "@xyflow/react";
 import { useCanvasStore } from "@/store/useCanvasStore";
-import {
-  Sparkles,
-  Copy,
-  CheckCircle,
-  FileText,
-  Loader2,
-  Wand2,
-} from "lucide-react";
-import type { NodeData } from "@/types";
+import { Film, Loader2, Wand2, Plus, Minus } from "lucide-react";
+import type { NodeData, NodeType } from "@/types";
 import { EditableTitle } from "./shared/EditableTitle";
 import { QuickAddNode } from "../canvas/QuickAddNode";
 import { Textarea } from "@/components/ui/textarea";
+import { getModelsByCategory } from "@/lib/model-registry";
 
 const CreativeDescNode = ({
   id,
@@ -23,25 +17,30 @@ const CreativeDescNode = ({
   selected,
 }: NodeProps<Node<NodeData>>) => {
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
+  const addMultipleConnectedNodes = useCanvasStore(
+    (state) => state.addMultipleConnectedNodes,
+  );
   const nodes = useCanvasStore((state) => state.nodes);
   const selectedNodeIds = useCanvasStore((state) => state.selectedNodeIds);
   const currentNode = nodes.find((n) => n.id === id);
-  const nodePosition = currentNode?.position || { x: 0, y: 0 };
-  const [copied, setCopied] = useState(false);
+  const nodePosition = useMemo(
+    () => currentNode?.position || { x: 0, y: 0 },
+    [currentNode?.position],
+  );
 
-  // 只有在单选状态下才显示控制面板
   const shouldShowPanel = selected && selectedNodeIds.length === 1;
-
-  // 本地状态用于输入框，防止中文输入法问题
   const [localPrompt, setLocalPrompt] = useState(data.prompt || "");
+  const [shotCount, setShotCount] = useState(data.shotCount || 4);
+  const [selectedModel, setSelectedModel] = useState(data.model || "");
 
-  // 同步外部数据变化到本地状态
+  // 获取可用的文本模型
+  const textModels = useMemo(() => getModelsByCategory("TEXT"), []);
+
   useEffect(() => {
     setLocalPrompt(data.prompt || "");
   }, [data.prompt]);
 
-  const handleOptimize = useCallback(async () => {
-    // 先同步本地输入到 store
+  const handleGenerateStoryboard = useCallback(async () => {
     if (localPrompt !== data.prompt) {
       updateNodeData(id, { prompt: localPrompt });
     }
@@ -51,11 +50,13 @@ const CreativeDescNode = ({
     updateNodeData(id, { isLoading: true, error: undefined });
 
     try {
-      const response = await fetch("/api/optimize", {
+      const response = await fetch("/api/storyboard", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: localPrompt,
+          shotCount,
+          modelName: selectedModel,
         }),
       });
 
@@ -64,155 +65,177 @@ const CreativeDescNode = ({
       if (result.success && result.data) {
         updateNodeData(id, {
           isLoading: false,
-          optimizedPrompt: result.data,
+          storyboardShots: result.data,
+          shotCount,
         });
+
+        // 自动创建文本节点
+        const nodesToCreate = result.data.map((shot: any) => ({
+          type: "text" as NodeType,
+          data: {
+            prompt: shot.description,
+            customTitle: shot.title,
+          },
+        }));
+
+        const startPosition = {
+          x: nodePosition.x + 400,
+          y: nodePosition.y - 150,
+        };
+
+        addMultipleConnectedNodes(nodesToCreate, id, startPosition);
       } else {
-        throw new Error(result.error || "优化失败");
+        const errorMsg = result.error || "分镜生成失败";
+        throw new Error(
+          errorMsg.includes("No text model configured")
+            ? "请先在设置中配置文本模型（如 Gemini 2.5 Pro）"
+            : errorMsg,
+        );
       }
     } catch (error) {
       updateNodeData(id, {
         isLoading: false,
-        error: error instanceof Error ? error.message : "优化失败",
+        error: error instanceof Error ? error.message : "分镜生成失败",
       });
     }
-  }, [id, localPrompt, updateNodeData]);
+  }, [
+    id,
+    localPrompt,
+    shotCount,
+    selectedModel,
+    updateNodeData,
+    data.prompt,
+    nodePosition,
+    addMultipleConnectedNodes,
+  ]);
 
-  const handleCopy = useCallback(() => {
-    if (data.optimizedPrompt) {
-      navigator.clipboard.writeText(data.optimizedPrompt);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  }, [data.optimizedPrompt]);
-
-  const hasResult = !!data.optimizedPrompt && !data.isLoading;
+  const successCount = data.storyboardShots?.length || 0;
+  const hasResult = !!data.storyboardShots && !data.isLoading;
 
   return (
     <>
-      {/* 可编辑标题 */}
       <EditableTitle
         nodeId={id}
-        defaultTitle={data.label}
+        defaultTitle="AI 分镜师"
         customTitle={data.customTitle}
       />
 
-      {/* 输出句柄 */}
       <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center">
         <QuickAddNode nodeId={id} nodePosition={nodePosition} />
         <Handle type="source" position={Position.Right} id="output" />
       </div>
 
-      {/* 节点显示区域 */}
       <div
-        style={{ width: "320px", height: "240px" }}
+        style={{ width: "320px", height: "200px" }}
         className={`relative rounded-2xl border ${
           selected
-            ? "border-cyan-500 ring-2 ring-cyan-500/30"
+            ? "border-purple-500 ring-2 ring-purple-500/30"
             : "border-zinc-700/50"
         } bg-[#1a1a1a] overflow-hidden shadow-xl group transition-all duration-200`}
       >
-        {hasResult ? (
-          <div className="relative w-full h-full p-4 overflow-y-auto">
-            <div className="text-xs text-zinc-400 mb-2 flex items-center gap-2">
-              <Sparkles size={12} className="text-cyan-400" />
-              <span>优化后的提示词</span>
-            </div>
-            <p className="text-sm text-zinc-200 leading-relaxed whitespace-pre-wrap wrap-break-word">
-              {data.optimizedPrompt}
-            </p>
+        <div className="relative w-full h-full p-6 flex flex-col items-center justify-center">
+          <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 bg-zinc-800/50 text-purple-500">
+            <Film size={28} className="opacity-60" />
           </div>
-        ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center text-zinc-500">
-            <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 bg-zinc-800/50 text-zinc-500">
-              <FileText size={28} className="opacity-60" />
-            </div>
-            <span className="text-sm font-medium opacity-60">提示词优化</span>
-            <span className="text-xs opacity-40 mt-1">选中节点开始优化</span>
+          <div className="text-sm font-medium text-zinc-300 mb-1">
+            AI 分镜生成器
           </div>
-        )}
+          {hasResult ? (
+            <div className="text-xs text-purple-400 flex items-center gap-1">
+              <span>✓ 已生成 {successCount} 个文本节点</span>
+            </div>
+          ) : (
+            <div className="text-xs text-zinc-500">输入故事描述开始生成</div>
+          )}
+        </div>
 
         {data.isLoading && (
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center z-20">
-            <Loader2 size={32} className="text-cyan-500 animate-spin mb-3" />
-            <span className="text-white/80 text-sm font-medium">优化中...</span>
+            <Loader2 size={32} className="text-purple-500 animate-spin mb-3" />
+            <span className="text-white/80 text-sm font-medium">
+              分镜生成中...
+            </span>
           </div>
         )}
       </div>
 
-      {/* 控制面板 */}
       {shouldShowPanel && (
         <div
           className="absolute top-full left-1/2 -translate-x-1/2 min-w-100 pt-4 z-70 pointer-events-auto"
           onMouseDown={(e) => e.stopPropagation()}
         >
           <div className="bg-[#1a1a1a]/95 backdrop-blur-xl border border-zinc-700/50 rounded-2xl p-4 flex flex-col gap-3">
+            {/* 模型选择 */}
+            <div className="flex flex-col gap-2">
+              <label className="text-xs font-medium text-zinc-400">
+                选择模型
+              </label>
+              <select
+                value={selectedModel}
+                onChange={(e) => {
+                  setSelectedModel(e.target.value);
+                  updateNodeData(id, { model: e.target.value });
+                }}
+                className="nodrag w-full px-3 py-2 text-sm rounded-lg bg-zinc-800/80 hover:bg-zinc-800 border border-zinc-700 focus:border-purple-500 text-white transition-colors"
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <option value="">自动选择</option>
+                {textModels.map((model) => (
+                  <option key={model.id} value={model.name}>
+                    {model.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <Textarea
-              className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none min-h-18 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-emerald-500 text-white placeholder-zinc-500"
-              placeholder="输入简单的创意描述..."
+              className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none min-h-24 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-purple-500 text-white placeholder-zinc-500"
+              placeholder="输入故事或场景描述，例如：一个关于勇士冒险的故事..."
               value={localPrompt}
               onChange={(e) => setLocalPrompt(e.target.value)}
               onBlur={() => updateNodeData(id, { prompt: localPrompt })}
               onMouseDown={(e) => e.stopPropagation()}
               onWheel={(e) => e.stopPropagation()}
-              rows={3}
+              rows={4}
             />
 
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleOptimize}
-                disabled={data.isLoading || !localPrompt}
-                className={`flex-1 h-10 px-4 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 whitespace-nowrap transition-all active:scale-[0.98] ${
-                  data.isLoading || !localPrompt
-                    ? "bg-gray-400 text-white cursor-not-allowed"
-                    : "bg-linear-to-r from-cyan-600 to-cyan-500 hover:from-cyan-500 hover:to-cyan-400 text-white shadow-lg shadow-cyan-500/25 hover:shadow-cyan-500/40"
-                }`}
-              >
-                {data.isLoading ? (
-                  <Loader2 className="animate-spin" size={15} />
-                ) : (
-                  <Wand2 size={15} />
-                )}
-                <span>{data.isLoading ? "优化中" : "AI 优化"}</span>
-              </button>
-
-              {data.optimizedPrompt && (
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 text-sm text-zinc-400">
+                <span>镜头数量：</span>
                 <button
-                  onClick={handleCopy}
-                  className="shrink-0 h-10 px-4 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 border border-zinc-700 text-white hover:bg-zinc-800 transition-all"
+                  onClick={() => setShotCount(Math.max(2, shotCount - 1))}
+                  className="w-7 h-7 rounded flex items-center justify-center bg-zinc-800 hover:bg-zinc-700 transition-colors"
                 >
-                  {copied ? (
-                    <>
-                      <CheckCircle size={15} />
-                      已复制
-                    </>
-                  ) : (
-                    <>
-                      <Copy size={15} />
-                      复制
-                    </>
-                  )}
+                  <Minus size={14} />
                 </button>
-              )}
+                <span className="w-8 text-center text-white font-semibold">
+                  {shotCount}
+                </span>
+                <button
+                  onClick={() => setShotCount(Math.min(8, shotCount + 1))}
+                  className="w-7 h-7 rounded flex items-center justify-center bg-zinc-800 hover:bg-zinc-700 transition-colors"
+                >
+                  <Plus size={14} />
+                </button>
+              </div>
             </div>
 
-            {data.optimizedPrompt && (
-              <div>
-                <label className="text-xs font-medium text-zinc-400 mb-2 block">
-                  编辑优化后的提示词
-                </label>
-                <textarea
-                  value={data.optimizedPrompt}
-                  onChange={(e) =>
-                    updateNodeData(id, { optimizedPrompt: e.target.value })
-                  }
-                  className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-cyan-500/20 min-h-30 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-cyan-500 text-white placeholder-zinc-500 transition-all"
-                  onWheel={(e) => e.stopPropagation()}
-                />
-                <p className="text-xs text-zinc-500 mt-2">
-                  提示：你可以继续编辑优化后的提示词
-                </p>
-              </div>
-            )}
+            <button
+              onClick={handleGenerateStoryboard}
+              disabled={data.isLoading || !localPrompt}
+              className={`w-full h-10 px-4 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 whitespace-nowrap transition-all active:scale-[0.98] ${
+                data.isLoading || !localPrompt
+                  ? "bg-gray-400 text-white cursor-not-allowed"
+                  : "bg-linear-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 text-white shadow-lg shadow-purple-500/25 hover:shadow-purple-500/40"
+              }`}
+            >
+              {data.isLoading ? (
+                <Loader2 className="animate-spin" size={15} />
+              ) : (
+                <Wand2 size={15} />
+              )}
+              <span>{data.isLoading ? "生成中" : "生成分镜"}</span>
+            </button>
 
             {data.error && (
               <div className="text-xs text-red-400 bg-red-500/10 px-3 py-2 rounded-lg border border-red-500/20">

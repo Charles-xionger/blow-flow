@@ -149,6 +149,39 @@ export class OSSClient {
   }
 
   /**
+   * 直接上传 Buffer 到 OSS
+   * @param buffer 文件内容 Buffer
+   * @param folder 目标文件夹（如 'images', 'videos'）
+   * @param filename 文件名
+   */
+  async uploadBuffer(
+    buffer: Buffer,
+    folder: string,
+    filename: string,
+  ): Promise<{ objectKey: string; url: string; size: number }> {
+    try {
+      console.log(`[OSS] 开始上传 Buffer，大小: ${buffer.length} 字节`);
+
+      // 生成 OSS 路径
+      const objectKey = this.generateObjectKey(folder, filename);
+
+      // 上传到 OSS
+      await this.uploadObject(objectKey, buffer);
+
+      console.log(`[OSS] 上传成功: ${objectKey}`);
+
+      return {
+        objectKey,
+        url: this.getPublicUrl(objectKey),
+        size: buffer.length,
+      };
+    } catch (error) {
+      console.error("[OSS] 上传 Buffer 失败:", error);
+      throw error;
+    }
+  }
+
+  /**
    * 下载文件从 OSS
    * @param objectKey OSS 中的文件路径
    * @param localPath 本地保存路径（可选）
