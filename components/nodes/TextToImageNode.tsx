@@ -9,6 +9,7 @@ import type { NodeData } from "@/types";
 import { getImageModels } from "@/lib/model-registry";
 import { EditableTitle } from "./shared/EditableTitle";
 import { QuickAddNode } from "../canvas/QuickAddNode";
+import { Textarea } from "@/components/ui/textarea";
 
 const aspectRatios = [
   { value: "1:1", label: "1:1 方形" },
@@ -39,13 +40,26 @@ const TextToImageNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
   // 只有在单选状态下才显示控制面板
   const shouldShowPanel = selected && selectedNodeIds.length === 1;
 
+  // 本地状态用于输入框，防止中文输入法问题
+  const [localPrompt, setLocalPrompt] = useState(data.prompt || "");
+
   // 加载图片模型列表
   useEffect(() => {
     setImageModels(getImageModels());
   }, []);
 
+  // 同步外部数据变化到本地状态
+  useEffect(() => {
+    setLocalPrompt(data.prompt || "");
+  }, [data.prompt]);
+
   const handleGenerate = useCallback(async () => {
-    if (!data.prompt) return;
+    // 先同步本地输入到 store
+    if (localPrompt !== data.prompt) {
+      updateNodeData(id, { prompt: localPrompt });
+    }
+
+    if (!localPrompt) return;
 
     updateNodeData(id, { isLoading: true, error: undefined });
 
@@ -54,7 +68,7 @@ const TextToImageNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          prompt: data.prompt,
+          prompt: localPrompt,
           model: data.model || "BananaPro",
           aspectRatio: data.aspectRatio || "1:1",
           resolution: data.resolution || "1k",
@@ -150,11 +164,13 @@ const TextToImageNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
           onMouseDown={(e) => e.stopPropagation()}
         >
           <div className="bg-[#1a1a1a]/95 backdrop-blur-xl border border-zinc-700/50 rounded-2xl p-4 flex flex-col gap-3">
-            <textarea
-              className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/20 min-h-18 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-blue-500 text-white placeholder-zinc-500 transition-all"
+            <Textarea
+              className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none min-h-18 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-blue-500 text-white placeholder-zinc-500"
               placeholder="描述你想要生成的图片..."
-              value={data.prompt || ""}
-              onChange={(e) => updateNodeData(id, { prompt: e.target.value })}
+              value={localPrompt}
+              onChange={(e) => setLocalPrompt(e.target.value)}
+              onBlur={() => updateNodeData(id, { prompt: localPrompt })}
+              onMouseDown={(e) => e.stopPropagation()}
               onWheel={(e) => e.stopPropagation()}
             />
 
@@ -219,9 +235,9 @@ const TextToImageNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
 
               <button
                 onClick={handleGenerate}
-                disabled={data.isLoading || !data.prompt}
+                disabled={data.isLoading || !localPrompt}
                 className={`shrink-0 h-8 px-4 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 whitespace-nowrap transition-all active:scale-[0.98] ${
-                  data.isLoading || !data.prompt
+                  data.isLoading || !localPrompt
                     ? "bg-gray-400 text-white cursor-not-allowed"
                     : "bg-linear-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40"
                 }`}

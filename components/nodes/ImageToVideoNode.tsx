@@ -9,6 +9,7 @@ import type { NodeData } from "@/types";
 import { getVideoModels } from "@/lib/model-registry";
 import { EditableTitle } from "./shared/EditableTitle";
 import { QuickAddNode } from "../canvas/QuickAddNode";
+import { Textarea } from "@/components/ui/textarea";
 
 const durations = [
   { value: "5", label: "5秒" },
@@ -49,10 +50,18 @@ const ImageToVideoNode = ({
     Array<{ id: string; value: string; label: string }>
   >([]);
 
+  // 本地状态用于输入框，防止中文输入法问题
+  const [localPrompt, setLocalPrompt] = useState(data.prompt || "");
+
   // 加载视频模型列表
   useEffect(() => {
     setVideoModels(getVideoModels());
   }, []);
+
+  // 同步外部数据变化到本地状态
+  useEffect(() => {
+    setLocalPrompt(data.prompt || "");
+  }, [data.prompt]);
 
   useEffect(() => {
     console.log("Video Models:", videoModels);
@@ -98,7 +107,7 @@ const ImageToVideoNode = ({
         });
       }
     },
-    [id, data, inputImage, updateNodeData],
+    [id, data, localPrompt, inputImage, updateNodeData],
   );
 
   const hasResult = !!data.videoSrc && !data.isLoading;
@@ -185,11 +194,13 @@ const ImageToVideoNode = ({
               </div>
             )}
 
-            <textarea
-              className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500/20 min-h-18 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-indigo-500 text-white placeholder-zinc-500 transition-all"
-              placeholder="描述视频的运动和变化..."
-              value={data.prompt || ""}
-              onChange={(e) => updateNodeData(id, { prompt: e.target.value })}
+            <Textarea
+              className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none min-h-18 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-pink-500 text-white placeholder-zinc-500"
+              placeholder="描述你想要的视频内容..."
+              value={localPrompt}
+              onChange={(e) => setLocalPrompt(e.target.value)}
+              onBlur={() => updateNodeData(id, { prompt: localPrompt })}
+              onMouseDown={(e) => e.stopPropagation()}
               onWheel={(e) => e.stopPropagation()}
               rows={3}
             />
@@ -241,9 +252,9 @@ const ImageToVideoNode = ({
 
               <button
                 onClick={() => handleGenerate()}
-                disabled={data.isLoading || !data.prompt || !inputImage}
+                disabled={data.isLoading || !localPrompt || !inputImage}
                 className={`shrink-0 h-8 px-4 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 whitespace-nowrap transition-all active:scale-[0.98] ${
-                  data.isLoading || !data.prompt || !inputImage
+                  data.isLoading || !localPrompt || !inputImage
                     ? "bg-gray-400 text-white cursor-not-allowed"
                     : "bg-linear-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40"
                 }`}

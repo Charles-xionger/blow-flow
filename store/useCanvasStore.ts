@@ -43,7 +43,12 @@ interface CanvasState {
   onConnect: OnConnect;
 
   // 节点操作
-  addNode: (type: NodeType, position?: { x: number; y: number }) => void;
+  addNode: (type: NodeType, position?: { x: number; y: number }) => string;
+  addConnectedNode: (
+    type: NodeType,
+    sourceNodeId: string,
+    position?: { x: number; y: number },
+  ) => void;
   deleteNode: (nodeId: string) => void;
   updateNodeData: (nodeId: string, data: Partial<NodeData>) => void;
   duplicateNode: (nodeId: string) => void;
@@ -223,6 +228,27 @@ export const useCanvasStore = create<CanvasState>()(
           };
 
           set({ nodes: [...get().nodes, newNode] });
+          return newNode.id;
+        },
+
+        // 添加连接节点（自动创建边）
+        addConnectedNode: (
+          type: NodeType,
+          sourceNodeId: string,
+          position = DEFAULT_NODE_POSITION,
+        ) => {
+          const newNodeId = get().addNode(type, position);
+
+          // 创建连接边
+          const newEdge = {
+            id: `edge-${sourceNodeId}-${newNodeId}`,
+            source: sourceNodeId,
+            target: newNodeId,
+            sourceHandle: "output",
+            targetHandle: null,
+          };
+
+          set({ edges: [...get().edges, newEdge] });
         },
 
         // 删除节点

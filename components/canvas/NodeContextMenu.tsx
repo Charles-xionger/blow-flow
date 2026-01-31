@@ -25,7 +25,7 @@ export function NodeContextMenu({
     deleteSelectedNodes,
     groupNodes,
     ungroupNodes,
-    addNode,
+    addConnectedNode,
   } = useCanvasStore();
 
   const node = nodes.find((n) => n.id === nodeId);
@@ -66,7 +66,10 @@ export function NodeContextMenu({
       x: node.position.x + 400,
       y: node.position.y,
     };
-    addNode(type, newPosition);
+
+    // 使用新的 addConnectedNode 方法，自动创建节点和连接边
+    addConnectedNode(type, nodeId, newPosition);
+
     onClose();
   };
 

@@ -16,6 +16,7 @@ import type { NodeData } from "@/types";
 import { getVideoModels } from "@/lib/model-registry";
 import { EditableTitle } from "./shared/EditableTitle";
 import { QuickAddNode } from "../canvas/QuickAddNode";
+import { Textarea } from "@/components/ui/textarea";
 
 const durations = [
   { value: "5", label: "5秒" },
@@ -59,6 +60,14 @@ const StartEndToVideoNode = ({
   const [videoModels, setVideoModels] = useState<
     Array<{ value: string; label: string }>
   >([]);
+
+  // 本地状态用于输入框，防止中文输入法问题
+  const [localPrompt, setLocalPrompt] = useState(data.prompt || "");
+
+  // 同步外部数据变化到本地状态
+  useEffect(() => {
+    setLocalPrompt(data.prompt || "");
+  }, [data.prompt]);
 
   // 加载视频模型列表 - 从数据库API异步获取
   useEffect(() => {
@@ -116,12 +125,17 @@ const StartEndToVideoNode = ({
     : inputImages;
 
   const handleGenerate = useCallback(async () => {
-    if (!data.prompt || inputImages.length < 2) return;
+    // 先同步本地输入到 store
+    if (localPrompt !== data.prompt) {
+      updateNodeData(id, { prompt: localPrompt });
+    }
+
+    if (!localPrompt || inputImages.length < 2) return;
 
     updateNodeData(id, { isLoading: true, error: undefined });
 
     const requestPayload = {
-      prompt: data.prompt,
+      prompt: localPrompt,
       startImage,
       endImage,
       model:
@@ -166,7 +180,7 @@ const StartEndToVideoNode = ({
     }
   }, [
     id,
-    data.prompt,
+    localPrompt,
     data.model,
     data.duration,
     data.promptOptimize,
@@ -289,11 +303,13 @@ const StartEndToVideoNode = ({
               </div>
             )}
 
-            <textarea
-              className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-pink-500/20 min-h-18 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-pink-500 text-white placeholder-zinc-500 transition-all"
-              placeholder="描述从首帧到尾帧的过渡过程..."
-              value={data.prompt || ""}
-              onChange={(e) => updateNodeData(id, { prompt: e.target.value })}
+            <Textarea
+              className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none min-h-18 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-cyan-500 text-white placeholder-zinc-500"
+              placeholder="描述你想要的视频内容..."
+              value={localPrompt}
+              onChange={(e) => setLocalPrompt(e.target.value)}
+              onBlur={() => updateNodeData(id, { prompt: localPrompt })}
+              onMouseDown={(e) => e.stopPropagation()}
               onWheel={(e) => e.stopPropagation()}
               rows={3}
             />
@@ -360,10 +376,10 @@ const StartEndToVideoNode = ({
               <button
                 onClick={handleGenerate}
                 disabled={
-                  data.isLoading || !data.prompt || inputImages.length < 2
+                  data.isLoading || !localPrompt || inputImages.length < 2
                 }
                 className={`shrink-0 h-8 px-4 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 whitespace-nowrap transition-all active:scale-[0.98] ${
-                  data.isLoading || !data.prompt || inputImages.length < 2
+                  data.isLoading || !localPrompt || inputImages.length < 2
                     ? "bg-gray-400 text-white cursor-not-allowed"
                     : "bg-linear-to-r from-pink-600 to-pink-500 hover:from-pink-500 hover:to-pink-400 text-white shadow-lg shadow-pink-500/25 hover:shadow-pink-500/40"
                 }`}

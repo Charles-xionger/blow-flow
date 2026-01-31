@@ -15,6 +15,7 @@ import {
 import type { NodeData } from "@/types";
 import { EditableTitle } from "./shared/EditableTitle";
 import { QuickAddNode } from "../canvas/QuickAddNode";
+import { Textarea } from "@/components/ui/textarea";
 
 const CreativeDescNode = ({
   id,
@@ -31,8 +32,21 @@ const CreativeDescNode = ({
   // 只有在单选状态下才显示控制面板
   const shouldShowPanel = selected && selectedNodeIds.length === 1;
 
+  // 本地状态用于输入框，防止中文输入法问题
+  const [localPrompt, setLocalPrompt] = useState(data.prompt || "");
+
+  // 同步外部数据变化到本地状态
+  useEffect(() => {
+    setLocalPrompt(data.prompt || "");
+  }, [data.prompt]);
+
   const handleOptimize = useCallback(async () => {
-    if (!data.prompt) return;
+    // 先同步本地输入到 store
+    if (localPrompt !== data.prompt) {
+      updateNodeData(id, { prompt: localPrompt });
+    }
+
+    if (!localPrompt) return;
 
     updateNodeData(id, { isLoading: true, error: undefined });
 
@@ -41,7 +55,7 @@ const CreativeDescNode = ({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          prompt: data.prompt,
+          prompt: localPrompt,
         }),
       });
 
@@ -61,7 +75,7 @@ const CreativeDescNode = ({
         error: error instanceof Error ? error.message : "优化失败",
       });
     }
-  }, [id, data.prompt, updateNodeData]);
+  }, [id, localPrompt, updateNodeData]);
 
   const handleCopy = useCallback(() => {
     if (data.optimizedPrompt) {
@@ -132,11 +146,13 @@ const CreativeDescNode = ({
           onMouseDown={(e) => e.stopPropagation()}
         >
           <div className="bg-[#1a1a1a]/95 backdrop-blur-xl border border-zinc-700/50 rounded-2xl p-4 flex flex-col gap-3">
-            <textarea
-              className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-cyan-500/20 min-h-18 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-cyan-500 text-white placeholder-zinc-500 transition-all"
-              placeholder="输入简单的描述，AI 会帮你扩展成专业提示词..."
-              value={data.prompt || ""}
-              onChange={(e) => updateNodeData(id, { prompt: e.target.value })}
+            <Textarea
+              className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none min-h-18 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-emerald-500 text-white placeholder-zinc-500"
+              placeholder="输入简单的创意描述..."
+              value={localPrompt}
+              onChange={(e) => setLocalPrompt(e.target.value)}
+              onBlur={() => updateNodeData(id, { prompt: localPrompt })}
+              onMouseDown={(e) => e.stopPropagation()}
               onWheel={(e) => e.stopPropagation()}
               rows={3}
             />
@@ -144,9 +160,9 @@ const CreativeDescNode = ({
             <div className="flex items-center gap-2">
               <button
                 onClick={handleOptimize}
-                disabled={data.isLoading || !data.prompt}
+                disabled={data.isLoading || !localPrompt}
                 className={`flex-1 h-10 px-4 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 whitespace-nowrap transition-all active:scale-[0.98] ${
-                  data.isLoading || !data.prompt
+                  data.isLoading || !localPrompt
                     ? "bg-gray-400 text-white cursor-not-allowed"
                     : "bg-linear-to-r from-cyan-600 to-cyan-500 hover:from-cyan-500 hover:to-cyan-400 text-white shadow-lg shadow-cyan-500/25 hover:shadow-cyan-500/40"
                 }`}
