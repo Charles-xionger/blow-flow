@@ -65,6 +65,7 @@ const ImageToVideoNode = ({
 
   // 本地状态用于输入框，防止中文输入法问题
   const [localPrompt, setLocalPrompt] = useState(data.prompt || "");
+  const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
 
   // 加载视频模型列表
   useEffect(() => {
@@ -79,6 +80,45 @@ const ImageToVideoNode = ({
   useEffect(() => {
     console.log("Video Models:", videoModels);
   }, [videoModels]);
+
+  const handleGeneratePrompt = useCallback(async () => {
+    if (!inputImage) return;
+
+    setIsGeneratingPrompt(true);
+
+    try {
+      const response = await fetch("/api/generate-prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nodeType: "imageToVideo",
+          currentPrompt: localPrompt || undefined,
+          context: {
+            inputImage,
+            duration: data.duration || "5",
+            model: data.model,
+          },
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.success && result.data) {
+        const generatedPrompt = result.data;
+        setLocalPrompt(generatedPrompt);
+        updateNodeData(id, { prompt: generatedPrompt });
+      } else {
+        throw new Error(result.error || "生成提示词失败");
+      }
+    } catch (error) {
+      console.error("Generate prompt error:", error);
+      updateNodeData(id, {
+        error: error instanceof Error ? error.message : "生成提示词失败",
+      });
+    } finally {
+      setIsGeneratingPrompt(false);
+    }
+  }, [id, inputImage, localPrompt, data.duration, data.model, updateNodeData]);
 
   const handleGenerate = useCallback(
     async (skipCache = false) => {
@@ -220,6 +260,29 @@ const ImageToVideoNode = ({
               rows={3}
             />
 
+            {/* AI 生成提示词按钮 */}
+            <button
+              onClick={handleGeneratePrompt}
+              disabled={isGeneratingPrompt || !inputImage}
+              className={`w-full h-8 rounded-lg text-xs font-medium flex items-center justify-center gap-2 transition-all ${
+                isGeneratingPrompt || !inputImage
+                  ? "bg-zinc-800 text-zinc-500 cursor-not-allowed"
+                  : "bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white"
+              }`}
+            >
+              {isGeneratingPrompt ? (
+                <>
+                  <Loader2 className="animate-spin" size={14} />
+                  <span>AI 生成提示词中...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles size={14} />
+                  <span>{localPrompt ? "优化提示词" : "AI 生成提示词"}</span>
+                </>
+              )}
+            </button>
+
             <div className="flex flex-col gap-2">
               {/* 第一行：模型和时长 */}
               <div className="flex items-center gap-2">
@@ -285,22 +348,6 @@ const ImageToVideoNode = ({
 
               {/* 第三行：按钮组 */}
               <div className="flex items-center gap-2">
-                <button
-                  className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-all border ${
-                    data.promptOptimize
-                      ? "text-indigo-400 bg-indigo-500/20 border-indigo-500/30"
-                      : "text-zinc-400 hover:text-white border-zinc-700 hover:border-zinc-600 hover:bg-zinc-700"
-                  }`}
-                  onClick={() =>
-                    updateNodeData(id, { promptOptimize: !data.promptOptimize })
-                  }
-                >
-                  <Sparkles
-                    size={15}
-                    fill={data.promptOptimize ? "currentColor" : "none"}
-                  />
-                </button>
-
                 <div className="flex-1" />
 
                 <button

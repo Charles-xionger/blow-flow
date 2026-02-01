@@ -189,7 +189,7 @@ const CreativeDescNode = ({
             </div>
 
             <Textarea
-              className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none min-h-24 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-purple-500 text-white placeholder-zinc-500"
+              className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none min-h-24 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-purple-500 text-white placeholder-zinc-500 max-h-32 overflow-y-auto"
               placeholder="输入故事或场景描述，例如：一个关于勇士冒险的故事..."
               value={localPrompt}
               onChange={(e) => setLocalPrompt(e.target.value)}

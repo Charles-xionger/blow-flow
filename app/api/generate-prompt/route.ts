@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
     const textModels = getModelsByCategory("TEXT");
 
     // 查找可用的 Gemini 文本模型
-    let selectedModel = "gemini-2.0-flash-exp";
+    let selectedModel = "gemini-2.5-pro";
     let apiKey: string | undefined;
 
     // 优先使用数据库配置的模型
@@ -93,10 +93,14 @@ export async function POST(request: NextRequest) {
     console.log("[API] System prompt length:", systemPrompt.length);
 
     // 使用 Gemini SDK 生成提示词
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = new GoogleGenAI({ apiKey, apiVersion: "v1alpha" });
+
+    // 准备内容，如果有图片则包含图片数据
+    const contents = await prepareContents(systemPrompt, nodeType, context);
+
     const result = await ai.models.generateContent({
       model: selectedModel,
-      contents: systemPrompt,
+      contents: [{ parts: contents }],
     });
     const generatedPrompt = result.text || "";
 
@@ -117,6 +121,156 @@ export async function POST(request: NextRequest) {
       { status: 500 },
     );
   }
+}
+
+async function prepareContents(
+  systemPrompt: string,
+  nodeType: string,
+  context: any,
+) {
+  const parts: any[] = [{ text: systemPrompt }];
+
+  // 根据节点类型添加相应的图片
+  if (nodeType === "startEndToVideo") {
+    if (context.startImage) {
+      const imageData = await getImageData(context.startImage);
+      if (imageData) {
+        parts.push({
+          text: "\n\nStart Frame Image:",
+        });
+        parts.push({
+          inlineData: {
+            mimeType: imageData.mimeType,
+            data: imageData.base64Data,
+          },
+          mediaResolution: {
+            level: "media_resolution_high",
+          },
+        });
+      }
+    }
+    if (context.endImage) {
+      const imageData = await getImageData(context.endImage);
+      if (imageData) {
+        parts.push({
+          text: "\n\nEnd Frame Image:",
+        });
+        parts.push({
+          inlineData: {
+            mimeType: imageData.mimeType,
+            data: imageData.base64Data,
+          },
+          mediaResolution: {
+            level: "media_resolution_high",
+          },
+        });
+      }
+    }
+  } else if (nodeType === "imageToVideo" && context.inputImage) {
+    const imageData = await getImageData(context.inputImage);
+    if (imageData) {
+      parts.push({
+        text: "\n\nInput Image:",
+      });
+      parts.push({
+        inlineData: {
+          mimeType: imageData.mimeType,
+          data: imageData.base64Data,
+        },
+        mediaResolution: {
+          level: "media_resolution_high",
+        },
+      });
+    }
+  }
+
+  return parts;
+}
+
+async function getImageData(imageSource: string): Promise<{
+  mimeType: string;
+  base64Data: string;
+} | null> {
+  try {
+    // 情况1: data URL 格式 (data:image/jpeg;base64,...)
+    if (imageSource.startsWith("data:")) {
+      const match = imageSource.match(/^data:([^;]+);base64,(.+)$/);
+      if (match) {
+        return {
+          mimeType: match[1],
+          base64Data: match[2],
+        };
+      }
+    }
+
+    // 情况2: HTTP/HTTPS URL，需要下载并转换为 base64
+    if (
+      imageSource.startsWith("http://") ||
+      imageSource.startsWith("https://")
+    ) {
+      console.log("[API] Downloading image from URL:", imageSource);
+      const response = await fetch(imageSource);
+      if (!response.ok) {
+        console.error("[API] Failed to download image:", response.statusText);
+        return null;
+      }
+
+      // 从 URL 推断 MIME 类型
+      let mimeType = response.headers.get("content-type") || "";
+
+      // 如果 Content-Type 不可靠，从文件扩展名推断
+      if (!mimeType || mimeType === "application/octet-stream") {
+        mimeType = getMimeTypeFromUrl(imageSource);
+      }
+
+      // 将图片转换为 base64
+      const arrayBuffer = await response.arrayBuffer();
+      const base64Data = Buffer.from(arrayBuffer).toString("base64");
+
+      console.log(
+        "[API] Image downloaded and converted to base64, size:",
+        base64Data.length,
+        "mimeType:",
+        mimeType,
+      );
+      return {
+        mimeType,
+        base64Data,
+      };
+    }
+
+    // 情况3: 纯 base64 字符串（不推荐，但作为兜底）
+    // 假设是 JPEG 格式
+    console.log("[API] Treating as raw base64 data");
+    return {
+      mimeType: "image/jpeg",
+      base64Data: imageSource,
+    };
+  } catch (error) {
+    console.error("[API] Error processing image:", error);
+    return null;
+  }
+}
+
+function getMimeTypeFromUrl(url: string): string {
+  const lowerUrl = url.toLowerCase();
+
+  if (lowerUrl.includes(".png")) {
+    return "image/png";
+  } else if (lowerUrl.includes(".jpg") || lowerUrl.includes(".jpeg")) {
+    return "image/jpeg";
+  } else if (lowerUrl.includes(".gif")) {
+    return "image/gif";
+  } else if (lowerUrl.includes(".webp")) {
+    return "image/webp";
+  } else if (lowerUrl.includes(".bmp")) {
+    return "image/bmp";
+  } else if (lowerUrl.includes(".svg")) {
+    return "image/svg+xml";
+  }
+
+  // 默认返回 jpeg
+  return "image/jpeg";
 }
 
 function generateSystemPrompt(
@@ -176,6 +330,8 @@ function generateStartEndToVideoPrompt(
 
 The user has provided an initial prompt: "${currentPrompt}"
 
+${hasImages ? "Analyze the provided start and end frame images carefully." : ""}
+
 Task: Enhance this prompt with professional cinematography details for a start-frame to end-frame video transition.
 
 Video Specifications:
@@ -184,10 +340,10 @@ Video Specifications:
 - Type: Transition from start frame to end frame
 
 Requirements:
-1. Keep the original creative intent but make it more professional
+1. ${hasImages ? "Based on the visual content of the images, describe the transition between the two frames" : "Keep the original creative intent but make it more professional"}
 2. Add specific camera movements (e.g., "smooth dolly forward", "pan left to right", "crane up")
 3. Include transition pacing for ${duration} seconds (${duration === "5" ? "quick, dynamic" : "smooth, gradual"})
-4. Add lighting or atmosphere transitions if applicable
+4. ${hasImages ? "Describe how elements in the start frame transform or move to become the end frame" : "Add lighting or atmosphere transitions if applicable"}
 5. Use cinematic terminology
 6. Output ONLY the enhanced prompt in English, no explanations
 
@@ -196,23 +352,25 @@ Enhanced Prompt:`;
 
   return `You are a professional video production expert specializing in camera movements and transitions.
 
+${hasImages ? "Carefully analyze the provided start frame and end frame images." : ""}
+
 Task: Generate a detailed, professional prompt for creating a video that transitions from a start frame to an end frame.
 
 Video Specifications:
 - Duration: ${duration} seconds
 - Resolution: ${resolution}
-- Type: ${hasImages ? "Image-based transition (2 frames provided)" : "Creative transition"}
+- Type: ${hasImages ? "Image-based transition (analyze the 2 frames provided below)" : "Creative transition"}
 
 Requirements:
-1. Create a cinematic transition description with specific camera movements
+1. ${hasImages ? "Describe what you see in both images and how to smoothly transition between them" : "Create a cinematic transition description with specific camera movements"}
 2. Include movement type: dolly, pan, tilt, crane, zoom, orbit, or combinations
 3. Describe the pacing: ${duration === "5" ? "quick and dynamic" : "smooth and gradual"} over ${duration} seconds
-4. Add lighting or atmosphere changes during transition
+4. ${hasImages ? "Explain how subjects, objects, lighting, and composition change from start to end" : "Add lighting or atmosphere changes during transition"}
 5. Use professional cinematography terms
 6. Keep it concise but detailed (50-100 words)
 7. Output ONLY the prompt in English, no introductions or explanations
 
-Example style: "Smooth dolly forward with subtle pan right, camera gradually rises revealing the full scene, golden hour lighting transitions to blue hour, gentle depth of field shift from foreground to background, cinematic motion blur, 4K quality"
+${!hasImages ? 'Example style: "Smooth dolly forward with subtle pan right, camera gradually rises revealing the full scene, golden hour lighting transitions to blue hour, gentle depth of field shift from foreground to background, cinematic motion blur, 4K quality"' : ""}
 
 Generated Prompt:`;
 }
@@ -223,11 +381,14 @@ function generateImageToVideoPrompt(
   context: any,
 ): string {
   const duration = context.duration || "5";
+  const hasImage = !!context.inputImage;
 
   if (hasExistingPrompt) {
     return `You are a professional video animator specializing in bringing static images to life.
 
 The user has provided an initial prompt: "${currentPrompt}"
+
+${hasImage ? "Carefully analyze the provided input image." : ""}
 
 Task: Enhance this prompt with professional animation and camera movement details for image-to-video generation.
 
@@ -236,16 +397,18 @@ Video Specifications:
 - Type: Animate a single image into a video
 
 Requirements:
-1. Keep the original creative intent
+1. ${hasImage ? "Based on the image content, describe specific animations that would bring it to life naturally" : "Keep the original creative intent"}
 2. Add specific animation details (parallax, camera movements, element animations)
 3. Include cinematic camera work suitable for ${duration} seconds
-4. Use professional animation terminology
+4. ${hasImage ? "Identify which elements in the image could move (water, clouds, people, objects, etc.)" : "Use professional animation terminology"}
 5. Output ONLY the enhanced prompt in English, no explanations
 
 Enhanced Prompt:`;
   }
 
   return `You are a professional video animator specializing in bringing static images to life.
+
+${hasImage ? "Carefully analyze the provided input image to understand its content, composition, and elements." : ""}
 
 Task: Generate a detailed prompt for animating a single image into a dynamic video.
 
@@ -254,15 +417,15 @@ Video Specifications:
 - Type: Image-to-video animation
 
 Requirements:
-1. Describe camera movements: orbit, dolly, zoom, parallax effects
-2. Include element animations if applicable (flowing water, moving clouds, etc.)
-3. Add depth and dimension effects
+1. ${hasImage ? "Describe what you see in the image and which elements should animate" : "Describe camera movements: orbit, dolly, zoom, parallax effects"}
+2. ${hasImage ? "Suggest natural movements based on the scene (e.g., wind effects, water flow, character movements)" : "Include element animations if applicable (flowing water, moving clouds, etc.)"}
+3. Add depth and dimension effects with appropriate camera movements
 4. Keep motion ${duration === "5" ? "dynamic and noticeable" : "smooth and subtle"}
 5. Use cinematic terms
 6. 50-100 words, concise and detailed
 7. Output ONLY the prompt in English, no explanations
 
-Example: "Slow camera orbit around the subject, subtle parallax effect creating depth, gentle zoom in on focal point, atmospheric elements like dust particles floating, cinematic motion blur, smooth 60fps motion"
+${!hasImage ? 'Example: "Slow camera orbit around the subject, subtle parallax effect creating depth, gentle zoom in on focal point, atmospheric elements like dust particles floating, cinematic motion blur, smooth 60fps motion"' : ""}
 
 Generated Prompt:`;
 }
