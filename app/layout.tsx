@@ -17,19 +17,18 @@ export default function RootLayout({
 }) {
   return (
     <html lang="zh-CN" suppressHydrationWarning>
-      <body className={inter.className}>
+      <body className={inter.className} suppressHydrationWarning>
         <script
           dangerouslySetInnerHTML={{
             __html: `
               (function() {
                 try {
                   const store = localStorage.getItem('canvas-store');
-                  const isDark = store ? JSON.parse(store).state.isDarkMode : 
-                    window.matchMedia('(prefers-color-scheme: dark)').matches;
-                  if (isDark) {
-                    document.documentElement.classList.add('dark');
-                  } else {
-                    document.documentElement.classList.remove('dark');
+                  if (store) {
+                    const isDark = JSON.parse(store).state.isDarkMode;
+                    if (isDark) {
+                      document.documentElement.classList.add('dark');
+                    }
                   }
                 } catch (e) {}
               })();

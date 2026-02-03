@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useRef, useEffect } from "react";
+import React, { useCallback, useRef, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   ReactFlow,
@@ -56,6 +56,7 @@ function CanvasInner() {
   const { screenToFlowPosition, getViewport } = useReactFlow();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const [mounted, setMounted] = useState(false);
 
   const {
     nodes,
@@ -135,12 +136,17 @@ function CanvasInner() {
     }
   }, [currentWorkflowId, router]);
 
+  // 客户端挂载标记
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   // 同步主题到 DOM
   useEffect(() => {
-    if (typeof document !== "undefined") {
+    if (mounted && typeof document !== "undefined") {
       document.documentElement.classList.toggle("dark", isDarkMode);
     }
-  }, [isDarkMode]);
+  }, [isDarkMode, mounted]);
 
   // 键盘快捷键：保存工作流
   const handleSave = useCallback(async () => {
@@ -272,13 +278,13 @@ function CanvasInner() {
     animated: true,
     style: {
       strokeWidth: 2,
-      stroke: isDarkMode ? "#666" : "#b1b1b7",
+      stroke: mounted && isDarkMode ? "#666" : "#b1b1b7",
     },
     markerEnd: {
       type: MarkerType.ArrowClosed,
       width: 20,
       height: 20,
-      color: isDarkMode ? "#666" : "#b1b1b7",
+      color: mounted && isDarkMode ? "#666" : "#b1b1b7",
     },
   };
 
@@ -302,7 +308,7 @@ function CanvasInner() {
         viewport={viewport}
         onViewportChange={(newViewport) => setViewport(newViewport)}
         fitView={nodes.length === 0}
-        className={isDarkMode ? "dark" : ""}
+        className={mounted && isDarkMode ? "dark" : ""}
         selectionOnDrag={true}
         panOnDrag={[1, 2]}
         selectionMode="partial"
@@ -318,7 +324,7 @@ function CanvasInner() {
           variant={BackgroundVariant.Dots}
           gap={16}
           size={1}
-          color={isDarkMode ? "#333" : "#ddd"}
+          color={mounted && isDarkMode ? "#333" : "#ddd"}
         />
         <Controls />
         <MiniMap
@@ -341,7 +347,9 @@ function CanvasInner() {
                 return "#6b7280"; // gray
             }
           }}
-          maskColor={isDarkMode ? "rgba(0,0,0,0.6)" : "rgba(255,255,255,0.6)"}
+          maskColor={
+            mounted && isDarkMode ? "rgba(0,0,0,0.6)" : "rgba(255,255,255,0.6)"
+          }
         />
 
         {/* 保留原工具栏（在底部） - 可选删除 */}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useCanvasStore } from "@/store/useCanvasStore";
 
 /**
@@ -9,15 +9,18 @@ import { useCanvasStore } from "@/store/useCanvasStore";
  */
 export function ThemeInitializer() {
   const isDarkMode = useCanvasStore((state) => state.isDarkMode);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    // 初始化时同步主题
-    if (typeof document !== "undefined") {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    // 只在客户端挂载后才同步主题，避免 hydration mismatch
+    if (mounted && typeof document !== "undefined") {
       document.documentElement.classList.toggle("dark", isDarkMode);
-      // 同步到 localStorage（以防 persist 中间件还未完成）
-      localStorage.setItem("canvas-theme", isDarkMode ? "dark" : "light");
     }
-  }, [isDarkMode]);
+  }, [isDarkMode, mounted]);
 
   return null;
 }
