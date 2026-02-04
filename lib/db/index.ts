@@ -78,6 +78,23 @@ function initializeTables(db: Database.Database) {
     );
   `);
 
+  // characters 表
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS characters (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      description TEXT NOT NULL,
+      reference_images TEXT NOT NULL,
+      tags TEXT NOT NULL,
+      lora_model_url TEXT,
+      lora_weight REAL DEFAULT 0.8,
+      lora_status TEXT DEFAULT 'none' CHECK(lora_status IN ('none', 'pending', 'training', 'ready', 'failed')),
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_characters_updated_at ON characters(updated_at DESC);
+  `);
+
   console.log("[DB] Database initialized");
 }
 

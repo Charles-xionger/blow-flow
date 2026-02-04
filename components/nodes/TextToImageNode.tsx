@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useState, useEffect } from "react";
+import { memo, useCallback, useState, useEffect, useMemo } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { Handle, Position } from "@xyflow/react";
 import { useCanvasStore } from "@/store/useCanvasStore";
@@ -40,21 +40,37 @@ const TextToImageNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
   // 只有在单选状态下才显示控制面板
   const shouldShowPanel = selected && selectedNodeIds.length === 1;
 
-  // 从连接的文本节点读取 prompt
-  const inputPrompt = useCanvasStore(
-    useCallback(
-      (state) => {
-        const inputEdges = state.edges.filter((edge) => edge.target === id);
-        if (inputEdges.length === 0) return null;
+  // 从连接的节点读取数据（文本节点的prompt或角色节点的数据）
+  const edges = useCanvasStore((state) => state.edges);
 
-        const sourceNode = state.nodes.find(
-          (n) => n.id === inputEdges[0].source,
-        );
-        return sourceNode?.data.prompt;
-      },
-      [id],
-    ),
-  );
+  const { inputPrompt, characterData, referenceImages } = useMemo(() => {
+    const inputEdges = edges.filter((edge) => edge.target === id);
+    let prompt = null;
+    let character = null;
+    let refImages: string[] = [];
+
+    for (const edge of inputEdges) {
+      const sourceNode = nodes.find((n) => n.id === edge.source);
+      if (!sourceNode) continue;
+
+      // 文本节点提供prompt
+      if (sourceNode.data.prompt) {
+        prompt = sourceNode.data.prompt;
+      }
+
+      // 角色节点提供角色数据和参考图
+      if (sourceNode.data.characterData) {
+        character = sourceNode.data.characterData;
+        refImages = character.referenceImages || [];
+      }
+    }
+
+    return {
+      inputPrompt: prompt,
+      characterData: character,
+      referenceImages: refImages,
+    };
+  }, [edges, nodes, id]);
 
   // 本地状态用于输入框，防止中文输入法问题
   const [localPrompt, setLocalPrompt] = useState(data.prompt || "");
@@ -78,8 +94,13 @@ const TextToImageNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
       updateNodeData(id, { prompt: localPrompt });
     }
 
-    const promptToUse = inputPrompt || localPrompt;
+    let promptToUse = inputPrompt || localPrompt;
     if (!promptToUse) return;
+
+    // 如果有角色数据，注入角色描述到提示词
+    if (characterData) {
+      promptToUse = `${characterData.description}. ${promptToUse}`;
+    }
 
     updateNodeData(id, { isLoading: true, error: undefined });
 
@@ -94,6 +115,7 @@ const TextToImageNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
           resolution: data.resolution || "1k",
           count: data.count || 1,
           promptOptimize: data.promptOptimize || false,
+          inputImages: referenceImages.length > 0 ? referenceImages : undefined,
         }),
       });
 
@@ -118,6 +140,8 @@ const TextToImageNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
     id,
     inputPrompt,
     localPrompt,
+    characterData,
+    referenceImages,
     data.prompt,
     data.model,
     data.aspectRatio,
@@ -140,6 +164,14 @@ const TextToImageNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
 
       {/* 输入句柄 */}
       <Handle type="target" position={Position.Left} id="input" />
+
+      {/* 角色信息提示 */}
+      {characterData && (
+        <div className="absolute -top-6 left-0 flex items-center gap-1 text-xs text-purple-400 bg-purple-900/30 px-2 py-0.5 rounded">
+          <span>🎭</span>
+          <span>{characterData.name}</span>
+        </div>
+      )}
 
       {/* 输出句柄 */}
       <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center">

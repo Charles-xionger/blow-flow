@@ -17,6 +17,7 @@ import {
   Loader2,
   FileText,
   Trash2,
+  User,
 } from "lucide-react";
 import {
   Dialog,
@@ -28,6 +29,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { CharacterLibrary } from "@/components/character/CharacterLibrary";
 
 // 侧边栏按钮组件 - 移到组件外部
 interface SidebarButtonProps {
@@ -81,7 +83,7 @@ export function Sidebar() {
     clearWorkflow,
   } = useCanvasStore();
   const [activePanel, setActivePanel] = useState<
-    "ADD" | "HISTORY" | "PROJECT" | null
+    "ADD" | "HISTORY" | "PROJECT" | "CHARACTER" | null
   >(null);
   const [workflows, setWorkflows] = useState<any[]>([]);
   const [isLoadingWorkflows, setIsLoadingWorkflows] = useState(false);
@@ -463,6 +465,11 @@ export function Sidebar() {
     </div>
   );
 
+  // 渲染角色库面板
+  const renderCharacterPanel = () => {
+    return <CharacterLibrary />;
+  };
+
   // 渲染面板内容
   const renderPanel = () => {
     if (!activePanel) return null;
@@ -470,8 +477,8 @@ export function Sidebar() {
     return (
       <div
         ref={panelRef}
-        className={`fixed left-19 top-4 w-80 ${bgMain} backdrop-blur-xl border ${borderColor} rounded-2xl z-190 flex flex-col shadow-2xl animate-in slide-in-from-left-2 duration-200`}
-        style={{ maxHeight: "calc(100vh - 32px)" }}
+        className={`fixed left-19 top-4 w-120 ${bgMain} backdrop-blur-xl border ${borderColor} rounded-2xl z-190 flex flex-col shadow-2xl animate-in slide-in-from-left-2 duration-200`}
+        style={{ maxHeight: "calc(100vh - 22px)" }}
       >
         {/* Header */}
         <div
@@ -501,11 +508,18 @@ export function Sidebar() {
                   className={isDark ? "text-blue-400" : "text-blue-600"}
                 />
               )}
+              {activePanel === "CHARACTER" && (
+                <User
+                  size={18}
+                  className={isDark ? "text-blue-400" : "text-blue-600"}
+                />
+              )}
             </div>
             <h3 className={`text-base font-bold ${textMain}`}>
               {activePanel === "ADD" && "添加节点"}
               {activePanel === "HISTORY" && "生成历史"}
               {activePanel === "PROJECT" && "项目"}
+              {activePanel === "CHARACTER" && "角色"}
             </h3>
           </div>
           <button
@@ -537,6 +551,7 @@ export function Sidebar() {
             </div>
           )}
           {activePanel === "PROJECT" && renderProjectPanel()}
+          {activePanel === "CHARACTER" && renderCharacterPanel()}
         </div>
       </div>
     );
@@ -579,6 +594,17 @@ export function Sidebar() {
           hoverBg={hoverBg}
           activeBg={activeBg}
           onClick={() => togglePanel("PROJECT")}
+        />
+        <div className={`h-px ${borderColor}`} />
+        <SidebarButton
+          icon={User}
+          tooltip="角色"
+          isActive={activePanel === "CHARACTER"}
+          isDark={isDark}
+          textSub={textSub}
+          hoverBg={hoverBg}
+          activeBg={activeBg}
+          onClick={() => togglePanel("CHARACTER")}
         />
       </div>
 

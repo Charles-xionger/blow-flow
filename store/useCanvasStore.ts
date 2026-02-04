@@ -217,6 +217,10 @@ export const useCanvasStore = create<CanvasState>()(
               label: "Original Image",
               data: {},
             },
+            [NodeType.CHARACTER]: {
+              label: "Character",
+              data: {},
+            },
             [NodeType.GROUP]: {
               label: "Group",
               data: {},
@@ -335,6 +339,10 @@ export const useCanvasStore = create<CanvasState>()(
             },
             [NodeType.ORIGINAL_IMAGE]: {
               label: "Original Image",
+              data: {},
+            },
+            [NodeType.CHARACTER]: {
+              label: "Character",
               data: {},
             },
             [NodeType.GROUP]: {

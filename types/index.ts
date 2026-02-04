@@ -12,6 +12,7 @@ export enum NodeType {
   STORYBOARD = "storyboard",
   ORIGINAL_IMAGE = "originalImage",
   GROUP = "group",
+  CHARACTER = "character",
 }
 
 // 节点数据接口
@@ -56,6 +57,10 @@ export interface NodeData extends Record<string, unknown> {
     cameraMovement?: string;
   }>;
   shotCount?: number;
+
+  // Character 专用
+  characterId?: string;
+  characterData?: Character;
 
   // UI 状态
   activeToolbarItem?: string;
@@ -145,4 +150,18 @@ export interface CacheEntry {
   result: string;
   createdAt: number;
   expiresAt: number;
+}
+
+// 角色管理
+export interface Character {
+  id: string;
+  name: string;
+  description: string; // 外貌、性格等详细描述
+  referenceImages: string[]; // 参考图片URLs（1-5张）
+  tags: string[]; // 标签（年龄、性别、风格等）
+  loraModelUrl?: string; // LoRA模型文件URL（可选）
+  loraWeight?: number; // LoRA权重 0.5-1.0
+  loraStatus?: "none" | "pending" | "training" | "ready" | "failed"; // LoRA训练状态
+  createdAt: number;
+  updatedAt: number;
 }

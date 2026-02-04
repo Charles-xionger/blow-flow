@@ -98,6 +98,13 @@ export function QuickAddNode({ nodePosition }: QuickAddNodeProps) {
               >
                 原始图片
               </button>
+
+              <button
+                onClick={() => handleAddNode(NodeType.CHARACTER)}
+                className="flex w-full items-center px-3 py-2 text-sm text-gray-200 hover:bg-gray-800"
+              >
+                角色
+              </button>
             </div>
           </div>
         </>

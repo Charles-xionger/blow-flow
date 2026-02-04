@@ -1,7 +1,15 @@
 "use client";
 
 import { useCanvasStore } from "@/store/useCanvasStore";
-import { Plus, Image, Video, FileImage, Wand2, FilmIcon } from "lucide-react";
+import {
+  Plus,
+  Image,
+  Video,
+  FileImage,
+  Wand2,
+  FilmIcon,
+  User,
+} from "lucide-react";
 import { NodeType } from "@/types";
 import { useReactFlow } from "@xyflow/react";
 
@@ -118,6 +126,15 @@ export function PaneContextMenu({ x, y, onClose }: PaneContextMenuProps) {
           >
             <Plus size={16} />
             <span>原始图片</span>
+          </button>
+
+          {/* 角色 */}
+          <button
+            onClick={() => handleAddNode(NodeType.CHARACTER)}
+            className="flex w-full items-center gap-3 px-4 py-2 text-sm text-gray-200 hover:bg-gray-800"
+          >
+            <User size={16} />
+            <span>角色</span>
           </button>
         </div>
       </div>

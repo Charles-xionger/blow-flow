@@ -31,6 +31,7 @@ import ImageToVideoNode from "@/components/nodes/ImageToVideoNode";
 import StartEndToVideoNode from "@/components/nodes/StartEndToVideoNode";
 import CreativeDescNode from "@/components/nodes/CreativeDescNode";
 import OriginalImageNode from "@/components/nodes/OriginalImageNode";
+import CharacterNode from "@/components/nodes/CharacterNode";
 import { GroupNode } from "@/components/nodes/GroupNode";
 
 // 导入右键菜单组件
@@ -48,6 +49,7 @@ const nodeTypes = {
   [NodeType.CREATIVE_DESC]: CreativeDescNode,
   [NodeType.STORYBOARD]: CreativeDescNode, // 使用同一个组件
   [NodeType.ORIGINAL_IMAGE]: OriginalImageNode,
+  [NodeType.CHARACTER]: CharacterNode,
   [NodeType.GROUP]: GroupNode,
 };
 

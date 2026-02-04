@@ -192,6 +192,11 @@ export function TopBar() {
     }
   };
 
+  // Prevent hydration mismatch by not rendering theme-dependent content until mounted
+  if (!mounted) {
+    return null;
+  }
+
   return (
     <>
       {/* 左上角：项目名称 */}
