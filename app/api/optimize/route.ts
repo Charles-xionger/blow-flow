@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
     const config = {
       baseUrl: process.env.DEFAULT_BASE_URL || "",
       key: process.env.DEFAULT_API_KEY || "",
-      modelId: "gemini-2.0-flash-exp",
+      modelId: "gemini-3-pro-preview",
       endpoint: "/v1/chat/completions",
     };
 

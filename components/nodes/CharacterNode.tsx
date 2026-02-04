@@ -8,15 +8,31 @@ import { User, Edit, Sparkles } from "lucide-react";
 import type { NodeData } from "@/types";
 import { EditableTitle } from "./shared/EditableTitle";
 import { QuickAddNode } from "../canvas/QuickAddNode";
+import { CharacterModal } from "../character/CharacterModal";
 
 const CharacterNode = ({ id, data }: NodeProps<Node<NodeData>>) => {
   const nodes = useCanvasStore((state) => state.nodes);
   const currentNode = nodes.find((n) => n.id === id);
   const nodePosition = currentNode?.position || { x: 0, y: 0 };
 
-  const [showEditModal, setShowEditModal] = useState(false);
+  const [showCharacterModal, setShowCharacterModal] = useState(false);
 
   const character = data.characterData;
+
+  // 编辑当前角色
+  const handleEditCurrent = () => {
+    if (character) {
+      setShowCharacterModal(true);
+    }
+  };
+
+  // 打开侧边栏角色库
+  const handleOpenCharacterLibrary = () => {
+    // 触发打开侧边栏的角色面板
+    window.dispatchEvent(
+      new CustomEvent("openSidebarPanel", { detail: { panel: "CHARACTER" } }),
+    );
+  };
 
   return (
     <>
@@ -73,9 +89,10 @@ const CharacterNode = ({ id, data }: NodeProps<Node<NodeData>>) => {
                   {character.name}
                 </h3>
                 <button
-                  onClick={() => setShowEditModal(true)}
+                  onClick={handleEditCurrent}
                   className="p-1 hover:bg-white/5 rounded transition-colors"
                   onMouseDown={(e) => e.stopPropagation()}
+                  title="编辑角色"
                 >
                   <Edit className="w-4 h-4 text-gray-400" />
                 </button>
@@ -138,14 +155,14 @@ const CharacterNode = ({ id, data }: NodeProps<Node<NodeData>>) => {
             <p className="text-sm text-gray-400 mb-4">
               未选择角色
               <br />
-              点击下方选择或创建角色
+              请在侧边栏角色库中选择
             </p>
             <button
-              onClick={() => setShowEditModal(true)}
+              onClick={handleOpenCharacterLibrary}
               onMouseDown={(e) => e.stopPropagation()}
               className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm rounded-lg transition-colors"
             >
-              选择角色
+              打开角色库
             </button>
           </div>
         )}
@@ -166,31 +183,18 @@ const CharacterNode = ({ id, data }: NodeProps<Node<NodeData>>) => {
         <QuickAddNode nodeId={id} nodePosition={nodePosition} />
       </Handle>
 
-      {/* 角色选择/编辑模态框 - 暂时简化，后续会创建完整的CharacterModal */}
-      {showEditModal && (
-        <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
-          onClick={() => setShowEditModal(false)}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <div
-            className="bg-zinc-900 rounded-xl p-6 max-w-md w-full mx-4 border border-zinc-800"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="text-lg font-semibold text-white mb-4">选择角色</h3>
-            <p className="text-sm text-gray-400 mb-4">
-              角色库功能正在开发中...
-              <br />
-              将在后续步骤中完成集成
-            </p>
-            <button
-              onClick={() => setShowEditModal(false)}
-              className="w-full px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg transition-colors"
-            >
-              关闭
-            </button>
-          </div>
-        </div>
+      {/* 角色编辑模态框 */}
+      {showCharacterModal && character && (
+        <CharacterModal
+          character={character}
+          onClose={(saved) => {
+            setShowCharacterModal(false);
+            if (saved) {
+              // 触发角色列表刷新
+              window.dispatchEvent(new CustomEvent("characterSaved"));
+            }
+          }}
+        />
       )}
     </>
   );

@@ -56,14 +56,37 @@ async function pollOperation(ai: any, operation: any): Promise<any> {
 }
 
 /**
+ * 将分辨率字符串标准化为 Veo 格式 (720p, 1080p, 4k)
+ * @param resolution 分辨率字符串 (如 "720p", "1080P", "4K")
+ * @returns Veo 格式的分辨率 ("720p", "1080p", "4k")
+ */
+function normalizeVideoResolution(resolution: string): string {
+  const resolutionLower = resolution.toLowerCase();
+
+  if (resolutionLower.includes("720")) return "720p";
+  if (resolutionLower.includes("1080")) return "1080p";
+  if (resolutionLower.includes("4k") || resolutionLower.includes("2160"))
+    return "4k";
+
+  // 默认 720p
+  return "720p";
+}
+
+/**
  * 生成视频 - Veo 3.1
  * @param model 模型 ID (veo-3.1-generate-preview)
  * @param prompt 提示词
+ * @param duration 时长（秒）
+ * @param resolution 分辨率 (720p, 1080p, 4k)
+ * @param aspectRatio 宽高比 (16:9, 9:16)
  * @returns 本地临时文件路径
  */
 export async function generateGeminiVideo(
   model: string,
   prompt: string,
+  duration: number = 5,
+  resolution: string = "720p",
+  aspectRatio: string = "16:9",
 ): Promise<string> {
   const apiKey = getApiKey();
 
@@ -74,13 +97,32 @@ export async function generateGeminiVideo(
   try {
     const ai = new GoogleGenAI({ apiKey });
 
-    console.log("[Gemini Veo] Starting video generation with model:", model);
+    // 标准化分辨率格式
+    const normalizedResolution = normalizeVideoResolution(resolution);
 
-    // 启动视频生成操作
-    let operation = await ai.models.generateVideos({
+    console.log(
+      `[Gemini Veo] 生成配置: duration=${duration}s, resolution=${normalizedResolution}, aspectRatio=${aspectRatio}`,
+    );
+
+    // 构建配置对象
+    const config: any = {
       model: model,
       prompt: prompt,
-    });
+      config: {
+        duration: `${duration}s`,
+        resolution: normalizedResolution,
+        aspectRatio: aspectRatio,
+      },
+    };
+
+    console.log("[Gemini Veo] Starting video generation with model:", model);
+    console.log(
+      "[Gemini Veo] Request config:",
+      JSON.stringify(config, null, 2),
+    );
+
+    // 启动视频生成操作
+    let operation = await ai.models.generateVideos(config);
 
     // 轮询直到完成
     operation = await pollOperation(ai, operation);
@@ -130,7 +172,7 @@ export async function generateGeminiVideo(
  * @param prompt 提示词
  * @param inputImage 输入图片 (base64, data URL, or HTTP URL)
  * @param duration 时长（秒）
- * @param resolution 分辨率 (720P, 1080P, 4K)
+ * @param resolution 分辨率 (720p, 1080p, 4k)
  * @param aspectRatio 宽高比 (16:9, 9:16)
  * @returns 视频 URL 或 base64
  */
@@ -139,7 +181,7 @@ export async function generateGeminiImageToVideo(
   prompt: string,
   inputImage: string,
   duration: number = 5,
-  resolution: string = "720P",
+  resolution: string = "720p",
   aspectRatio: string = "16:9",
 ): Promise<string> {
   const apiKey = getApiKey();
@@ -179,13 +221,16 @@ export async function generateGeminiImageToVideo(
       );
     }
 
+    // 标准化分辨率格式
+    const normalizedResolution = normalizeVideoResolution(resolution);
+
     console.log(
       "[Gemini I2V] Starting image-to-video generation with model:",
       model,
       "Duration:",
       duration,
       "Resolution:",
-      resolution,
+      normalizedResolution,
       "Aspect Ratio:",
       aspectRatio,
     );
@@ -198,22 +243,26 @@ export async function generateGeminiImageToVideo(
         imageBytes: imageBytes.toString("base64"),
         mimeType: "image/jpeg",
       },
+      config: {
+        duration: `${duration}s`,
+        resolution: normalizedResolution,
+        aspectRatio: aspectRatio,
+      },
     };
-
-    // 添加 Veo 3.1 配置
-    if (duration) {
-      config.duration = `${duration}s`;
-    }
-    if (resolution) {
-      config.resolution = resolution;
-    }
-    if (aspectRatio) {
-      config.aspectRatio = aspectRatio;
-    }
 
     console.log(
       "[Gemini I2V] Request config:",
-      JSON.stringify(config, null, 2),
+      JSON.stringify(
+        {
+          ...config,
+          image: {
+            mimeType: config.image.mimeType,
+            bytesLength: imageBytes.length,
+          },
+        },
+        null,
+        2,
+      ),
     );
 
     // 启动图片到视频生成操作

@@ -102,7 +102,7 @@ export class OSSClient {
 
   /**
    * 从 URL 下载文件并上传到 OSS
-   * @param url 源文件 URL
+   * @param url 源文件 URL（支持 http/https URL 和 base64 data URL）
    * @param folder 目标文件夹（如 'images', 'videos'）
    * @param filename 文件名（可选，默认从 URL 提取）
    */
@@ -112,30 +112,68 @@ export class OSSClient {
     filename?: string,
   ): Promise<{ objectKey: string; url: string; size: number }> {
     try {
-      console.log(`[OSS] 开始从 URL 下载: ${url}`);
+      console.log(`[OSS] 开始处理 URL: ${url.substring(0, 100)}...`);
 
-      // 下载文件
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`下载失败: ${response.statusText}`);
-      }
+      let buffer: Buffer;
 
-      const arrayBuffer = await response.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
+      // 检查是否是 base64 data URL
+      if (url.startsWith("data:")) {
+        console.log("[OSS] 检测到 base64 数据，直接转换");
 
-      // 生成文件名
-      if (!filename) {
-        const urlPath = new URL(url).pathname;
-        filename = urlPath.split("/").pop() || `file-${Date.now()}.bin`;
+        // 提取 base64 数据
+        const matches = url.match(/^data:([^;]+);base64,(.+)$/);
+        if (!matches) {
+          throw new Error("无效的 base64 data URL 格式");
+        }
+
+        const mimeType = matches[1];
+        const base64Data = matches[2];
+
+        // 如果没有提供文件名，根据 MIME 类型生成
+        if (!filename) {
+          const ext = mimeType.split("/")[1] || "png";
+          filename = `file-${Date.now()}.${ext}`;
+        }
+
+        // 转换为 Buffer
+        buffer = Buffer.from(base64Data, "base64");
+        console.log(`[OSS] Base64 转换成功，大小: ${buffer.length} 字节`);
+      } else {
+        // HTTP/HTTPS URL，下载文件
+        console.log(`[OSS] 开始从 HTTP(S) URL 下载`);
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`下载失败: ${response.statusText}`);
+        }
+
+        const arrayBuffer = await response.arrayBuffer();
+        buffer = Buffer.from(arrayBuffer);
+        console.log(`[OSS] 下载成功，大小: ${buffer.length} 字节`);
+
+        // 生成文件名
+        if (!filename) {
+          const urlPath = new URL(url).pathname;
+          filename = urlPath.split("/").pop() || `file-${Date.now()}.bin`;
+        }
       }
 
       // 生成 OSS 路径
       const objectKey = this.generateObjectKey(folder, filename);
 
-      // 上传到 OSS
-      await this.uploadObject(objectKey, buffer);
+      // 上传到 OSS，设置正确的 Content-Type
+      const contentType = filename.endsWith(".png")
+        ? "image/png"
+        : filename.endsWith(".jpg") || filename.endsWith(".jpeg")
+          ? "image/jpeg"
+          : filename.endsWith(".webp")
+            ? "image/webp"
+            : "application/octet-stream";
 
-      console.log(`[OSS] 上传成功，大小: ${buffer.length} 字节`);
+      await this.uploadObject(objectKey, buffer, {
+        "Content-Type": contentType,
+      });
+
+      console.log(`[OSS] 上传成功: ${objectKey}, Content-Type: ${contentType}`);
 
       return {
         objectKey,

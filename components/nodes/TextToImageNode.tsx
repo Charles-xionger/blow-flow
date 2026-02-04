@@ -4,8 +4,9 @@ import { memo, useCallback, useState, useEffect, useMemo } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { Handle, Position } from "@xyflow/react";
 import { useCanvasStore } from "@/store/useCanvasStore";
-import { Image, Sparkles, Wand2, Loader2, Link2 } from "lucide-react";
+import { Image, Sparkles, Wand2, Loader2, Link2, User } from "lucide-react";
 import type { NodeData } from "@/types";
+import { toast } from "sonner";
 import { getImageModels } from "@/lib/model-registry";
 import { EditableTitle } from "./shared/EditableTitle";
 import { QuickAddNode } from "../canvas/QuickAddNode";
@@ -84,6 +85,69 @@ const TextToImageNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
   useEffect(() => {
     setLocalPrompt(data.prompt || "");
   }, [data.prompt]);
+
+  // 保存为角色
+  const handleSaveAsCharacter = async () => {
+    if (!data.imageSrc) return;
+
+    const toastId = toast.loading("正在分析图片...");
+
+    try {
+      // 调用图片分析 API
+      const analyzeResponse = await fetch("/api/character/analyze-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageUrl: data.imageSrc,
+          prompt: localPrompt || data.prompt || "",
+        }),
+      });
+
+      const analyzeResult = await analyzeResponse.json();
+
+      if (analyzeResult.success) {
+        console.log(
+          "[TextToImageNode] Analysis completed:",
+          analyzeResult.data,
+        );
+
+        toast.loading("正在保存角色...", { id: toastId });
+
+        // 直接保存到数据库
+        const saveResponse = await fetch("/api/character", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: analyzeResult.data.name,
+            description: analyzeResult.data.description,
+            referenceImages: [data.imageSrc],
+            tags: analyzeResult.data.tags || [],
+          }),
+        });
+
+        const saveResult = await saveResponse.json();
+
+        if (saveResult.success) {
+          toast.success(`角色"${analyzeResult.data.name}"已保存！`, {
+            id: toastId,
+          });
+
+          // 触发角色库刷新事件
+          window.dispatchEvent(new CustomEvent("characterSaved"));
+        } else {
+          throw new Error(saveResult.error || "保存失败");
+        }
+      } else {
+        throw new Error(analyzeResult.error);
+      }
+    } catch (error) {
+      console.error("Failed to save character:", error);
+      toast.error(
+        `保存失败: ${error instanceof Error ? error.message : "未知错误"}`,
+        { id: toastId },
+      );
+    }
+  };
 
   const handleGenerate = useCallback(async () => {
     // 先同步本地输入到 store
@@ -191,6 +255,7 @@ const TextToImageNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
               src={data.imageSrc}
               alt="Generated"
               className="w-full h-full object-contain"
+              onSaveAsCharacter={handleSaveAsCharacter}
             />
           </div>
         ) : (

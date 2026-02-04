@@ -1,17 +1,36 @@
 "use client";
 
-import { useState } from "react";
-import { X, Upload, Trash2, Loader2 } from "lucide-react";
+import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
+import { X, Upload, Trash2, Loader2, Sparkles } from "lucide-react";
 import type { Character } from "@/types";
 import { toast } from "sonner";
 
 interface CharacterModalProps {
   character: Character | null;
   onClose: (saved: boolean) => void;
+  prefilledImage?: string;
+  analyzedData?: {
+    name: string;
+    description: string;
+    tags: string[];
+    appearance?: {
+      age?: string;
+      gender?: string;
+      hair?: string;
+      clothing?: string;
+    };
+  };
 }
 
-export function CharacterModal({ character, onClose }: CharacterModalProps) {
+export function CharacterModal({
+  character,
+  onClose,
+  prefilledImage,
+  analyzedData,
+}: CharacterModalProps) {
   const isEdit = !!character;
+  const isAIGenerated = !!analyzedData;
 
   const [name, setName] = useState(character?.name || "");
   const [description, setDescription] = useState(character?.description || "");
@@ -22,6 +41,18 @@ export function CharacterModal({ character, onClose }: CharacterModalProps) {
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+
+  // Auto-fill form with AI-analyzed data
+  useEffect(() => {
+    if (analyzedData && !character) {
+      setName(analyzedData.name || "");
+      setDescription(analyzedData.description || "");
+      setTags(analyzedData.tags || []);
+    }
+    if (prefilledImage && !character) {
+      setReferenceImages([prefilledImage]);
+    }
+  }, [analyzedData, prefilledImage, character]);
 
   // 处理图片上传
   const handleImageUpload = async (
@@ -139,6 +170,10 @@ export function CharacterModal({ character, onClose }: CharacterModalProps) {
       const result = await response.json();
 
       if (result.success) {
+        console.log(
+          "[CharacterModal] Character saved successfully:",
+          result.data,
+        );
         toast.success(isEdit ? "角色已更新" : "角色已创建");
         onClose(true);
       } else {
@@ -152,13 +187,14 @@ export function CharacterModal({ character, onClose }: CharacterModalProps) {
     }
   };
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[10000] p-4"
       onClick={() => !isSubmitting && onClose(false)}
+      onMouseDown={(e) => e.stopPropagation()}
     >
       <div
-        className="bg-zinc-900 rounded-xl border border-zinc-800 max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+        className="bg-zinc-900 rounded-xl border border-zinc-800 w-[90vw] max-w-4xl max-h-[90vh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 头部 */}
@@ -182,6 +218,12 @@ export function CharacterModal({ character, onClose }: CharacterModalProps) {
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">
                 角色名称 <span className="text-red-400">*</span>
+                {isAIGenerated && (
+                  <span className="ml-2 inline-flex items-center gap-1 text-xs text-purple-400">
+                    <Sparkles className="w-3 h-3" />
+                    AI 生成
+                  </span>
+                )}
               </label>
               <input
                 type="text"
@@ -198,6 +240,12 @@ export function CharacterModal({ character, onClose }: CharacterModalProps) {
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">
                 角色描述 <span className="text-red-400">*</span>
+                {isAIGenerated && (
+                  <span className="ml-2 inline-flex items-center gap-1 text-xs text-purple-400">
+                    <Sparkles className="w-3 h-3" />
+                    AI 生成
+                  </span>
+                )}
               </label>
               <textarea
                 value={description}
@@ -206,6 +254,39 @@ export function CharacterModal({ character, onClose }: CharacterModalProps) {
                 className="w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 min-h-[120px] resize-y"
                 required
               />
+              {isAIGenerated && analyzedData?.appearance && (
+                <div className="mt-2 p-3 bg-purple-500/10 border border-purple-500/20 rounded-lg">
+                  <p className="text-xs font-medium text-purple-400 mb-1">
+                    AI 识别的外貌特征：
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 text-xs text-gray-300">
+                    {analyzedData.appearance.age && (
+                      <div>
+                        <span className="text-gray-500">年龄：</span>
+                        {analyzedData.appearance.age}
+                      </div>
+                    )}
+                    {analyzedData.appearance.gender && (
+                      <div>
+                        <span className="text-gray-500">性别：</span>
+                        {analyzedData.appearance.gender}
+                      </div>
+                    )}
+                    {analyzedData.appearance.hair && (
+                      <div>
+                        <span className="text-gray-500">发型：</span>
+                        {analyzedData.appearance.hair}
+                      </div>
+                    )}
+                    {analyzedData.appearance.clothing && (
+                      <div>
+                        <span className="text-gray-500">服装：</span>
+                        {analyzedData.appearance.clothing}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
               <p className="text-xs text-gray-500 mt-1">
                 提示：描述越详细，生成的角色越一致
               </p>
@@ -271,6 +352,12 @@ export function CharacterModal({ character, onClose }: CharacterModalProps) {
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">
                 标签
+                {isAIGenerated && tags.length > 0 && (
+                  <span className="ml-2 inline-flex items-center gap-1 text-xs text-purple-400">
+                    <Sparkles className="w-3 h-3" />
+                    AI 生成
+                  </span>
+                )}
               </label>
 
               <div className="flex gap-2 mb-2">
@@ -343,6 +430,7 @@ export function CharacterModal({ character, onClose }: CharacterModalProps) {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

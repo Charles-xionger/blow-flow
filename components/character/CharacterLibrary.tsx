@@ -14,6 +14,21 @@ export function CharacterLibrary() {
   const [editingCharacter, setEditingCharacter] = useState<Character | null>(
     null,
   );
+  const [prefilledData, setPrefilledData] = useState<{
+    image?: string;
+    prompt?: string;
+    analyzedData?: {
+      name: string;
+      description: string;
+      tags: string[];
+      appearance: {
+        age: string;
+        gender: string;
+        hair: string;
+        clothing: string;
+      };
+    };
+  } | null>(null);
 
   // 加载角色列表
   const loadCharacters = useCallback(async () => {
@@ -40,13 +55,48 @@ export function CharacterLibrary() {
     loadCharacters();
   }, [loadCharacters]);
 
+  // 监听来自 TextToImageNode 的事件
+  useEffect(() => {
+    const handleOpenModal = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      console.log(
+        "[CharacterLibrary] Received openCharacterModal event:",
+        customEvent.detail,
+      );
+
+      setPrefilledData({
+        image: customEvent.detail.prefilledImage,
+        prompt: customEvent.detail.prefilledPrompt,
+        analyzedData: customEvent.detail.analyzedData,
+      });
+      setEditingCharacter(null);
+      setShowModal(true);
+
+      console.log("[CharacterLibrary] Modal state set to open");
+    };
+
+    const handleCharacterSaved = () => {
+      console.log("[CharacterLibrary] Character saved, reloading list");
+      loadCharacters();
+    };
+
+    window.addEventListener("openCharacterModal", handleOpenModal);
+    window.addEventListener("characterSaved", handleCharacterSaved);
+    return () => {
+      window.removeEventListener("openCharacterModal", handleOpenModal);
+      window.removeEventListener("characterSaved", handleCharacterSaved);
+    };
+  }, []);
+
   const handleCreateNew = () => {
     setEditingCharacter(null);
+    setPrefilledData(null);
     setShowModal(true);
   };
 
   const handleEdit = (character: Character) => {
     setEditingCharacter(character);
+    setPrefilledData(null);
     setShowModal(true);
   };
 
@@ -74,6 +124,7 @@ export function CharacterLibrary() {
   const handleModalClose = (saved: boolean) => {
     setShowModal(false);
     setEditingCharacter(null);
+    setPrefilledData(null);
     if (saved) {
       loadCharacters();
     }
@@ -155,6 +206,8 @@ export function CharacterLibrary() {
         <CharacterModal
           character={editingCharacter}
           onClose={handleModalClose}
+          prefilledImage={prefilledData?.image}
+          analyzedData={prefilledData?.analyzedData}
         />
       )}
     </div>

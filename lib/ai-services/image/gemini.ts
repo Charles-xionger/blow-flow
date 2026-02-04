@@ -33,18 +33,43 @@ async function downloadImageAsBase64(imageUrl: string): Promise<string> {
 }
 
 /**
+ * 将分辨率字符串转换为 Gemini 格式 (1K, 2K, 4K)
+ * @param resolution 分辨率字符串 (如 "1024x1024", "2048x2048", "1k", "2K")
+ * @returns Gemini 格式的分辨率 ("1K", "2K", "4K")
+ */
+function normalizeResolution(resolution: string): string {
+  const resolutionLower = resolution.toLowerCase();
+
+  // 如果已经是 K 格式，转换为大写
+  if (resolutionLower.endsWith("k")) {
+    return resolutionLower.toUpperCase();
+  }
+
+  // 从像素转换为 K
+  if (resolutionLower.includes("x")) {
+    const width = parseInt(resolutionLower.split("x")[0]);
+    if (width <= 1024) return "1K";
+    if (width <= 2048) return "2K";
+    return "4K";
+  }
+
+  // 默认 1K
+  return "1K";
+}
+
+/**
  * 生成图片 - Gemini SDK
  * @param model 模型 ID (gemini-2.5-flash-image, gemini-3-pro-image-preview)
  * @param prompt 提示词
- * @param _aspectRatio 宽高比（保留参数兼容性）
- * @param _resolution 分辨率（保留参数兼容性）
+ * @param aspectRatio 宽高比 (1:1, 16:9, 9:16, 4:3, 3:4)
+ * @param resolution 分辨率 (1K, 2K, 4K 或 1024x1024 格式)
  * @returns 图片 base64 URL
  */
 export async function generateGeminiImage(
   model: string,
   prompt: string,
-  _aspectRatio: string = "1:1", // eslint-disable-line @typescript-eslint/no-unused-vars
-  _resolution: string = "1024x1024", // eslint-disable-line @typescript-eslint/no-unused-vars
+  aspectRatio: string = "1:1",
+  resolution: string = "1K",
 ): Promise<string> {
   const apiKey = getApiKey();
 
@@ -55,12 +80,23 @@ export async function generateGeminiImage(
   try {
     const ai = new GoogleGenAI({ apiKey });
 
+    // 标准化分辨率格式
+    const imageSize = normalizeResolution(resolution);
+
+    console.log(
+      `[Gemini] 生成配置: aspectRatio=${aspectRatio}, imageSize=${imageSize}`,
+    );
+
     // 构建请求内容
     const response = await ai.models.generateContent({
       model: model,
       contents: prompt,
       config: {
         responseModalities: ["image"] as any,
+        imageConfig: {
+          aspectRatio: aspectRatio,
+          imageSize: imageSize,
+        },
       } as any,
     });
 

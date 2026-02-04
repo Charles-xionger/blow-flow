@@ -103,7 +103,7 @@ export async function POST(request: NextRequest) {
 
     // 检查是否是 Gemini 模型
     const allModels = getAllModels();
-    let modelDef = allModels[model];
+    let modelDef = allModels[model] as (typeof allModels)[string] | undefined;
     if (!modelDef) {
       modelDef = Object.values(allModels).find((m) => m.id === model);
     }

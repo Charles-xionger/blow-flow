@@ -82,8 +82,8 @@ export async function POST(request: NextRequest) {
 
     console.log(`[DownloadMedia] Generated zip: ${zipBuffer.length} bytes`);
 
-    // 返回 zip 文件
-    return new NextResponse(zipBuffer, {
+    // 返回 zip 文件 (将 Buffer 转换为 Uint8Array)
+    return new NextResponse(Uint8Array.from(zipBuffer), {
       status: 200,
       headers: {
         "Content-Type": "application/zip",

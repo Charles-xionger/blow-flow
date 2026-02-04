@@ -12,6 +12,7 @@ import {
   ConnectionMode,
   BackgroundVariant,
   MarkerType,
+  SelectionMode,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
@@ -82,9 +83,19 @@ function CanvasInner() {
     (state) => state.setCurrentWorkflowId,
   );
 
-  // 从 URL 加载项目（只在 URL 变化时触发，不依赖 currentWorkflowId）
+  // 使用 ref 跟踪上次加载的项目 ID，防止循环加载
+  const lastLoadedIdRef = useRef<string | null>(null);
+  const isLoadingRef = useRef(false);
+
+  // 从 URL 加载项目（只在 URL 变化时触发）
   useEffect(() => {
     const projectId = searchParams.get("project");
+
+    // 如果正在加载，或者已经加载过这个项目，跳过
+    if (isLoadingRef.current || lastLoadedIdRef.current === projectId) {
+      return;
+    }
+
     console.log(
       "[URL Load] projectId from URL:",
       projectId,
@@ -93,9 +104,11 @@ function CanvasInner() {
     );
 
     // 只有当 URL 中有 project ID，且与当前不同时才加载
-    // 使用 ref 记住上次加载的 ID，避免重复加载
     if (projectId && projectId !== currentWorkflowId) {
       console.log("[URL Load] Loading project from URL:", projectId);
+      isLoadingRef.current = true;
+      lastLoadedIdRef.current = projectId;
+
       // 从 API 加载项目
       fetch(`/api/workflow/${projectId}`)
         .then((res) => res.json())
@@ -104,16 +117,25 @@ function CanvasInner() {
             loadWorkflow(result.data);
           }
         })
-        .catch((err) =>
-          console.error("Failed to load workflow from URL:", err),
-        );
+        .catch((err) => console.error("Failed to load workflow from URL:", err))
+        .finally(() => {
+          isLoadingRef.current = false;
+        });
+    } else if (!projectId && currentWorkflowId) {
+      // URL 中没有项目 ID，但 store 中有，说明用户清空了 URL
+      lastLoadedIdRef.current = null;
     }
-  }, [searchParams, currentWorkflowId, loadWorkflow]); // 添加完整依赖
+  }, [searchParams, currentWorkflowId, loadWorkflow]);
 
   // 同步 currentWorkflowId 到 URL（使用 ref 防止循环更新）
   const lastSyncedIdRef = useRef<string | null>(null);
   useEffect(() => {
     const currentProjectId = searchParams.get("project");
+
+    // 如果正在加载，跳过同步
+    if (isLoadingRef.current) {
+      return;
+    }
 
     // 如果已经同步过这个 ID，跳过
     if (lastSyncedIdRef.current === currentWorkflowId) {
@@ -130,10 +152,12 @@ function CanvasInner() {
     if (currentWorkflowId && currentProjectId !== currentWorkflowId) {
       console.log("[URL Sync] Updating URL to:", currentWorkflowId);
       lastSyncedIdRef.current = currentWorkflowId;
+      lastLoadedIdRef.current = currentWorkflowId;
       router.push(`/?project=${currentWorkflowId}`, { scroll: false });
     } else if (!currentWorkflowId && currentProjectId) {
       console.log("[URL Sync] Clearing URL");
       lastSyncedIdRef.current = null;
+      lastLoadedIdRef.current = null;
       router.push("/", { scroll: false });
     }
   }, [currentWorkflowId, router, searchParams]);
@@ -237,7 +261,7 @@ function CanvasInner() {
 
   // 处理画布右键菜单
   const onPaneContextMenu = useCallback(
-    (event: React.MouseEvent) => {
+    (event: React.MouseEvent | MouseEvent) => {
       event.preventDefault();
       showContextMenu(event.clientX, event.clientY, "pane");
     },
@@ -313,7 +337,7 @@ function CanvasInner() {
         className={mounted && isDarkMode ? "dark" : ""}
         selectionOnDrag={true}
         panOnDrag={[1, 2]}
-        selectionMode="partial"
+        selectionMode={SelectionMode.Partial}
         multiSelectionKeyCode="Shift"
         minZoom={0.1}
         maxZoom={4}

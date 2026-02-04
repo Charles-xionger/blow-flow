@@ -155,6 +155,10 @@ export const useCanvasStore = create<CanvasState>()(
             NodeType,
             { label: string; data: Partial<NodeData> }
           > = {
+            [NodeType.TEXT]: {
+              label: "Text",
+              data: {},
+            },
             [NodeType.TEXT_TO_IMAGE]: {
               label: "Text to Image",
               data: {
@@ -473,12 +477,20 @@ export const useCanvasStore = create<CanvasState>()(
           const minY = Math.min(...nodesToGroup.map((n) => n.position.y));
           const maxX = Math.max(
             ...nodesToGroup.map(
-              (n) => n.position.x + (n.style?.width || DEFAULT_NODE_WIDTH),
+              (n) =>
+                n.position.x +
+                (typeof n.style?.width === "number"
+                  ? n.style.width
+                  : Number(n.style?.width) || DEFAULT_NODE_WIDTH),
             ),
           );
           const maxY = Math.max(
             ...nodesToGroup.map(
-              (n) => n.position.y + (n.style?.height || DEFAULT_NODE_HEIGHT),
+              (n) =>
+                n.position.y +
+                (typeof n.style?.height === "number"
+                  ? n.style.height
+                  : Number(n.style?.height) || DEFAULT_NODE_HEIGHT),
             ),
           );
 

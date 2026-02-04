@@ -62,7 +62,9 @@ function DialogContent({
 }) {
   return (
     <DialogPortal data-slot="dialog-portal">
-      <DialogOverlay zIndex={overlayZIndex} />
+      <DialogOverlay
+        {...(overlayZIndex ? ({ zIndex: overlayZIndex } as any) : {})}
+      />
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(

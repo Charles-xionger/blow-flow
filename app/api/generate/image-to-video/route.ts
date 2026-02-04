@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
 
     // 检查是否是 Gemini 模型
     const allModels = getAllModels();
-    let modelDef = allModels[model]; // 首先用 key 查找
+    let modelDef = allModels[model] as (typeof allModels)[string] | undefined; // 首先用 key 查找
 
     // 如果用 key 找不到，尝试用 id 查找
     if (!modelDef) {
@@ -145,11 +145,9 @@ export async function POST(request: NextRequest) {
         const objectKey = `generated/video-${Date.now()}.mp4`;
 
         // 上传视频
-        const result = await ossClient.uploadObject(
-          objectKey,
-          videoBuffer,
-          "video/mp4",
-        );
+        const result = await ossClient.uploadObject(objectKey, videoBuffer, {
+          "Content-Type": "video/mp4",
+        });
         videoUrl = result.url;
 
         // 清理临时文件

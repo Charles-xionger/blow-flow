@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
 
     // 检查是否是 Gemini 模型
     const allModels = getAllModels();
-    let modelDef: any = allModels[model]; // 首先用 key 查找
+    let modelDef = allModels[model] as (typeof allModels)[string] | undefined; // 首先用 key 查找
 
     // 如果用 key 找不到，尝试用 id 查找
     if (!modelDef) {
@@ -127,10 +127,18 @@ export async function POST(request: NextRequest) {
             finalPrompt,
             inputImages[0],
             durationSeconds,
+            resolution,
+            aspectRatio,
           );
         } else {
           // 文本生成视频
-          tempVideoPath = await generateGeminiVideo(modelDef.id, finalPrompt);
+          tempVideoPath = await generateGeminiVideo(
+            modelDef.id,
+            finalPrompt,
+            durationSeconds,
+            resolution,
+            aspectRatio,
+          );
         }
 
         // 上传到 OSS

@@ -31,7 +31,7 @@ GEMINI_API_KEY=your_api_key_here
 curl -X POST http://localhost:3000/api/test/gemini \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gemini-2.0-flash-exp",
+    "model": "gemini-3-pro-preview",
     "prompt": "Explain how AI works in a few words"
   }'
 ```

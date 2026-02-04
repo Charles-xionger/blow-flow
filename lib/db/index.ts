@@ -108,7 +108,9 @@ export function closeDatabase() {
 
 // 在 Next.js 中，开发环境热重载时关闭旧连接
 if (process.env.NODE_ENV === "development") {
-  const globalForDb = global as typeof globalThis & { db?: Database.Database };
+  const globalForDb = global as typeof globalThis & {
+    db?: Database.Database | null;
+  };
   if (globalForDb.db) {
     globalForDb.db.close();
   }

@@ -127,7 +127,25 @@ export function Sidebar() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const togglePanel = (panel: "ADD" | "HISTORY" | "PROJECT" | null) => {
+  // 监听打开侧边栏面板的事件
+  useEffect(() => {
+    const handleOpenSidebarPanel = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const { panel } = customEvent.detail;
+      if (panel === "CHARACTER") {
+        setActivePanel("CHARACTER");
+      }
+    };
+
+    window.addEventListener("openSidebarPanel", handleOpenSidebarPanel);
+    return () => {
+      window.removeEventListener("openSidebarPanel", handleOpenSidebarPanel);
+    };
+  }, []);
+
+  const togglePanel = (
+    panel: "ADD" | "HISTORY" | "PROJECT" | "CHARACTER" | null,
+  ) => {
     setActivePanel((prev) => (prev === panel ? null : panel));
     // 当打开项目面板时，加载项目列表
     if (panel === "PROJECT") {
@@ -551,7 +569,10 @@ export function Sidebar() {
             </div>
           )}
           {activePanel === "PROJECT" && renderProjectPanel()}
-          {activePanel === "CHARACTER" && renderCharacterPanel()}
+          {/* 始终渲染 CharacterLibrary 以保持事件监听器活跃 */}
+          <div className={activePanel === "CHARACTER" ? "" : "hidden"}>
+            {renderCharacterPanel()}
+          </div>
         </div>
       </div>
     );

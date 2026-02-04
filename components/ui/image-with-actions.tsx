@@ -1,23 +1,36 @@
 "use client";
 
-import { Download, Expand, X, ZoomIn, ZoomOut } from "lucide-react";
+import { Download, Expand, X, ZoomIn, ZoomOut, User } from "lucide-react";
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 
 interface ImageWithActionsProps {
   src: string | undefined;
   alt?: string;
   className?: string;
+  onSaveAsCharacter?: () => void | Promise<void>;
 }
 
 export function ImageWithActions({
   src,
   alt = "图片",
   className = "",
+  onSaveAsCharacter,
 }: ImageWithActionsProps) {
   const [showPreview, setShowPreview] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [scale, setScale] = useState(1);
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
 
   useEffect(() => {
     if (showPreview) {
@@ -140,6 +153,19 @@ export function ImageWithActions({
             >
               <Download size={16} />
             </button>
+            {onSaveAsCharacter && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowSaveDialog(true);
+                }}
+                onMouseDown={(e) => e.stopPropagation()}
+                className="p-2 rounded-lg bg-purple-600/80 hover:bg-purple-600 text-white backdrop-blur-sm transition-all hover:scale-110 cursor-pointer"
+                title="保存为角色"
+              >
+                <User size={16} />
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -195,6 +221,48 @@ export function ImageWithActions({
           </div>,
           document.body,
         )}
+
+      {/* 保存为角色对话框 */}
+      <Dialog open={showSaveDialog} onOpenChange={setShowSaveDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>保存为角色</DialogTitle>
+            <DialogDescription>
+              将此图片保存为角色，AI 将自动分析图片中的角色特征并生成角色信息。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-4 py-4">
+            <div className="flex items-center justify-center">
+              <img
+                src={src}
+                alt={alt}
+                className="max-w-full max-h-60 rounded-lg border border-zinc-700"
+              />
+            </div>
+            <p className="text-sm text-gray-400">
+              点击确认后，系统将使用 AI
+              分析图片，提取角色的外貌、风格等特征信息。
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowSaveDialog(false)}>
+              取消
+            </Button>
+            <Button
+              onClick={async () => {
+                setShowSaveDialog(false);
+                if (onSaveAsCharacter) {
+                  await onSaveAsCharacter();
+                }
+              }}
+              className="bg-purple-600 hover:bg-purple-700"
+            >
+              <User className="w-4 h-4 mr-2" />
+              保存为角色
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

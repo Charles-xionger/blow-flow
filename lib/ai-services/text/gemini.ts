@@ -11,7 +11,7 @@ const getApiKey = () => {
 
 /**
  * 生成文本内容
- * @param model 模型名称 (如 "gemini-2.0-flash-exp")
+ * @param model 模型名称 (如 "gemini-3-pro-preview")
  * @param prompt 提示词
  * @returns 生成的文本
  */
