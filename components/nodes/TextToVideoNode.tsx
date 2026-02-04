@@ -66,9 +66,6 @@ const TextToVideoNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
     setLocalPrompt(data.prompt || "");
   }, [data.prompt]);
 
-  // 优先使用连接节点的 prompt，否则使用本地 prompt
-  const effectivePrompt = inputPrompt || localPrompt;
-
   const handleGenerate = useCallback(
     async (skipCache = false) => {
       // 先同步本地输入到 store
@@ -116,6 +113,7 @@ const TextToVideoNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
       id,
       inputPrompt,
       localPrompt,
+      data.prompt,
       data.model,
       data.aspectRatio,
       data.duration,

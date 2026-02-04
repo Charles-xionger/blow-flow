@@ -3,6 +3,8 @@
  * 运行命令: node scripts/migrate-add-category.js
  */
 
+/* eslint-disable @typescript-eslint/no-require-imports */
+/* eslint-disable @typescript-eslint/no-unused-vars */
 const Database = require("better-sqlite3");
 const path = require("path");
 const fs = require("fs");

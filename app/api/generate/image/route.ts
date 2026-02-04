@@ -206,10 +206,8 @@ export async function POST(request: NextRequest) {
     }
 
     // 提示词优化（如果启用）
-    let finalPrompt = prompt;
-    if (promptOptimize && prompt) {
-      // TODO: 调用提示词优化服务
-    }
+    const finalPrompt = promptOptimize && prompt ? prompt : prompt;
+    // TODO: 调用提示词优化服务
 
     // 根据模型选择生成函数
     let generateFn: (

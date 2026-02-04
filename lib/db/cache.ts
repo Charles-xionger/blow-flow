@@ -40,6 +40,7 @@ export function getCache(cacheKey: string): unknown | null {
 
   try {
     return JSON.parse(row.result);
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
   } catch (e) {
     return null;
   }

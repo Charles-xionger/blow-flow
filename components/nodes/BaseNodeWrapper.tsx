@@ -7,7 +7,7 @@
 "use client";
 
 import React, { memo, ReactNode } from "react";
-import { Handle, Position, NodeProps } from "@xyflow/react";
+import { Handle, Position } from "@xyflow/react";
 import { NodeData } from "@/types";
 import { cn } from "@/lib/utils";
 import { Loader2, AlertCircle, MoreVertical } from "lucide-react";

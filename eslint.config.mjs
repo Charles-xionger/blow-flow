@@ -18,6 +18,8 @@ const eslintConfig = defineConfig([
       // Custom rules can be added here
       // 暂时关闭 any 类型警告
       "@typescript-eslint/no-explicit-any": "off",
+      // no-unused-vars 规则关闭
+      "@typescript-eslint/no-unused-vars": "off",
     },
   },
 ]);

@@ -4,7 +4,6 @@ import {
   Connection,
   Edge,
   EdgeChange,
-  Node,
   NodeChange,
   addEdge,
   OnNodesChange,

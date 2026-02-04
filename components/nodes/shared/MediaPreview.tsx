@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState } from "react";
-import { cn } from "@/lib/utils";
 import { Maximize2, Download, X } from "lucide-react";
 
 interface MediaPreviewProps {

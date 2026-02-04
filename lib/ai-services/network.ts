@@ -88,6 +88,7 @@ export const fetchThirdParty = async (
           } else if (jsonErr.fail_reason) {
             errMsg = jsonErr.fail_reason;
           }
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
         } catch (e) {
           // 保持原始错误消息
         }
@@ -112,6 +113,7 @@ export const fetchThirdParty = async (
       try {
         if (!text) return {};
         return JSON.parse(text);
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
       } catch (e) {
         const preview = text.slice(0, 200);
         if (preview.trim().startsWith("<")) {

@@ -43,8 +43,8 @@ async function downloadImageAsBase64(imageUrl: string): Promise<string> {
 export async function generateGeminiImage(
   model: string,
   prompt: string,
-  _aspectRatio: string = "1:1",
-  _resolution: string = "1024x1024",
+  _aspectRatio: string = "1:1", // eslint-disable-line @typescript-eslint/no-unused-vars
+  _resolution: string = "1024x1024", // eslint-disable-line @typescript-eslint/no-unused-vars
 ): Promise<string> {
   const apiKey = getApiKey();
 

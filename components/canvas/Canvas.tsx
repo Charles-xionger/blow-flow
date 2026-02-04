@@ -108,7 +108,7 @@ function CanvasInner() {
           console.error("Failed to load workflow from URL:", err),
         );
     }
-  }, [searchParams]); // 只依赖 searchParams，避免循环
+  }, [searchParams, currentWorkflowId, loadWorkflow]); // 添加完整依赖
 
   // 同步 currentWorkflowId 到 URL（使用 ref 防止循环更新）
   const lastSyncedIdRef = useRef<string | null>(null);
@@ -136,7 +136,7 @@ function CanvasInner() {
       lastSyncedIdRef.current = null;
       router.push("/", { scroll: false });
     }
-  }, [currentWorkflowId, router]);
+  }, [currentWorkflowId, router, searchParams]);
 
   // 客户端挂载标记
   useEffect(() => {

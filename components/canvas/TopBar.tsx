@@ -10,7 +10,6 @@ import {
   Save,
   Sun,
   Moon,
-  FolderOpen,
   Settings as SettingsIcon,
   Trash2,
 } from "lucide-react";

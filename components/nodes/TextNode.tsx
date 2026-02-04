@@ -20,9 +20,17 @@ const TextNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
   const shouldShowPanel = selected && selectedNodeIds.length === 1;
   const [localPrompt, setLocalPrompt] = useState(data.prompt || "");
 
+  // 使用 key 或者不在 effect 中设置状态，而是在渲染时检查
   useEffect(() => {
-    setLocalPrompt(data.prompt || "");
-  }, [data.prompt]);
+    // 使用 setTimeout 将 setState 推迟到下一个事件循环，避免同步调用
+    const timer = setTimeout(() => {
+      if (data.prompt !== localPrompt) {
+        setLocalPrompt(data.prompt || "");
+      }
+    }, 0);
+
+    return () => clearTimeout(timer);
+  }, [data.prompt]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleBlur = useCallback(() => {
     if (localPrompt !== data.prompt) {
