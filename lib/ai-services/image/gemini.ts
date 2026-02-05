@@ -128,12 +128,16 @@ export async function generateGeminiImage(
  * @param model 模型 ID
  * @param prompt 提示词
  * @param inputImages 输入图片数组（URL 或 base64）
+ * @param aspectRatio 宽高比 (1:1, 16:9, 9:16)
+ * @param resolution 分辨率 (1K, 2K, 4K 或 1024x1024 格式)
  * @returns 生成的图片 base64 URL
  */
 export async function generateGeminiImageToImage(
   model: string,
   prompt: string,
   inputImages: string | string[],
+  aspectRatio: string = "1:1",
+  resolution: string = "1024x1024",
 ): Promise<string> {
   const apiKey = getApiKey();
 
@@ -176,11 +180,22 @@ export async function generateGeminiImageToImage(
       })),
     ];
 
+    // 标准化分辨率
+    const imageSize = normalizeResolution(resolution);
+
+    console.log(
+      `[Gemini] Image-to-image 配置: aspectRatio=${aspectRatio}, imageSize=${imageSize}`,
+    );
+
     const response = await ai.models.generateContent({
       model: model,
       contents: contents,
       config: {
         responseModalities: ["image"] as any,
+        imageConfig: {
+          aspectRatio: aspectRatio,
+          imageSize: imageSize,
+        },
       } as any,
     });
 

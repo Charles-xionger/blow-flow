@@ -53,7 +53,15 @@ const ImageToVideoNode = ({
         const sourceNode = state.nodes.find(
           (n) => n.id === inputEdges[0].source,
         );
-        return sourceNode?.data.imageSrc;
+        if (!sourceNode) return null;
+
+        // 支持角色节点 - 使用角色的第一张参考图
+        if (sourceNode.data.characterData?.referenceImages?.[0]) {
+          return sourceNode.data.characterData.referenceImages[0];
+        }
+
+        // 支持普通图片节点
+        return sourceNode.data.imageSrc;
       },
       [id],
     ),

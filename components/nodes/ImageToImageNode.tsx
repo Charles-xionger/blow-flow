@@ -25,6 +25,12 @@ const aspectRatios = [
   { value: "9:16", label: "9:16 竖屏" },
 ];
 
+const resolutions = [
+  { value: "1024x1024", label: "1K (1024x1024)" },
+  { value: "2048x2048", label: "2K (2048x2048)" },
+  { value: "4096x4096", label: "4K (4096x4096)" },
+];
+
 const ImageToImageNode = ({
   id,
   data,
@@ -51,7 +57,15 @@ const ImageToImageNode = ({
     const images = inputEdges
       .map((edge) => {
         const sourceNode = nodes.find((n) => n.id === edge.source);
-        return sourceNode?.data.imageSrc;
+        if (!sourceNode) return null;
+
+        // 支持角色节点 - 使用角色的第一张参考图
+        if (sourceNode.data.characterData?.referenceImages?.[0]) {
+          return sourceNode.data.characterData.referenceImages[0];
+        }
+
+        // 支持普通图片节点
+        return sourceNode.data.imageSrc;
       })
       .filter(Boolean) as string[];
 
@@ -99,6 +113,7 @@ const ImageToImageNode = ({
             inputImages, // 传递所有输入图片
             model: data.model || "BananaPro",
             aspectRatio: data.aspectRatio || "1:1",
+            resolution: data.resolution || "1024x1024", // 传递分辨率参数
             promptOptimize: data.promptOptimize || false,
             skipCache, // 传递 skipCache 参数
           }),
@@ -127,6 +142,7 @@ const ImageToImageNode = ({
       localPrompt,
       data.model,
       data.aspectRatio,
+      data.resolution,
       data.promptOptimize,
       inputImage,
       inputImages,
@@ -244,11 +260,12 @@ const ImageToImageNode = ({
               rows={3}
             />
 
+            {/* 第一行：模型和宽高比 */}
             <div className="flex items-center gap-2">
               <select
                 value={data.model || imageModels[0]?.value || ""}
                 onChange={(e) => updateNodeData(id, { model: e.target.value })}
-                className="h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-purple-500/20"
+                className="flex-1 h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-purple-500/20"
               >
                 {imageModels.map((m) => (
                   <option key={m.value} value={m.value}>
@@ -270,6 +287,45 @@ const ImageToImageNode = ({
                   </option>
                 ))}
               </select>
+            </div>
+
+            {/* 第二行：分辨率、提示词优化 */}
+            <div className="flex items-center gap-2">
+              <select
+                value={data.resolution || "1024x1024"}
+                onChange={(e) =>
+                  updateNodeData(id, { resolution: e.target.value })
+                }
+                className="flex-1 h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-purple-500/20"
+              >
+                {resolutions.map((r) => (
+                  <option key={r.value} value={r.value}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
+
+              {/* 暂时注释掉数量配置 - 因为是串行调用，速度较慢 */}
+              {/* <div className="flex items-center gap-1.5">
+                <label className="text-xs text-zinc-400 whitespace-nowrap">
+                  数量
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="4"
+                  value={data.count || 1}
+                  onChange={(e) =>
+                    updateNodeData(id, {
+                      count: Math.min(
+                        4,
+                        Math.max(1, parseInt(e.target.value) || 1),
+                      ),
+                    })
+                  }
+                  className="w-14 h-8 px-2 text-sm text-center rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-purple-500/20"
+                />
+              </div> */}
 
               <button
                 className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-all border ${
@@ -280,19 +336,21 @@ const ImageToImageNode = ({
                 onClick={() =>
                   updateNodeData(id, { promptOptimize: !data.promptOptimize })
                 }
+                title="提示词优化"
               >
                 <Sparkles
                   size={15}
                   fill={data.promptOptimize ? "currentColor" : "none"}
                 />
               </button>
+            </div>
 
-              <div className="flex-1" />
-
+            {/* 第三行：生成按钮 */}
+            <div className="flex items-center gap-2">
               <button
                 onClick={() => handleGenerate(false)}
                 disabled={data.isLoading || !localPrompt || !inputImage}
-                className={`shrink-0 h-8 px-4 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 whitespace-nowrap transition-all active:scale-[0.98] ${
+                className={`flex-1 h-8 px-4 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 whitespace-nowrap transition-all active:scale-[0.98] ${
                   data.isLoading || !localPrompt || !inputImage
                     ? "bg-gray-400 text-white cursor-not-allowed"
                     : "bg-linear-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 text-white shadow-lg shadow-purple-500/25 hover:shadow-purple-500/40"

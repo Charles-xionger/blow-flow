@@ -15,6 +15,7 @@ interface ImageToImageRequest {
   inputImages?: string[]; // 支持多张输入图片
   model?: string;
   aspectRatio?: string;
+  resolution?: string; // 分辨率参数
   promptOptimize?: boolean;
   skipCache?: boolean; // 跳过缓存，强制重新生成
 }
@@ -44,6 +45,7 @@ export async function POST(request: NextRequest) {
       inputImages,
       model = "BananaPro",
       aspectRatio = "1:1",
+      resolution = "1024x1024",
       promptOptimize = false,
       skipCache = false,
     } = body;
@@ -109,6 +111,8 @@ export async function POST(request: NextRequest) {
         modelDef.id,
         finalPrompt,
         imagesToUse,
+        aspectRatio,
+        resolution,
       );
 
       // 下载并上传到 OSS
