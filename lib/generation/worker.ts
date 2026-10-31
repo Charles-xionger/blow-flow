@@ -1,3 +1,4 @@
+import { RunningHubSockets } from './runninghub-sockets';
 import { ArtifactSaveError, artifactTransferTiming } from './storage';
 import { randomUUID } from 'node:crypto';
 import { GenerationService, type TaskRecord, type TaskSnapshot } from './service';
@@ -10,16 +11,36 @@ export interface WorkerIO {
 }
 export class GenerationWorker {
   private now: () => number;
+  private sockets = new RunningHubSockets();
   constructor(private service: GenerationService, private io: WorkerIO) { this.now = io.now || Date.now; }
 
   async tick(): Promise<boolean> {
-    const task = this.claim();
-    if (!task) return false;
-    const snapshot: TaskSnapshot = JSON.parse(task.snapshot);
-    if (task.status === 'submitting') await this.submit(task, snapshot);
-    else if (task.status === 'succeeded') await this.saveArtifacts(task);
-    else await this.query(task, snapshot);
-    return true;
+    try {
+      const task = this.claim();
+      if (!task) return false;
+      const snapshot: TaskSnapshot = JSON.parse(task.snapshot);
+      if (task.status === 'submitting') await this.submit(task, snapshot);
+      else if (task.status === 'succeeded') await this.saveArtifacts(task);
+      else await this.query(task, snapshot);
+      return true;
+    } finally {
+      const running = this.service.db.prepare("SELECT id FROM generation_tasks WHERE status='running' AND deadline > ?")
+        .all(this.now()) as { id: string }[];
+      this.sockets.retain(new Set(running.map(t => t.id)));
+    }
+  }
+
+  close() { this.sockets.close(); }
+
+  private track(task: TaskRecord, snapshot: TaskSnapshot, data: unknown) {
+    const address = data && typeof data === 'object' && 'netWssUrl' in data ? data.netWssUrl : undefined;
+    this.sockets.connect(task.id, address, snapshot.connection.baseUrl, () => {
+      // Notifications only move the next query forward. Claim/update retain lease fencing.
+      try {
+        this.service.db.prepare(`UPDATE generation_tasks SET next_poll=MIN(next_poll, ?)
+          WHERE id=? AND status='running' AND deadline > ?`).run(this.now(), task.id, this.now());
+      } catch { /* A periodic query or a restarted worker will recover. */ }
+    });
   }
 
   private claim(): TaskRecord | undefined {
@@ -85,8 +106,9 @@ export class GenerationWorker {
         return;
       }
       if (!platformId) throw new PlatformError('unknown');
-      this.update(task, { platform_id: platformId, status: data?.taskStatus === 'FAILED' ? 'failed' : 'running',
+      const accepted = this.update(task, { platform_id: platformId, status: data?.taskStatus === 'FAILED' ? 'failed' : 'running',
         error: data?.taskStatus === 'FAILED' ? '平台生成失败' : null, lease_until: 0, next_poll: this.now() });
+      if (accepted && data?.taskStatus !== 'FAILED') this.track(task, snapshot, data);
     } catch {
       this.update(task, { status: 'uncertain', error: '提交结果待核实，请勿重复生成', lease_until: 0 });
     }
@@ -114,8 +136,11 @@ export class GenerationWorker {
     try {
       const result = await platformCall(snapshot, 'outputs', { taskId: task.platform_id }, this.io.fetch,
         r => this.diagnostic(task, snapshot, r));
-      if (result.code === 804 || result.code === 813) {
-        this.update(task, { next_poll: this.now() + snapshot.connection.pollIntervalMs, lease_until: 0, query_errors: 0 });
+      const hasAddress = result.data && typeof result.data === 'object' && 'netWssUrl' in result.data;
+      if (result.code === 804 || result.code === 813 || (result.code === 0 && hasAddress)) {
+        const interval = this.sockets.has(task.id) ? Math.max(30_000, snapshot.connection.pollIntervalMs) : snapshot.connection.pollIntervalMs;
+        if (this.update(task, { next_poll: this.now() + interval, lease_until: 0, query_errors: 0 }))
+          this.track(task, snapshot, result.data);
         return;
       }
       if (result.code === 805) {

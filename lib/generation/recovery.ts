@@ -30,6 +30,7 @@ interface ViewPort {
 }
 const defaultIO = { create: createGeneration, get: getGeneration, resume: resumeGeneration, retrySave: retryGenerationSave };
 export function generationRecovery(nodeId: string, view: ViewPort, storage: Storage, io = defaultIO) {
+  const revisions = new Map<string, number>();
   function current(taskId: string) {
     const node = view.read();
     const association = generationAssociation(nodeId, storage);
@@ -37,6 +38,9 @@ export function generationRecovery(nodeId: string, view: ViewPort, storage: Stor
   }
   function apply(task: GenerationTask) {
     if (!current(task.id)) return;
+    const previous = revisions.get(task.id);
+    if (previous !== undefined && task.revision !== undefined && previous > task.revision) return;
+    if (task.revision !== undefined) revisions.set(task.id, task.revision);
     view.update({ generationStatus: generationLabel(task), generationBlocked: ['uncertain', 'timed_out'].includes(task.status),
       isLoading: generationActive(task), error: task.error || undefined,
       generationCanRetrySave: task.status === 'succeeded' && task.saveStatus === 'failed',
@@ -132,7 +136,7 @@ export function generationRecovery(nodeId: string, view: ViewPort, storage: Stor
     if (saved) persist({ ...saved, detached: true }, storage);
     if (view.read()) view.update({ ...clearedGenerationAssociation });
   }
-  return { start, recover, poll, resume, retrySave, detach };
+  return { start, recover, poll, apply, resume, retrySave, detach };
 }
 
 // Keep a durable cancellation outbox when deletion races creation or the network is offline.

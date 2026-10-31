@@ -17,6 +17,7 @@ async function main() {
     catch { console.error('[generation] worker iteration failed; inspect private task diagnostics'); }
     await delay(1000);
   }
+  worker.close();
   closeDatabase();
 }
 main().catch(() => { console.error('[generation] startup failed'); process.exitCode = 1; });

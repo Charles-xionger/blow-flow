@@ -19,8 +19,8 @@ export async function createGeneration(request: CreateGeneration): Promise<Gener
   if (!response.ok) throw new GenerationRequestError(result.error || '创建任务失败', response.status >= 400 && response.status < 500);
   return result;
 }
-export async function getGeneration(id: string): Promise<GenerationTask> {
-  const response = await fetch(`/api/generation/tasks/${encodeURIComponent(id)}`, { cache: 'no-store' });
+export async function getGeneration(id: string, signal?: AbortSignal): Promise<GenerationTask> {
+  const response = await fetch(`/api/generation/tasks/${encodeURIComponent(id)}`, { cache: 'no-store', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000) });
   if (!response.ok) throw new Error('任务查询暂时不可用');
   return response.json();
 }

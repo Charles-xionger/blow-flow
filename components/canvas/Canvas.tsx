@@ -1,5 +1,6 @@
 "use client";
 
+import { GenerationNotificationsProvider } from "./GenerationNotificationsProvider";
 import { retryGenerationDeletions } from "@/lib/generation/recovery";
 import React, { useCallback, useRef, useEffect, useState, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -429,7 +430,7 @@ export default function Canvas() {
   return (
     <ReactFlowProvider>
       <div className="w-full h-screen">
-        <CanvasInner />
+        <GenerationNotificationsProvider><CanvasInner /></GenerationNotificationsProvider>
       </div>
     </ReactFlowProvider>
   );

@@ -11,7 +11,7 @@ export interface PublicModel {
 }
 export interface GenerationTask extends CreateGeneration {
   id: string; modelVersion: string; status: GenerationStatus; saveStatus: SaveStatus;
-  createdAt: number; updatedAt: number; deadline: number | null; artifacts: string[]; error: string | null;
+  revision: number; createdAt: number; updatedAt: number; deadline: number | null; artifacts: string[]; error: string | null;
 }
 export interface WorkflowNode { inputs: Record<string, unknown>; class_type: string; _meta?: Record<string, unknown> }
 export interface ModelConfig {

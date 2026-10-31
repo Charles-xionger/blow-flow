@@ -11,7 +11,7 @@ export interface TaskRecord {
   id: string; request_id: string; request_json: string; connection_id: string; snapshot: string; input: string;
   status: GenerationTask['status']; save_status: GenerationTask['saveStatus']; platform_id: string | null;
   created_at: number; updated_at: number; deadline: number | null; next_poll: number; lease_until: number;
-  lease_token: string | null; query_errors: number; results: string; artifacts: string; error: string | null;
+  revision: number; lease_token: string | null; query_errors: number; results: string; artifacts: string; error: string | null;
 }
 export interface TaskSnapshot { model: ModelConfig; connection: ConnectionConfig }
 
@@ -33,6 +33,17 @@ export class GenerationService {
       CREATE TABLE IF NOT EXISTS generation_diagnostics (
         id INTEGER PRIMARY KEY, task_id TEXT NOT NULL, created_at INTEGER NOT NULL, response TEXT NOT NULL);
     `);
+    // Serialize migration with the worker: both processes may start together.
+    db.transaction(() => {
+      const columns = db.pragma('table_info(generation_tasks)') as { name: string }[];
+      if (!columns.some(c => c.name === 'revision'))
+        db.exec('ALTER TABLE generation_tasks ADD COLUMN revision INTEGER NOT NULL DEFAULT 0');
+      db.exec(`CREATE TRIGGER IF NOT EXISTS generation_public_revision
+        AFTER UPDATE OF status, save_status, artifacts, error, deadline ON generation_tasks
+        WHEN NEW.status IS NOT OLD.status OR NEW.save_status IS NOT OLD.save_status
+          OR NEW.artifacts IS NOT OLD.artifacts OR NEW.error IS NOT OLD.error OR NEW.deadline IS NOT OLD.deadline
+        BEGIN UPDATE generation_tasks SET revision = OLD.revision + 1 WHERE id = NEW.id; END;`);
+    }).immediate();
   }
   models(): PublicModel[] {
     return this.config.models.map(m => ({ id: m.id, name: m.name, category: m.category,
@@ -77,6 +88,16 @@ export class GenerationService {
     if (!task) throw new GenerationError('任务不存在', 404);
     return this.publicTask(task);
   }
+  getMany(ids: string[]): GenerationTask[] {
+    const tasks: GenerationTask[] = [];
+    for (let offset = 0; offset < ids.length; offset += 500) {
+      const batch = ids.slice(offset, offset + 500);
+      const rows = this.db.prepare(`SELECT * FROM generation_tasks WHERE id IN (${batch.map(() => '?').join(',')})`)
+        .all(...batch) as TaskRecord[];
+      tasks.push(...rows.map(row => this.publicTask(row)));
+    }
+    return tasks;
+  }
   deleteNode(canvasId: string, nodeId: string): void {
     text(canvasId); text(nodeId);
     this.db.transaction(() => {
@@ -118,7 +139,7 @@ export class GenerationService {
     const request: CreateGeneration = JSON.parse(task.request_json);
     const snapshot: TaskSnapshot = JSON.parse(task.snapshot);
     return { ...request, id: task.id, modelVersion: snapshot.model.version, status: task.status,
-      saveStatus: task.save_status, createdAt: task.created_at, updatedAt: task.updated_at,
+      saveStatus: task.save_status, revision: task.revision, createdAt: task.created_at, updatedAt: task.updated_at,
       deadline: task.deadline, artifacts: JSON.parse(task.artifacts), error: task.error };
   }
 }

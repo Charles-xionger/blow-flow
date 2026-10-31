@@ -1,12 +1,13 @@
 'use client';
-import { useEffect, useMemo, useState, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useCanvasStore, canvasDraftStorage } from '@/store/useCanvasStore';
 import type { NodeData } from '@/types';
+import { useGenerationNotifications } from '@/components/canvas/GenerationNotificationsProvider';
 import { generationRecovery } from '@/lib/generation/recovery';
 
 export function useGenerationTask(id: string, data: NodeData) {
   const canvasId = useCanvasStore(s => s.currentWorkflowId);
-  const [pollVersion, setPollVersion] = useState(0);
+  const notifications = useGenerationNotifications();
   const activeSession = useRef<symbol | undefined>(undefined);
   const session = useMemo(() => {
     const token = Symbol();
@@ -33,15 +34,8 @@ export function useGenerationTask(id: string, data: NodeData) {
   }, [session, recovery, id]);
   useEffect(() => {
     if (!data.generationTaskId) return;
-    let stopped = false;
-    let timer: ReturnType<typeof setTimeout>;
-    async function poll() {
-      const active = await recovery.poll(data.generationTaskId!);
-      if (!stopped && active) timer = setTimeout(poll, 2000);
-    }
-    void poll();
-    return () => { stopped = true; clearTimeout(timer); };
-  }, [data.generationTaskId, recovery, pollVersion]);
+    return notifications.subscribe(data.generationTaskId, recovery.apply);
+  }, [data.generationTaskId, notifications, recovery]);
   return {
     detach: recovery.detach,
     start: async (request: Parameters<typeof recovery.start>[0]) => {
@@ -49,7 +43,7 @@ export function useGenerationTask(id: string, data: NodeData) {
       canvasDraftStorage.flush();
       await result;
     },
-    retrySave: async () => { await recovery.retrySave(); setPollVersion(v => v + 1); },
-    resume: async () => { await recovery.resume(); setPollVersion(v => v + 1); },
+    retrySave: async () => { await recovery.retrySave(); if (data.generationTaskId) notifications.refresh(data.generationTaskId); },
+    resume: async () => { await recovery.resume(); if (data.generationTaskId) notifications.refresh(data.generationTaskId); },
   };
 }
