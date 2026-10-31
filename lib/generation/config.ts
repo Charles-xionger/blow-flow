@@ -1,3 +1,4 @@
+import { validGenerationDimensions } from './dimensions';
 import fs from 'node:fs';
 import workflow from '../../config/workflows/krea2.json';
 import type { GenerationConfig } from './types';
@@ -52,7 +53,7 @@ export function validateGenerationConfig(config: GenerationConfig): void {
     const d = m.capabilities.dimensions;
     keys(d, ['min', 'max', 'step', 'defaultWidth', 'defaultHeight']);
     if (![d.min, d.max, d.step, d.defaultWidth, d.defaultHeight].every(Number.isSafeInteger) || d.min < 64 || d.max > 8192 || d.max < d.min || d.step < 8 || d.step % 8 ||
-      [d.defaultWidth, d.defaultHeight].some(n => n < d.min || n > d.max || n % d.step)) throw new Error('Invalid model dimensions');
+      !validGenerationDimensions(d, d.defaultWidth, d.defaultHeight)) throw new Error('Invalid model dimensions');
     keys(m.mapping, ['prompt', 'width', 'height', 'seed', 'customResolution']);
     for (const key of ['prompt', 'width', 'height', 'seed', 'customResolution'] as const) {
       const mapping = m.mapping[key];

@@ -267,3 +267,31 @@ test('unconfigured models remain visible and reject creation; unsafe admin confi
   bad.connections[0].apiKey = 'inline-secret';
   assert.throws(() => new GenerationService(db, bad), /configuration/);
 });
+
+test('ambiguous JSON submission errors retain occupancy while a definitive rejection releases it', async (t) => {
+  const { GenerationWorker } = require('../lib/generation/worker.ts');
+  for (const code of [500, 9999, 416]) {
+    const { service } = setup(t);
+    let submits = 0;
+    const worker = new GenerationWorker(service, { fetch: async () => { submits++; return Response.json({ code }); }, save: async () => assert.fail() });
+    const a = service.create(request()); const b = service.create(request('next'));
+    await worker.tick(); await worker.tick();
+    assert.equal(service.get(a.id).status, code === 416 ? 'failed' : 'uncertain');
+    assert.equal(service.get(b.id).status, code === 416 ? 'failed' : 'queued');
+    assert.equal(submits, code === 416 ? 2 : 1);
+  }
+});
+
+test('transient JSON platform errors use the bounded query retry policy', async (t) => {
+  const { service, config } = setup(t);
+  const { GenerationWorker } = require('../lib/generation/worker.ts');
+  let now = Date.now(); let queries = 0;
+  const worker = new GenerationWorker(service, { now: () => now, fetch: async url => {
+    if (url.endsWith('/create')) return Response.json({ code: 0, data: { taskId: '100' } });
+    queries++; return Response.json({ code: 500, msg: 'UNKNOWN_ERROR' });
+  }, save: async () => assert.fail() });
+  const a = service.create(request()); await worker.tick(); await worker.tick();
+  assert.equal(service.get(a.id).status, 'running');
+  for (let i = 0; i < 4; i++) { now += config.connections[0].pollIntervalMs; await worker.tick(); }
+  assert.equal(queries, 3); assert.equal(service.get(a.id).status, 'uncertain');
+});

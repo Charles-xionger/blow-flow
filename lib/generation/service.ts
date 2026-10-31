@@ -1,3 +1,4 @@
+import { validGenerationDimensions } from './dimensions';
 import { validateGenerationConfig } from './config';
 import type Database from 'better-sqlite3';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -54,10 +55,8 @@ export class GenerationService {
       if (!connection || !this.configured(connection)) throw new GenerationError('平台连接未配置', 503);
       if (model.adapter !== 'runninghub-workflow') throw new GenerationError('不支持的适配器');
       const d = model.capabilities.dimensions;
-      for (const dimension of [request.input.width, request.input.height]) {
-        if (!Number.isInteger(dimension) || dimension < d.min || dimension > d.max || dimension % d.step !== 0)
-          throw new GenerationError(`尺寸必须为 ${d.min}–${d.max} 范围内 ${d.step} 的倍数`);
-      }
+      if (!validGenerationDimensions(d, request.input.width, request.input.height))
+        throw new GenerationError(`尺寸必须为 ${d.min}–${d.max} 范围内 ${d.step} 的倍数`);
       const id = randomUUID();
       const now = Date.now();
       // 48 random bits are exactly representable both by JSON and ComfyUI.

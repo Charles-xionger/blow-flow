@@ -7,6 +7,10 @@ export class PlatformError extends Error {
 export type PlatformReply = { code: number; data?: unknown; msg?: string };
 export type PlatformFetch = typeof fetch;
 
+// Only documented pre-execution rejections establish that no task was accepted.
+export const submissionRejections = new Set([301, 380, 412, 415, 416, 421, 433, 435, 436, 801, 802, 803, 806, 810, 811, 812]);
+export const transientPlatformErrors = new Set([500, 1000, 1003, 1005, 1010, 1011, 1012]);
+
 // JSON.parse's reviver runs after numeric precision has already been lost. Tokenize
 // JSON strings/numbers first, quoting only integer tokens outside the safe range.
 export function parsePlatformJson(raw: string): PlatformReply {

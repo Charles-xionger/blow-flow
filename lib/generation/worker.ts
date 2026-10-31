@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { GenerationService, type TaskRecord, type TaskSnapshot } from './service';
-import { platformCall, PlatformError, redact, submission, type PlatformFetch } from './runninghub';
+import { platformCall, submissionRejections, transientPlatformErrors, PlatformError, redact, submission, type PlatformFetch } from './runninghub';
 
 export interface WorkerIO {
   fetch: PlatformFetch;
@@ -75,14 +75,16 @@ export class GenerationWorker {
       const result = await platformCall(snapshot, 'create', submission(snapshot, JSON.parse(task.input)), this.io.fetch,
         r => this.diagnostic(task, snapshot, r));
       const data = result.data as { taskId?: unknown; taskStatus?: string } | undefined;
-      if (result.code !== 0) {
+      const platformId = data && ['string', 'number'].includes(typeof data.taskId) && /^\d+$/.test(String(data.taskId))
+        ? String(data.taskId) : null;
+      if (result.code !== 0 && !platformId) {
+        if (!submissionRejections.has(result.code)) throw new PlatformError('unknown');
         this.update(task, { status: 'failed', error: '平台明确拒绝提交', lease_until: 0 });
         return;
       }
-      if (!data || !['string', 'number'].includes(typeof data.taskId) || !/^\d+$/.test(String(data.taskId)))
-        throw new PlatformError('unknown');
-      this.update(task, { platform_id: String(data.taskId), status: data.taskStatus === 'FAILED' ? 'failed' : 'running',
-        error: data.taskStatus === 'FAILED' ? '平台生成失败' : null, lease_until: 0, next_poll: this.now() });
+      if (!platformId) throw new PlatformError('unknown');
+      this.update(task, { platform_id: platformId, status: data?.taskStatus === 'FAILED' ? 'failed' : 'running',
+        error: data?.taskStatus === 'FAILED' ? '平台生成失败' : null, lease_until: 0, next_poll: this.now() });
     } catch {
       this.update(task, { status: 'uncertain', error: '提交结果待核实，请勿重复生成', lease_until: 0 });
     }
@@ -99,7 +101,7 @@ export class GenerationWorker {
         this.update(task, { status: 'failed', error: '平台生成失败', lease_until: 0 });
         return;
       }
-      if (result.code !== 0) throw new PlatformError('business');
+      if (result.code !== 0) throw new PlatformError(transientPlatformErrors.has(result.code) ? 'transient' : 'business');
       if (!Array.isArray(result.data) || !result.data.length) throw new PlatformError('unknown');
       const files = result.data.filter((f: { nodeId?: string }) => String(f.nodeId) === snapshot.model.outputNode);
       const urls: string[] = files.map((f: { fileUrl?: unknown }) => {

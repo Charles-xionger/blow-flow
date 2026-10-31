@@ -12,6 +12,7 @@ import { getImageModels } from "@/lib/model-registry";
 import { Textarea } from "@/components/ui/textarea";
 import { ImageWithActions } from "@/components/ui/image-with-actions";
 
+import { validGenerationDimensions } from "@/lib/generation/dimensions";
 import { generationModels } from "@/lib/generation/client";
 import type { PublicModel } from "@/lib/generation/types";
 import { useGenerationTask } from "@/hooks/useGenerationTask";
@@ -183,7 +184,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
       if (!taskModel && !data.pendingGeneration) return;
       if (taskModel && !data.pendingGeneration) {
         const dims = taskModel.capabilities.dimensions;
-        if ([data.generationWidth ?? dims.defaultWidth, data.generationHeight ?? dims.defaultHeight].some(n => !Number.isInteger(n) || n < dims.min || n > dims.max || n % dims.step)) {
+        if (!validGenerationDimensions(dims, data.generationWidth ?? dims.defaultWidth, data.generationHeight ?? dims.defaultHeight)) {
           updateNodeData(id, { error: `尺寸须为 ${dims.min}–${dims.max} 范围内 ${dims.step} 的倍数` });
           return;
         }

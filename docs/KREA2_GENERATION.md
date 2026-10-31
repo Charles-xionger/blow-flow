@@ -70,7 +70,7 @@ node -r ./scripts/register-typescript.cjs -e 'console.log(JSON.stringify(require
 
 - [国际站高级工作流提交](https://www.runninghub.ai/runninghub-api-doc-en/api-425761093.md)：`POST /task/openapi/create`，body 含 apiKey、workflowId、workflow JSON 字符串及 nodeInfoList；Authorization 使用 Bearer。同文档正文要求 fieldValue 保持类型，而附带 schema 声明为 string；本实现按正文保留数字/布尔，并提交完整导出图以固定执行配置，真实联调需确认账号服务行为。
 - [国际站工作流结果查询](https://www.runninghub.ai/runninghub-api-doc-en/api-425761034.md)：`POST /task/openapi/outputs`，taskId 以字符串发送；code 0 的 data 为输出列表，读取节点 103 的 fileUrl。
-- [错误码](https://www.runninghub.ai/runninghub-api-doc-en/doc-8287467.md)：804 运行中、813 排队中、805 任务失败。其他查询业务错误不无限重试。数值形式 int64 taskId 在 JSON 数字解析前转成字符串，避免精度损失。
+- [错误码](https://www.runninghub.ai/runninghub-api-doc-en/doc-8287467.md)：804 运行中、813 排队中、805 任务失败。500 等暂时性平台错误走有限重试，其他查询业务错误不无限重试。提交阶段仅明确的前置拒绝释放占位，500 或未知返回码保留占位。数值形式 int64 taskId 在 JSON 数字解析前转成字符串，避免精度损失。
 - [TTResolutionSelector 固定版本 b69cf75](https://github.com/AICoderTudou/ComfyUI-TT-Resolution_selector-Node/blob/b69cf75c2ce5f864e3db5301dba46a6b5eeaa8fb/nodes/resolution_selector.py)：自定义整数范围 64–8192，步长 1，直接返回宽高。
 - [ComfyUI v0.25.0 EmptyLatentImage](https://github.com/comfyanonymous/ComfyUI/blob/v0.25.0/nodes.py)：按 `height // 8`、`width // 8` 分配 latent。本模型仅允许 8 的倍数，防止隐式截断；范围可由管理员缩小，不自动裁剪。
 
