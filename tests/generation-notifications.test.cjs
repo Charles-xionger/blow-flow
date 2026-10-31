@@ -130,3 +130,65 @@ test('a consumer can cancel an SSE body without leaking or rejecting cleanup', a
   await read(reader);
   await assert.doesNotReject(reader.cancel());
 });
+
+test('canvas displays original-task resume and save retry through HTTP and shared SSE together', async t => {
+  t.mock.timers.enable({ apis: ['setInterval', 'Date'] });
+  const { service, config } = setup(t);
+  config.connections[0].queryTimeoutMs = 1000;
+  const { generationHttp } = require('../lib/generation/http.ts');
+  const { GenerationNotifications } = require('../lib/generation/notifications.ts');
+  const { generationRecovery } = require('../lib/generation/recovery.ts');
+  const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
+  const task = service.create(request('resume-and-save'));
+  let view = { generationTaskId: task.id }, submits = 0, saves = 0;
+  const call = async (method, resource, id) => {
+    const response = await generationHttp(new Request('http://local/tasks/' + id, { method }), service, resource, id);
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+  const recovery = generationRecovery(task.nodeId, { read: () => view, update: patch => { view = { ...view, ...patch }; } },
+    { getItem: () => null }, {
+      get: id => call('GET', 'tasks', id), resume: id => call('POST', 'tasks', id), retrySave: id => call('POST', 'save', id),
+    });
+  const notifications = new GenerationNotifications({
+    get: id => call('GET', 'tasks', id),
+    stream: async (ids, signal, message) => {
+      const response = await subscribe(service, ids, signal);
+      const reader = response.body.getReader();
+      while (!signal.aborted) {
+        const chunk = await reader.read();
+        if (chunk.done) return;
+        const text = new TextDecoder().decode(chunk.value);
+        message(text.match(/event: (.*)/)[1], JSON.parse(text.match(/data: (.*)/)[1]));
+      }
+    },
+  });
+  t.after(() => notifications.close());
+  const worker = new GenerationWorker(service, {
+    fetch: async url => {
+      if (url.endsWith('/create')) { submits++; return Response.json({ code: 0, data: { taskId: '123' } }); }
+      return Response.json({ code: 0, data: [{ nodeId: '103', fileUrl: 'https://platform.test/image.png' }] });
+    },
+    save: async () => { if (++saves === 1) throw new Error('OSS unavailable'); return 'https://oss.test/recovered.png'; },
+  });
+  await worker.tick();
+  notifications.subscribe(task.id, recovery.apply); await flush();
+  assert.equal(view.generationStatus, '平台处理中');
+  t.mock.timers.tick(1000); await worker.tick();
+  t.mock.timers.tick(500); await flush();
+  assert.equal(view.generationStatus, '等待超时');
+  assert.equal(view.generationBlocked, true);
+  await recovery.resume(); notifications.refresh(task.id); await flush();
+  assert.equal(view.generationBlocked, false);
+  assert.equal(view.isLoading, true);
+  await worker.tick(); t.mock.timers.tick(500); await flush();
+  assert.equal(view.generationCanRetrySave, true);
+  await recovery.retrySave(); notifications.refresh(task.id); await flush();
+  assert.equal(view.generationSaving, true);
+  await worker.tick(); t.mock.timers.tick(500); await flush();
+  assert.equal(view.imageSrc, 'https://oss.test/recovered.png');
+  assert.equal(view.isLoading, false);
+  assert.equal(view.generationStatus, '已保存');
+  assert.equal(submits, 1);
+  notifications.close();
+});
