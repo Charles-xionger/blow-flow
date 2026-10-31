@@ -43,3 +43,8 @@ next-env.d.ts
 # SQLite runtime files
 /data/canvas.db-wal
 /data/canvas.db-shm
+
+.agents
+
+.claude
+
