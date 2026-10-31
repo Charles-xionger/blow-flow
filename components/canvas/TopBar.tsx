@@ -26,8 +26,7 @@ export const TopBar = memo(function TopBar() {
   const toggleTheme = useCanvasStore((state) => state.toggleTheme);
   const nodeCount = useCanvasStore((state) => state.nodes.length);
   const clearCanvas = useCanvasStore((state) => state.clearCanvas);
-  const setNodes = useCanvasStore((state) => state.setNodes);
-  const setEdges = useCanvasStore((state) => state.setEdges);
+  const importGraph = useCanvasStore((state) => state.importGraph);
   const currentWorkflowId = useCanvasStore((state) => state.currentWorkflowId);
   const setCurrentWorkflowId = useCanvasStore((state) => state.setCurrentWorkflowId);
 
@@ -151,8 +150,7 @@ export const TopBar = memo(function TopBar() {
 
         // 导入工作流到 store
         if (data.nodes && data.edges) {
-          setNodes(data.nodes);
-          setEdges(data.edges);
+          importGraph(data.nodes, data.edges);
           if (data.projectName) {
             setProjectName(data.projectName);
           }

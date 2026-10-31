@@ -1,3 +1,4 @@
+require('../scripts/register-typescript.cjs');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -115,5 +116,58 @@ test('store refuses invalid connections even without canvas preview validation',
   const before = store.getState().edges;
   store.getState().onConnect({ source: id, target: id, sourceHandle: 'output', targetHandle: 'input' });
   assert.equal(store.getState().edges, before);
+  canvasDraftStorage.flush();
+});
+
+test('switching canvases does not cancel; explicit deletion persists cancellation and duplicating does not copy task identity', async () => {
+  const { useCanvasStore: store, canvasDraftStorage } = load('store/useCanvasStore.ts');
+  const { NodeType } = load('types/index.ts');
+  const values = new Map(); const calls = [];
+  const previousStorage = global.localStorage; const previousFetch = global.fetch;
+  global.localStorage = { getItem: k => values.get(k) || null, setItem: (k,v) => values.set(k,v), removeItem: k => values.delete(k) };
+  global.fetch = async (url, options) => { calls.push({ url, options }); return Response.json({ deleted: true }); };
+  try {
+    store.getState().setCurrentWorkflowId('one');
+    const id = store.getState().addNode(NodeType.TEXT_TO_IMAGE);
+    const pending = { requestId: 'lost', canvasId: 'one', nodeId: id, modelId: 'runninghub-krea2',
+      input: { prompt: 'garden', width: 1920, height: 1080 } };
+    store.getState().updateNodeData(id, { pendingGeneration: pending, isLoading: true });
+    const original = store.getState().nodes.find(n => n.id === id);
+    store.getState().duplicateNode(id);
+    const copy = store.getState().nodes.at(-1);
+    assert.equal(copy.data.pendingGeneration, undefined);
+    assert.equal(copy.data.isLoading, false);
+    store.getState().loadWorkflow({ id: 'two', name: 'Other', nodes: [], edges: [] });
+    assert.equal(calls.length, 0);
+    store.getState().loadWorkflow({ id: 'one', name: 'Original', nodes: [original], edges: [] });
+    store.getState().deleteNode(id);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].options.method, 'DELETE');
+    assert.deepEqual(JSON.parse(calls[0].options.body), { canvasId: 'one', nodeId: id });
+    assert.equal(store.getState().nodes.length, 0);
+    assert.equal(JSON.parse(values.get('generation-node-v1:' + id)).deleted, true);
+    canvasDraftStorage.flush();
+  } finally { global.fetch = previousFetch; global.localStorage = previousStorage; }
+});
+
+test('imported canvas copies have independent task identities while preserving connections and groups', () => {
+  const { useCanvasStore: store, canvasDraftStorage } = load('store/useCanvasStore.ts');
+  const { NodeType } = load('types/index.ts');
+  store.getState().importGraph([
+    { id: 'group', type: NodeType.GROUP, position: { x: 0, y: 0 }, data: { type: NodeType.GROUP } },
+    { id: 'source', type: NodeType.TEXT, position: { x: 1, y: 1 }, parentId: 'group', data: { type: NodeType.TEXT } },
+    { id: 'image', type: NodeType.TEXT_TO_IMAGE, position: { x: 2, y: 2 }, data: {
+      type: NodeType.TEXT_TO_IMAGE, generationTaskId: 'old-task', isLoading: true, imageSrc: 'saved.png',
+    } },
+  ], [{ id: 'edge', source: 'source', target: 'image' }]);
+  const { nodes, edges } = store.getState();
+  assert.ok(nodes.every(n => !['group', 'source', 'image'].includes(n.id)));
+  assert.equal(nodes[1].parentId, nodes[0].id);
+  assert.equal(nodes[2].data.generationTaskId, undefined);
+  assert.equal(nodes[2].data.isLoading, false);
+  assert.equal(nodes[2].data.imageSrc, 'saved.png');
+  assert.equal(edges[0].source, nodes[1].id);
+  assert.equal(edges[0].target, nodes[2].id);
   canvasDraftStorage.flush();
 });

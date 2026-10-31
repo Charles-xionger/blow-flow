@@ -1,3 +1,4 @@
+import { deleteNodeGeneration, generationAssociation } from "@/lib/generation/recovery";
 import { isValidCanvasConnection } from "@/lib/canvas/connections";
 import { createDraftStorage } from "@/lib/canvas/draft-storage";
 import { toast } from "sonner";
@@ -39,6 +40,7 @@ interface CanvasState {
 
   // Actions
   setNodes: (nodes: CanvasNode[]) => void;
+  importGraph: (nodes: CanvasNode[], edges: Edge[]) => void;
   setEdges: (edges: Edge[]) => void;
   setViewport: (viewport: { x: number; y: number; zoom: number }) => void;
   onNodesChange: OnNodesChange;
@@ -86,6 +88,20 @@ interface CanvasState {
   clearWorkflow: () => void;
   clearCanvas: () => void; // 别名，与原项目保持一致
   exportWorkflow: () => WorkflowData;
+}
+
+function withoutTaskAssociation(data: NodeData): NodeData {
+  return { ...data, pendingGeneration: undefined, generationTaskId: undefined,
+    generationStatus: undefined, generationBlocked: false, isLoading: false, error: undefined };
+}
+
+function cancelDeletedNodes(nodes: CanvasNode[], canvasId: string | null) {
+  for (const node of nodes) {
+    if (!node.data.generationTaskId && !node.data.pendingGeneration &&
+      (typeof localStorage === "undefined" || !generationAssociation(node.id))) continue;
+    try { deleteNodeGeneration(node.id, canvasId || "draft", node.data); }
+    catch { toast.error("无法保存取消请求，请恢复本地存储后重试删除"); throw new Error("无法保存取消请求"); }
+  }
 }
 
 function createCanvasNode(type: NodeType, position: { x: number; y: number }, data: Partial<NodeData> = {}): CanvasNode {
@@ -233,10 +249,22 @@ export const useCanvasStore = create<CanvasState>()(
 
         // 节点和边的变化处理
         setNodes: (nodes) => set({ nodes }),
+        importGraph: (nodes, edges) => {
+          const ids = new Map(nodes.map(node => [node.id, nanoid()]));
+          set({
+            nodes: nodes.map(node => ({ ...node, id: ids.get(node.id)!,
+              parentId: node.parentId ? ids.get(node.parentId) : undefined,
+              data: withoutTaskAssociation(node.data) })),
+            edges: edges.filter(edge => ids.has(edge.source) && ids.has(edge.target))
+              .map(edge => ({ ...edge, id: nanoid(), source: ids.get(edge.source)!, target: ids.get(edge.target)! })),
+            selectedNodeIds: [],
+          });
+        },
         setEdges: (edges) => set({ edges }),
         setViewport: (viewport) => set({ viewport }),
 
         onNodesChange: (changes: NodeChange[]) => {
+          cancelDeletedNodes(get().nodes.filter(node => changes.some(change => change.type === "remove" && change.id === node.id)), get().currentWorkflowId);
           const updatedNodes = applyNodeChanges(
             changes,
             get().nodes,
@@ -307,6 +335,7 @@ export const useCanvasStore = create<CanvasState>()(
 
         // 删除节点
         deleteNode: (nodeId: string) => {
+          cancelDeletedNodes(get().nodes.filter(node => node.id === nodeId), get().currentWorkflowId);
           set({
             nodes: get().nodes.filter((node) => node.id !== nodeId),
             edges: get().edges.filter(
@@ -339,13 +368,11 @@ export const useCanvasStore = create<CanvasState>()(
               y: node.position.y + 50,
             },
             data: {
-              ...node.data,
+              ...withoutTaskAssociation(node.data),
               // 清除输出数据
               imageSrc: undefined,
               videoSrc: undefined,
               outputArtifacts: undefined,
-              isLoading: false,
-              error: undefined,
             },
           };
 
@@ -361,6 +388,7 @@ export const useCanvasStore = create<CanvasState>()(
         deleteSelectedNodes: () => {
           const selectedIds = get().selectedNodeIds;
           if (selectedIds.length === 0) return;
+          cancelDeletedNodes(get().nodes.filter(node => selectedIds.includes(node.id)), get().currentWorkflowId);
 
           set({
             nodes: get().nodes.filter((node) => !selectedIds.includes(node.id)),

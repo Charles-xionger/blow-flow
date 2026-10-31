@@ -4,3 +4,5 @@ export const runtime = 'nodejs';
 export function POST(request: Request) {
   return generationHttp(request, getGenerationService(), 'tasks');
 }
+
+export const DELETE = POST;

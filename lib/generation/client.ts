@@ -25,7 +25,7 @@ export async function getGeneration(id: string): Promise<GenerationTask> {
   return response.json();
 }
 export const generationLabels: Record<GenerationTask['status'], string> = {
-  queued: '本地排队', submitting: '提交中', running: '平台处理中', uncertain: '待核实',
+  cancelled: '已取消', queued: '本地排队', submitting: '提交中', running: '平台处理中', uncertain: '待核实',
   timed_out: '等待超时', succeeded: '生成成功', failed: '生成失败',
 };
 export function generationLabel(task: GenerationTask): string {
@@ -34,4 +34,16 @@ export function generationLabel(task: GenerationTask): string {
 }
 export function generationActive(task: GenerationTask): boolean {
   return ['queued', 'submitting', 'running'].includes(task.status) || (task.status === 'succeeded' && ['pending', 'saving'].includes(task.saveStatus));
+}
+
+export async function resumeGeneration(id: string): Promise<GenerationTask> {
+  const response = await fetch(`/api/generation/tasks/${encodeURIComponent(id)}`, { method: 'POST' });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || '继续查询失败');
+  return result;
+}
+export async function deleteGenerationNode(canvasId: string, nodeId: string): Promise<void> {
+  const response = await fetch('/api/generation/tasks', { method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ canvasId, nodeId }) });
+  if (!response.ok) throw new Error('取消排队任务失败');
 }

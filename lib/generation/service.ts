@@ -28,6 +28,8 @@ export class GenerationService {
       query_errors INTEGER NOT NULL DEFAULT 0, results TEXT NOT NULL DEFAULT '[]',
       artifacts TEXT NOT NULL DEFAULT '[]', error TEXT);
       CREATE INDEX IF NOT EXISTS generation_queue ON generation_tasks(connection_id, status, created_at);
+      CREATE TABLE IF NOT EXISTS generation_deleted_nodes (
+        canvas_id TEXT NOT NULL, node_id TEXT NOT NULL, PRIMARY KEY(canvas_id, node_id));
       CREATE TABLE IF NOT EXISTS generation_diagnostics (
         id INTEGER PRIMARY KEY, task_id TEXT NOT NULL, created_at INTEGER NOT NULL, response TEXT NOT NULL);
     `);
@@ -49,6 +51,8 @@ export class GenerationService {
         if (existing.request_json !== requestJson) throw new GenerationError('请求标识已用于不同输入', 409);
         return this.publicTask(existing);
       }
+      if (this.db.prepare('SELECT 1 FROM generation_deleted_nodes WHERE canvas_id=? AND node_id=?').get(request.canvasId, request.nodeId))
+        throw new GenerationError('节点已删除', 409);
       const model = this.config.models.find(m => m.id === request.modelId);
       if (!model) throw new GenerationError('未知模型');
       const connection = this.config.connections.find(c => c.id === model.connectionId);
@@ -72,6 +76,29 @@ export class GenerationService {
     const task = this.db.prepare('SELECT * FROM generation_tasks WHERE id = ?').get(id) as TaskRecord | undefined;
     if (!task) throw new GenerationError('任务不存在', 404);
     return this.publicTask(task);
+  }
+  deleteNode(canvasId: string, nodeId: string): void {
+    text(canvasId); text(nodeId);
+    this.db.transaction(() => {
+      this.db.prepare('INSERT OR IGNORE INTO generation_deleted_nodes VALUES (?,?)').run(canvasId, nodeId);
+      this.db.prepare(`UPDATE generation_tasks SET status='cancelled', updated_at=?
+        WHERE status='queued' AND json_extract(request_json, '$.canvasId')=?
+        AND json_extract(request_json, '$.nodeId')=?`).run(Date.now(), canvasId, nodeId);
+    }).immediate();
+  }
+  resume(id: string, now = Date.now()): GenerationTask {
+    return this.db.transaction(() => {
+      const task = this.db.prepare('SELECT * FROM generation_tasks WHERE id=?').get(id) as TaskRecord | undefined;
+      if (!task) throw new GenerationError('任务不存在', 404);
+      if (['timed_out', 'uncertain'].includes(task.status)) {
+        if (!task.platform_id) throw new GenerationError('提交结果待核实，尚无可查询的平台任务 ID', 409);
+        const snapshot: TaskSnapshot = JSON.parse(task.snapshot);
+        this.db.prepare(`UPDATE generation_tasks SET status='running', deadline=?, next_poll=?,
+          query_errors=0, error=NULL, updated_at=?, lease_token=NULL, lease_until=0 WHERE id=?`)
+          .run(now + snapshot.connection.queryTimeoutMs, now, now, id);
+      }
+      return this.get(id);
+    }).immediate();
   }
   private publicTask(task: TaskRecord): GenerationTask {
     const request: CreateGeneration = JSON.parse(task.request_json);

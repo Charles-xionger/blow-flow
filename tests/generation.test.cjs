@@ -295,3 +295,158 @@ test('transient JSON platform errors use the bounded query retry policy', async 
   for (let i = 0; i < 4; i++) { now += config.connections[0].pollIntervalMs; await worker.tick(); }
   assert.equal(queries, 3); assert.equal(service.get(a.id).status, 'uncertain');
 });
+
+test('continue querying renews the deadline on the original task and releases occupancy only at a definite outcome', async t => {
+  const { service, config } = setup(t);
+  const { GenerationWorker } = require('../lib/generation/worker.ts');
+  let now = Date.now(); let submits = 0; let finished = false;
+  const worker = new GenerationWorker(service, { now: () => now, fetch: async url => {
+    if (url.endsWith('/create')) { submits++; return Response.json({ code: 0, data: { taskId: '123' } }); }
+    return Response.json({ code: finished ? 805 : 804 });
+  }, save: async () => assert.fail() });
+  const a = service.create(request()); const b = service.create(request('second'));
+  await worker.tick(); now += config.connections[0].queryTimeoutMs + 1;
+  await worker.tick(); assert.equal(service.get(a.id).status, 'timed_out');
+  const resumed = service.resume(a.id, now);
+  assert.equal(resumed.deadline, now + config.connections[0].queryTimeoutMs);
+  assert.equal(resumed.id, a.id);
+  await worker.tick(); assert.equal(submits, 1);
+  finished = true; now += config.connections[0].pollIntervalMs;
+  await worker.tick(); await worker.tick();
+  assert.equal(service.get(a.id).status, 'failed');
+  assert.equal(service.get(b.id).status, 'running'); assert.equal(submits, 2);
+});
+
+test('deletion cancels queued generations atomically, prevents late creation, and preserves already claimed tasks', async t => {
+  const { service } = setup(t);
+  const { GenerationWorker } = require('../lib/generation/worker.ts');
+  let release; let submits = 0;
+  const worker = new GenerationWorker(service, { fetch: async url => {
+    if (url.endsWith('/create')) { submits++; return new Promise(resolve => release = resolve); }
+    return Response.json({ code: 805 });
+  }, save: async () => assert.fail() });
+  const a = service.create(request()); const b = service.create(request('queued'));
+  const flight = worker.tick();
+  service.deleteNode('canvas-1', 'node-1');
+  assert.equal(service.get(a.id).status, 'submitting');
+  assert.equal(service.get(b.id).status, 'cancelled');
+  assert.throws(() => service.create(request('late')), /删除/);
+  release(Response.json({ code: 0, data: { taskId: '123' } })); await flight;
+  await worker.tick(); assert.equal(service.get(a.id).status, 'failed');
+  assert.equal(submits, 1);
+});
+
+test('killed executors recover queued, ambiguous submission, identified and saving tasks from the reopened database', async t => {
+  const { fork } = require('node:child_process');
+  const { once } = require('node:events');
+  const { GenerationWorker } = require('../lib/generation/worker.ts');
+  for (const phase of ['queued', 'submitting', 'running', 'saving']) {
+    const dir = mkdtempSync(path.join(tmpdir(), 'recovery-'));
+    const filename = path.join(dir, 'tasks.db');
+    const config = structuredClone(defaultConfig);
+    config.connections[0].baseUrl = 'https://platform.test';
+    process.env.RUNNINGHUB_API_KEY = 'secret-test-key';
+    let db = new Database(filename);
+    const task = new GenerationService(db, config).create(request());
+    db.close();
+    const now = Date.now();
+    const child = fork(path.join(__dirname, 'helpers/recovery-worker.cjs'), [], { stdio: ['ignore', 'ignore', 'inherit', 'ipc'] });
+    const message = once(child, 'message');
+    child.send({ filename, config, phase, now });
+    await message;
+    const exited = once(child, 'exit'); child.kill('SIGKILL'); await exited;
+    db = new Database(filename);
+    const service = new GenerationService(db, config);
+    let submits = 0; let queries = 0;
+    const worker = new GenerationWorker(service, {
+      now: () => now + 130_000,
+      fetch: async (url, init) => {
+        if (url.endsWith('/create')) { submits++; return Response.json({ code: 0, data: { taskId: '987654321' } }); }
+        queries++; assert.equal(JSON.parse(init.body).taskId, '987654321');
+        return Response.json({ code: 805 });
+      }, save: async () => assert.fail(),
+    });
+    await worker.tick();
+    assert.equal(service.get(task.id).status, { queued: 'running', submitting: 'uncertain', running: 'failed', saving: 'succeeded' }[phase]);
+    assert.equal(submits, phase === 'queued' ? 1 : 0);
+    assert.equal(queries, phase === 'running' ? 1 : 0);
+    if (phase === 'saving') assert.equal(service.get(task.id).saveStatus, 'failed');
+    db.close(); rmSync(dir, { recursive: true });
+  }
+});
+
+test('canvas recovery reuses a persisted request after a lost response, and old results cannot overwrite a newer generation or deleted node', async () => {
+  const { generationRecovery } = require('../lib/generation/recovery.ts');
+  const values = new Map();
+  const storage = { getItem: k => values.get(k) || null, setItem: (k,v) => values.set(k,v), removeItem: k => values.delete(k) };
+  let node = {}; let resolveOld; let calls = [];
+  const task = (r, id) => ({ ...r, id, status: 'succeeded', saveStatus: 'saved', artifacts: [id + '.png'], error: null });
+  const port = { read: () => node, update: v => Object.assign(node, v) };
+  const io = { create: async r => { calls.push(r); throw Error('lost response'); },
+    get: async id => new Promise(resolve => resolveOld = () => resolve(task(request(), id))), resume: async () => assert.fail() };
+  await generationRecovery('node-1', port, storage, io).start(request());
+  assert.equal(node.pendingGeneration.requestId, 'request-1');
+  node = {}; // Reload even an older saved canvas: journal restores its association.
+  io.create = async r => { calls.push(r); return task(r, r.requestId); };
+  const recovery = generationRecovery('node-1', port, storage, io);
+  await recovery.recover();
+  assert.equal(node.generationTaskId, 'request-1');
+  assert.deepEqual(calls[0], calls[1]);
+  const oldPoll = recovery.poll('request-1');
+  await recovery.start(request('new'));
+  resolveOld(); await oldPoll;
+  assert.equal(node.imageSrc, 'new.png');
+  const latePoll = recovery.poll('new'); node = undefined;
+  resolveOld(); await latePoll;
+  assert.equal(node, undefined);
+});
+
+test('recovery never submits when durable storage fails and never updates a switched-away canvas', async () => {
+  const { generationRecovery } = require('../lib/generation/recovery.ts');
+  let node = {}; let submits = 0; let resolveCreate;
+  const values = new Map();
+  const storage = { getItem: k => values.get(k) || null, setItem: (k,v) => values.set(k,v), removeItem: k => values.delete(k) };
+  const view = { read: () => node, update: v => Object.assign(node, v) };
+  const io = { create: async r => { submits++; return new Promise(resolve => resolveCreate = () => resolve({
+    ...r, id: 'original', status: 'running', artifacts: [], error: null,
+  })); }, get: async () => assert.fail(), resume: async () => assert.fail() };
+  await generationRecovery('node-1', view, { ...storage, setItem: () => { throw Error('quota'); } }, io).start(request());
+  assert.equal(submits, 0); assert.match(node.error, /尚未提交/);
+  const inFlight = generationRecovery('node-1', view, storage, io).start(request());
+  node = undefined; resolveCreate(); await inFlight;
+  assert.equal(node, undefined);
+  node = {};
+  await generationRecovery('node-1', view, storage, io).recover();
+  assert.equal(node.generationTaskId, 'original'); assert.equal(submits, 1);
+});
+
+test('task HTTP supports continuing the original task and deleting a node without cancelling an accepted submission', async t => {
+  const { service } = setup(t);
+  const { generationHttp } = require('../lib/generation/http.ts');
+  const a = service.create(request());
+  const res = await generationHttp(new Request('http://test/tasks', {
+    method: 'DELETE', body: JSON.stringify({ canvasId: 'canvas-1', nodeId: 'node-1' }),
+  }), service, 'tasks');
+  assert.equal(res.status, 200);
+  assert.equal(service.get(a.id).status, 'cancelled');
+  const again = await generationHttp(new Request('http://test/tasks/' + a.id, { method: 'POST' }), service, 'tasks', a.id);
+  assert.equal((await again.json()).status, 'cancelled');
+});
+
+test('a newer legacy-model generation detaches task recovery even when reopening an older saved canvas', async () => {
+  const { generationRecovery } = require('../lib/generation/recovery.ts');
+  const values = new Map();
+  const storage = { getItem: k => values.get(k) || null, setItem: (k,v) => values.set(k,v), removeItem: k => values.delete(k) };
+  let node = {};
+  const view = { read: () => node, update: v => Object.assign(node, v) };
+  const io = { create: async r => ({ ...r, id: 'krea', status: 'succeeded', saveStatus: 'saved', artifacts: ['old.png'] }),
+    get: async () => assert.fail('detached task must not be queried'), resume: async () => assert.fail() };
+  const recovery = generationRecovery('node-1', view, storage, io);
+  await recovery.start(request());
+  await recovery.detach();
+  node.imageSrc = 'legacy.png';
+  node = { ...node, generationTaskId: 'krea' }; // Older saved association.
+  await generationRecovery('node-1', view, storage, io).recover();
+  assert.equal(node.generationTaskId, undefined);
+  assert.equal(node.imageSrc, 'legacy.png');
+});

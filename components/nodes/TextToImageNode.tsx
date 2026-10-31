@@ -41,7 +41,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
 
   const [taskModels, setTaskModels] = useState<PublicModel[]>([]);
   const taskModel = taskModels.find(m => m.id === data.model);
-  const createTask = useGenerationTask(id, data);
+  const { start: createTask, resume: resumeTask, detach: detachTask } = useGenerationTask(id, data);
   const taskUnavailable = (data.usesGenerationTasks && !taskModel) || (!!taskModel && (!taskModel.configured || data.generationBlocked));
 
   // 获取当前节点位置
@@ -199,6 +199,11 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
       return;
     }
 
+    try { await detachTask(); }
+    catch {
+      updateNodeData(id, { error: "无法保存任务关联变更，请稍后重试" });
+      return;
+    }
     updateNodeData(id, { isLoading: true, error: undefined });
 
     try {
@@ -240,6 +245,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
     characterData,
     referenceImages,
     taskModel,
+    detachTask,
     data.usesGenerationTasks,
     createTask,
     data.pendingGeneration,
@@ -327,8 +333,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
               <select
                 value={data.model || imageModels[0]?.value || ""}
                 disabled={data.isLoading || !!data.pendingGeneration || data.generationBlocked}
-                onChange={(e) => updateNodeData(id, { model: e.target.value, usesGenerationTasks: taskModels.some(m => m.id === e.target.value),
-                  generationTaskId: undefined, generationStatus: undefined, generationBlocked: false })}
+                onChange={(e) => updateNodeData(id, { model: e.target.value, usesGenerationTasks: taskModels.some(m => m.id === e.target.value) })}
                 className="h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
               >
                 {taskModels.map(m => <option key={m.id} value={m.id}>{m.name}{m.configured ? "" : "（未配置）"}</option>)}
@@ -402,7 +407,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
                 ) : (
                   <Wand2 size={15} />
                 )}
-                <span>{data.isLoading ? "生成中" : data.pendingGeneration ? "重试创建" : "生成"}</span>
+                <span>{data.isLoading ? "生成中" : data.pendingGeneration ? "恢复原请求" : data.generationTaskId ? "重新生成" : "生成"}</span>
               </button>
             </div>
 
@@ -423,6 +428,8 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
               <span>仅文生图，不支持参考图。尺寸须为 {taskModel.capabilities.dimensions.step} 的倍数。</span>
               {!taskModel.configured && <span>请管理员配置平台连接</span>}
             </div>}
+            {data.generationBlocked && data.generationTaskId && <button type="button"
+              onClick={() => void resumeTask()} className="text-sm text-blue-300">继续查询原任务</button>}
             {data.generationStatus && <div role="status" className="text-xs text-blue-300">{data.generationStatus}</div>}
             {data.error && (
               <div className="text-xs text-red-400 bg-red-500/10 px-3 py-2 rounded-lg border border-red-500/20">

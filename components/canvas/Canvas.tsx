@@ -1,5 +1,6 @@
 "use client";
 
+import { retryGenerationDeletions } from "@/lib/generation/recovery";
 import React, { useCallback, useRef, useEffect, useState, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -59,6 +60,12 @@ const nodeTypes = {
 };
 
 function CanvasInner() {
+  useEffect(() => {
+    const retry = () => { void retryGenerationDeletions().catch(() => {}); };
+    retry();
+    window.addEventListener("online", retry);
+    return () => window.removeEventListener("online", retry);
+  }, []);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const interactionHandlers = useCanvasInteractions();
 

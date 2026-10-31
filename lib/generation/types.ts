@@ -1,4 +1,4 @@
-export type GenerationStatus = 'queued' | 'submitting' | 'running' | 'uncertain' | 'timed_out' | 'succeeded' | 'failed';
+export type GenerationStatus = 'cancelled' | 'queued' | 'submitting' | 'running' | 'uncertain' | 'timed_out' | 'succeeded' | 'failed';
 export type SaveStatus = 'pending' | 'saving' | 'saved' | 'failed';
 export interface GenerationInput { prompt: string; width: number; height: number }
 export interface CreateGeneration {

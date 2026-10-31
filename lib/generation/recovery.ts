@@ -1,0 +1,143 @@
+import type { CreateGeneration, GenerationTask } from './types';
+import { createGeneration, deleteGenerationNode, generationActive, generationLabel, GenerationRequestError, getGeneration, resumeGeneration } from './client';
+
+interface Association { request: CreateGeneration; taskId?: string; deleted?: boolean; detached?: boolean }
+interface Storage { getItem(key: string): string | null; setItem(key: string, value: string): void; removeItem(key: string): void }
+const key = (nodeId: string) => 'generation-node-v1:' + nodeId;
+export function generationAssociation(nodeId: string, storage: Storage = localStorage): Association | undefined {
+  const value = storage.getItem(key(nodeId));
+  return value ? JSON.parse(value) : undefined;
+}
+function persist(value: Association, storage: Storage) {
+  storage.setItem(key(value.request.nodeId), JSON.stringify(value));
+}
+
+export interface GenerationView {
+  pendingGeneration?: CreateGeneration; generationTaskId?: string;
+  generationStatus?: string; generationBlocked?: boolean; isLoading?: boolean;
+  error?: string; imageSrc?: string; outputArtifacts?: string[];
+}
+interface ViewPort {
+  // Returns undefined after deletion, navigation or unmount.
+  read(): GenerationView | undefined;
+  update(value: GenerationView): void;
+}
+const defaultIO = { create: createGeneration, get: getGeneration, resume: resumeGeneration };
+export function generationRecovery(nodeId: string, view: ViewPort, storage: Storage, io = defaultIO) {
+  function current(taskId: string) {
+    const node = view.read();
+    const association = generationAssociation(nodeId, storage);
+    return !association?.deleted && !association?.detached && node && !node.pendingGeneration && node.generationTaskId === taskId;
+  }
+  function apply(task: GenerationTask) {
+    if (!current(task.id)) return;
+    view.update({ generationStatus: generationLabel(task), generationBlocked: ['uncertain', 'timed_out'].includes(task.status),
+      isLoading: generationActive(task), error: task.error || undefined,
+      ...(task.artifacts.length ? { imageSrc: task.artifacts[0], outputArtifacts: task.artifacts } : {}) });
+  }
+  async function start(request: CreateGeneration) {
+    if (!view.read()) return;
+    const association = generationAssociation(nodeId, storage);
+    if (association?.deleted) return;
+    // Saving a draft assigns a workflow ID; retain the generation identity of this node.
+    const pending = view.read()?.pendingGeneration || { ...request, canvasId: association?.request.canvasId || request.canvasId };
+    try {
+      // Synchronous durable write must succeed before the paid request can be sent.
+      try { persist({ request: pending }, storage); }
+      catch {
+        view.update({ isLoading: false, error: '无法保存任务恢复记录，尚未提交生成' });
+        return;
+      }
+      view.update({ pendingGeneration: pending, generationTaskId: undefined, isLoading: true,
+        generationBlocked: false, error: undefined, generationStatus: '提交中' });
+      const task = await io.create(pending);
+      const latest = generationAssociation(nodeId, storage);
+      if (latest?.deleted || latest?.request.requestId !== pending.requestId) return;
+      persist({ request: pending, taskId: task.id }, storage);
+      if (view.read()?.pendingGeneration?.requestId !== pending.requestId) return;
+      view.update({ pendingGeneration: undefined, generationTaskId: task.id });
+      apply(task);
+    } catch (error) {
+      if (!view.read() || view.read()?.pendingGeneration?.requestId !== pending.requestId) return;
+      if (error instanceof GenerationRequestError && error.rejected) {
+        storage.removeItem(key(nodeId));
+        view.update({ pendingGeneration: undefined, isLoading: false, error: error.message, generationStatus: '创建被拒绝' });
+      } else view.update({ isLoading: false, error: '创建结果待确认，请恢复原请求', generationStatus: '创建待确认' });
+    }
+  }
+  async function recover() {
+    const saved = generationAssociation(nodeId, storage);
+    if (!view.read()) return;
+    if (saved?.detached) {
+      view.update({ pendingGeneration: undefined, generationTaskId: undefined,
+        generationStatus: undefined, generationBlocked: false });
+      return;
+    }
+    if (saved?.deleted) {
+      view.update({ pendingGeneration: undefined, generationTaskId: undefined, isLoading: false,
+        generationBlocked: true, generationStatus: '节点任务关联已删除' });
+      return;
+    }
+    if (saved?.taskId) {
+      view.update({ pendingGeneration: undefined, generationTaskId: saved.taskId });
+    } else if (saved || view.read()?.pendingGeneration) {
+      // Override a stale saved canvas with the durable latest request.
+      const request = saved?.request || view.read()!.pendingGeneration!;
+      view.update({ pendingGeneration: request });
+      await start(request);
+    }
+  }
+  async function poll(taskId: string) {
+    try {
+      const task = await io.get(taskId);
+      if (!current(taskId)) return false;
+      apply(task);
+      return generationActive(task);
+    } catch {
+      if (!current(taskId)) return false;
+      view.update({ error: '连接暂时中断，后台任务继续执行' });
+      return true;
+    }
+  }
+  async function resume() {
+    const taskId = view.read()?.generationTaskId;
+    if (!taskId) return;
+    try { apply(await io.resume(taskId)); }
+    catch (error) { if (current(taskId)) view.update({ error: error instanceof Error ? error.message : '继续查询失败' }); }
+  }
+  async function detach() {
+    const taskId = view.read()?.generationTaskId;
+    let saved = generationAssociation(nodeId, storage);
+    if (!saved && taskId) saved = { request: await io.get(taskId), taskId };
+    if (saved) persist({ ...saved, detached: true }, storage);
+    if (view.read()) view.update({ generationTaskId: undefined, pendingGeneration: undefined,
+      generationStatus: undefined, generationBlocked: false });
+  }
+  return { start, recover, poll, resume, detach };
+}
+
+// Keep a durable cancellation outbox when deletion races creation or the network is offline.
+interface Deletion { nodeId: string; canvasId: string; taskId?: string }
+const deletionKey = 'generation-deletions-v1';
+function deletions(storage: Storage): Deletion[] {
+  return JSON.parse(storage.getItem(deletionKey) || '[]');
+}
+export async function retryGenerationDeletions(storage: Storage = localStorage) {
+  for (const deletion of deletions(storage)) {
+    try {
+      const canvasId = deletion.taskId ? (await getGeneration(deletion.taskId)).canvasId : deletion.canvasId;
+      await deleteGenerationNode(canvasId, deletion.nodeId);
+      storage.setItem(deletionKey, JSON.stringify(deletions(storage).filter(d => d.nodeId !== deletion.nodeId)));
+    } catch { /* Retain for the next online event or canvas mount. */ }
+  }
+}
+export function deleteNodeGeneration(nodeId: string, canvasId: string, data: GenerationView, storage: Storage = localStorage) {
+  const saved = generationAssociation(nodeId, storage);
+  const request = saved?.request || data.pendingGeneration;
+  const queue = deletions(storage).filter(d => d.nodeId !== nodeId);
+  queue.push({ nodeId, canvasId: request?.canvasId || canvasId,
+    taskId: request ? undefined : data.generationTaskId });
+  storage.setItem(deletionKey, JSON.stringify(queue));
+  if (request) persist({ request, taskId: saved?.taskId, deleted: true }, storage);
+  void retryGenerationDeletions(storage);
+}
