@@ -5,12 +5,16 @@ import type { Node, NodeProps } from "@xyflow/react";
 import { BaseNode, NodeSurface } from "./BaseNode";
 import { useNodeInputs } from "@/hooks/useNodeInputs";
 import { useCanvasStore } from "@/store/useCanvasStore";
-import { Image, Sparkles, Wand2, Loader2, Link2, User } from "lucide-react";
+import { Image, Sparkles, Wand2, Loader2, Link2 } from "lucide-react";
 import type { NodeData } from "@/types";
 import { toast } from "sonner";
 import { getImageModels } from "@/lib/model-registry";
 import { Textarea } from "@/components/ui/textarea";
 import { ImageWithActions } from "@/components/ui/image-with-actions";
+
+import { generationModels } from "@/lib/generation/client";
+import type { PublicModel } from "@/lib/generation/types";
+import { useGenerationTask } from "@/hooks/useGenerationTask";
 
 const aspectRatios = [
   { value: "1:1", label: "1:1 方形" },
@@ -33,6 +37,11 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
   const [imageModels, setImageModels] = useState<
     Array<{ value: string; label: string }>
   >([]);
+
+  const [taskModels, setTaskModels] = useState<PublicModel[]>([]);
+  const taskModel = taskModels.find(m => m.id === data.model);
+  const createTask = useGenerationTask(id, data);
+  const taskUnavailable = (data.usesGenerationTasks && !taskModel) || (!!taskModel && (!taskModel.configured || data.generationBlocked));
 
   // 获取当前节点位置
 
@@ -75,6 +84,9 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
   // 加载图片模型列表
   useEffect(() => {
     setImageModels(getImageModels());
+    let active = true;
+    generationModels().then(models => { if (active) setTaskModels(models); }).catch(() => {});
+    return () => { active = false; };
   }, []);
 
   // 同步外部数据变化到本地状态
@@ -159,6 +171,33 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
       promptToUse = `${characterData.description}. ${promptToUse}`;
     }
 
+    if (data.usesGenerationTasks && !taskModel && !data.pendingGeneration) {
+      updateNodeData(id, { error: "模型目录暂时不可用" });
+      return;
+    }
+    if (taskModel || data.pendingGeneration) {
+      if (referenceImages.length || data.inputImages?.length) {
+        updateNodeData(id, { error: "此模型不支持参考图" });
+        return;
+      }
+      if (!taskModel && !data.pendingGeneration) return;
+      if (taskModel && !data.pendingGeneration) {
+        const dims = taskModel.capabilities.dimensions;
+        if ([data.generationWidth ?? dims.defaultWidth, data.generationHeight ?? dims.defaultHeight].some(n => !Number.isInteger(n) || n < dims.min || n > dims.max || n % dims.step)) {
+          updateNodeData(id, { error: `尺寸须为 ${dims.min}–${dims.max} 范围内 ${dims.step} 的倍数` });
+          return;
+        }
+      }
+      await createTask(data.pendingGeneration || {
+        requestId: crypto.randomUUID(), modelId: taskModel?.id || data.pendingGeneration!.modelId,
+        canvasId: useCanvasStore.getState().currentWorkflowId || "draft", nodeId: id,
+        input: { prompt: promptToUse,
+          width: data.generationWidth ?? taskModel!.capabilities.dimensions.defaultWidth,
+          height: data.generationHeight ?? taskModel!.capabilities.dimensions.defaultHeight },
+      });
+      return;
+    }
+
     updateNodeData(id, { isLoading: true, error: undefined });
 
     try {
@@ -199,6 +238,13 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
     localPrompt,
     characterData,
     referenceImages,
+    taskModel,
+    data.usesGenerationTasks,
+    createTask,
+    data.pendingGeneration,
+    data.generationWidth,
+    data.generationHeight,
+    data.inputImages,
     data.prompt,
     data.model,
     data.aspectRatio,
@@ -245,7 +291,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
         {data.isLoading && (
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center z-20">
             <Loader2 size={32} className="text-blue-500 animate-spin mb-3" />
-            <span className="text-white/80 text-sm font-medium">生成中...</span>
+            <span className="text-white/80 text-sm font-medium">{data.generationTaskId ? data.generationStatus : "生成中..."}</span>
           </div>
         )}
       </NodeSurface>
@@ -279,9 +325,12 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
             <div className="flex items-center gap-2">
               <select
                 value={data.model || imageModels[0]?.value || ""}
-                onChange={(e) => updateNodeData(id, { model: e.target.value })}
+                disabled={data.isLoading || !!data.pendingGeneration || data.generationBlocked}
+                onChange={(e) => updateNodeData(id, { model: e.target.value, usesGenerationTasks: taskModels.some(m => m.id === e.target.value),
+                  generationTaskId: undefined, generationStatus: undefined, generationBlocked: false })}
                 className="h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
               >
+                {taskModels.map(m => <option key={m.id} value={m.id}>{m.name}{m.configured ? "" : "（未配置）"}</option>)}
                 {imageModels.map((m) => (
                   <option key={m.value} value={m.value}>
                     {m.label}
@@ -289,6 +338,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
                 ))}
               </select>
 
+              {!taskModel && <>
               <select
                 value={data.aspectRatio || "1:1"}
                 onChange={(e) =>
@@ -333,11 +383,13 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
                 />
               </button>
 
+              </>}
+
               <div className="flex-1" />
 
               <button
                 onClick={handleGenerate}
-                disabled={data.isLoading || (!inputPrompt && !localPrompt)}
+                disabled={data.isLoading || taskUnavailable || (!inputPrompt && !localPrompt)}
                 className={`shrink-0 h-8 px-4 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 whitespace-nowrap transition-all active:scale-[0.98] ${
                   data.isLoading || (!inputPrompt && !localPrompt)
                     ? "bg-gray-400 text-white cursor-not-allowed"
@@ -349,10 +401,28 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
                 ) : (
                   <Wand2 size={15} />
                 )}
-                <span>{data.isLoading ? "生成中" : "生成"}</span>
+                <span>{data.isLoading ? "生成中" : data.pendingGeneration ? "重试创建" : "生成"}</span>
               </button>
             </div>
 
+            {taskModel && <div className="flex flex-col gap-2 text-xs text-zinc-300">
+              <div className="flex items-center gap-2">
+                {(["generationWidth", "generationHeight"] as const).map((field, index) => {
+                  const dims = taskModel.capabilities.dimensions;
+                  return <label key={field}>{index === 0 ? "宽" : "高"}
+                    <input aria-label={index === 0 ? "生成宽度" : "生成高度"} type="number"
+                      min={dims.min} max={dims.max} step={dims.step}
+                      value={data[field] ?? (index === 0 ? dims.defaultWidth : dims.defaultHeight)}
+                      onChange={e => updateNodeData(id, { [field]: Number(e.target.value) })}
+                      className="ml-2 w-20 bg-zinc-800 rounded px-2 py-1" />
+                  </label>;
+                })}
+              </div>
+              <span>实际生成尺寸：{data.generationWidth ?? taskModel.capabilities.dimensions.defaultWidth} × {data.generationHeight ?? taskModel.capabilities.dimensions.defaultHeight} px</span>
+              <span>仅文生图，不支持参考图。尺寸须为 {taskModel.capabilities.dimensions.step} 的倍数。</span>
+              {!taskModel.configured && <span>请管理员配置平台连接</span>}
+            </div>}
+            {data.generationStatus && <div role="status" className="text-xs text-blue-300">{data.generationStatus}</div>}
             {data.error && (
               <div className="text-xs text-red-400 bg-red-500/10 px-3 py-2 rounded-lg border border-red-500/20">
                 {data.error}

@@ -1,3 +1,4 @@
+import type { CreateGeneration } from "@/lib/generation/types";
 import { Edge, Node } from "@xyflow/react";
 
 // 节点类型枚举
@@ -30,6 +31,14 @@ export interface NodeData extends Record<string, unknown> {
   imageSrc?: string;
   videoSrc?: string;
   outputArtifacts?: string[]; // 历史输出/批量生成
+
+  usesGenerationTasks?: boolean;
+  generationTaskId?: string;
+  pendingGeneration?: CreateGeneration;
+  generationStatus?: string;
+  generationBlocked?: boolean;
+  generationWidth?: number;
+  generationHeight?: number;
 
   // 状态
   isLoading?: boolean;
