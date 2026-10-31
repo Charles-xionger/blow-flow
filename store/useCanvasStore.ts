@@ -1,3 +1,6 @@
+import { isValidCanvasConnection } from "@/lib/canvas/connections";
+import { createDraftStorage } from "@/lib/canvas/draft-storage";
+import { toast } from "sonner";
 import { create } from "zustand";
 import { devtools, persist } from "zustand/middleware";
 import {
@@ -85,6 +88,106 @@ interface CanvasState {
   exportWorkflow: () => WorkflowData;
 }
 
+function createCanvasNode(type: NodeType, position: { x: number; y: number }, data: Partial<NodeData> = {}): CanvasNode {
+  const nodeTypeMap: Record<
+    NodeType,
+    { label: string; data: Partial<NodeData> }
+  > = {
+    [NodeType.TEXT]: {
+      label: "Text",
+      data: {},
+    },
+    [NodeType.TEXT_TO_IMAGE]: {
+      label: "Text to Image",
+      data: {
+        model: "BananaPro",
+        aspectRatio: "1:1",
+        resolution: "1k",
+        count: 1,
+      },
+    },
+    [NodeType.TEXT_TO_VIDEO]: {
+      label: "Text to Video",
+      data: {
+        model: "Sora 2",
+        aspectRatio: "16:9",
+        resolution: "720p",
+        duration: "5s",
+        count: 1,
+      },
+    },
+    [NodeType.IMAGE_TO_IMAGE]: {
+      label: "Image to Image",
+      data: {
+        model: "BananaPro",
+        aspectRatio: "1:1",
+        resolution: "1k",
+        count: 1,
+      },
+    },
+    [NodeType.IMAGE_TO_VIDEO]: {
+      label: "Image to Video",
+      data: {
+        model: "Sora 2",
+        aspectRatio: "16:9",
+        resolution: "720p",
+        duration: "5s",
+        count: 1,
+      },
+    },
+    [NodeType.START_END_TO_VIDEO]: {
+      label: "Start-End to Video",
+      data: {
+        model: "Sora 2",
+        aspectRatio: "16:9",
+        resolution: "720p",
+        duration: "5s",
+        count: 1,
+        swapFrames: false,
+      },
+    },
+    [NodeType.CREATIVE_DESC]: {
+      label: "Creative Description",
+      data: { model: "BananaPro" },
+    },
+    [NodeType.STORYBOARD]: {
+      label: "Storyboard",
+      data: {},
+    },
+    [NodeType.ORIGINAL_IMAGE]: {
+      label: "Original Image",
+      data: {},
+    },
+    [NodeType.CHARACTER]: {
+      label: "Character",
+      data: {},
+    },
+    [NodeType.GROUP]: {
+      label: "Group",
+      data: {},
+    },
+  };
+
+  const config = nodeTypeMap[type];
+  return {
+    id: nanoid(),
+    type: type,
+    position,
+    data: {
+      label: config.label,
+      type,
+      ...config.data,
+      ...data,
+    },
+    style: {
+      width: DEFAULT_NODE_WIDTH,
+      height: DEFAULT_NODE_HEIGHT,
+    },
+  };
+
+
+}
+
 const DEFAULT_NODE_POSITION = { x: 250, y: 150 };
 // 节点默认尺寸
 const DEFAULT_NODE_WIDTH = 320;
@@ -100,6 +203,19 @@ const getInitialTheme = (): boolean => {
   // 检查系统偏好
   return window.matchMedia("(prefers-color-scheme: dark)").matches;
 };
+
+type CanvasDraft = Pick<CanvasState,
+  "nodes" | "edges" | "viewport" | "projectName" | "isDarkMode" | "currentWorkflowId"
+>;
+export const canvasDraftStorage = createDraftStorage<CanvasDraft>(
+  () => typeof window === "undefined"
+    ? { getItem: () => null, setItem: () => {}, removeItem: () => {} }
+    : localStorage,
+  (error) => {
+    console.error("Canvas draft storage failed", error);
+    if (typeof window !== "undefined") toast.error("本地草稿未保存，请手动保存工作流", { id: "canvas-draft-error" });
+  },
+);
 
 export const useCanvasStore = create<CanvasState>()(
   devtools(
@@ -127,13 +243,15 @@ export const useCanvasStore = create<CanvasState>()(
           ) as CanvasNode[];
 
           // 更新选中的节点ID列表
-          const selectedIds = updatedNodes
+          const selectedIds = changes.some((change) => ["select", "remove", "add", "replace"].includes(change.type)) ? updatedNodes
             .filter((node) => node.selected)
-            .map((node) => node.id);
+            .map((node) => node.id) : get().selectedNodeIds;
 
           set({
             nodes: updatedNodes,
-            selectedNodeIds: selectedIds,
+            selectedNodeIds: selectedIds.length === get().selectedNodeIds.length &&
+              selectedIds.every((id, i) => id === get().selectedNodeIds[i])
+              ? get().selectedNodeIds : selectedIds,
           });
         },
 
@@ -144,6 +262,7 @@ export const useCanvasStore = create<CanvasState>()(
         },
 
         onConnect: (connection: Connection) => {
+          if (!isValidCanvasConnection(connection, get().nodes, get().edges)) return;
           set({
             edges: addEdge(connection, get().edges),
           });
@@ -151,101 +270,7 @@ export const useCanvasStore = create<CanvasState>()(
 
         // 添加节点
         addNode: (type: NodeType, position = DEFAULT_NODE_POSITION) => {
-          const nodeTypeMap: Record<
-            NodeType,
-            { label: string; data: Partial<NodeData> }
-          > = {
-            [NodeType.TEXT]: {
-              label: "Text",
-              data: {},
-            },
-            [NodeType.TEXT_TO_IMAGE]: {
-              label: "Text to Image",
-              data: {
-                model: "BananaPro",
-                aspectRatio: "1:1",
-                resolution: "1k",
-                count: 1,
-              },
-            },
-            [NodeType.TEXT_TO_VIDEO]: {
-              label: "Text to Video",
-              data: {
-                model: "Sora 2",
-                aspectRatio: "16:9",
-                resolution: "720p",
-                duration: "5s",
-                count: 1,
-              },
-            },
-            [NodeType.IMAGE_TO_IMAGE]: {
-              label: "Image to Image",
-              data: {
-                model: "BananaPro",
-                aspectRatio: "1:1",
-                resolution: "1k",
-                count: 1,
-              },
-            },
-            [NodeType.IMAGE_TO_VIDEO]: {
-              label: "Image to Video",
-              data: {
-                model: "Sora 2",
-                aspectRatio: "16:9",
-                resolution: "720p",
-                duration: "5s",
-                count: 1,
-              },
-            },
-            [NodeType.START_END_TO_VIDEO]: {
-              label: "Start-End to Video",
-              data: {
-                model: "Sora 2",
-                aspectRatio: "16:9",
-                resolution: "720p",
-                duration: "5s",
-                count: 1,
-                swapFrames: false,
-              },
-            },
-            [NodeType.CREATIVE_DESC]: {
-              label: "Creative Description",
-              data: { model: "BananaPro" },
-            },
-            [NodeType.STORYBOARD]: {
-              label: "Storyboard",
-              data: {},
-            },
-            [NodeType.ORIGINAL_IMAGE]: {
-              label: "Original Image",
-              data: {},
-            },
-            [NodeType.CHARACTER]: {
-              label: "Character",
-              data: {},
-            },
-            [NodeType.GROUP]: {
-              label: "Group",
-              data: {},
-            },
-          };
-
-          const config = nodeTypeMap[type];
-          const newNode: CanvasNode = {
-            id: nanoid(),
-            type: type,
-            position,
-            data: {
-              label: config.label,
-              type,
-              ...config.data,
-            },
-            style: {
-              width: DEFAULT_NODE_WIDTH,
-              height: DEFAULT_NODE_HEIGHT,
-            },
-          };
-
+          const newNode = createCanvasNode(type, position);
           set({ nodes: [...get().nodes, newNode] });
           return newNode.id;
         },
@@ -256,143 +281,28 @@ export const useCanvasStore = create<CanvasState>()(
           sourceNodeId: string,
           position = DEFAULT_NODE_POSITION,
         ) => {
-          const newNodeId = get().addNode(type, position);
-
-          // 创建连接边
-          const newEdge = {
-            id: `edge-${sourceNodeId}-${newNodeId}`,
-            source: sourceNodeId,
-            target: newNodeId,
-            sourceHandle: "output",
-            targetHandle: null,
-          };
-
-          set({ edges: [...get().edges, newEdge] });
+          get().addMultipleConnectedNodes([{ type, data: {} }], sourceNodeId, position);
         },
 
-        // 批量添加连接节点
-        addMultipleConnectedNodes: (nodes, sourceNodeId, startPosition) => {
-          const newNodeIds: string[] = [];
-          const verticalSpacing = 300; // 节点间距
-
-          const nodeTypeMap: Record<
-            NodeType,
-            { label: string; data: Partial<NodeData> }
-          > = {
-            [NodeType.TEXT]: {
-              label: "Text",
-              data: {},
-            },
-            [NodeType.TEXT_TO_IMAGE]: {
-              label: "Text to Image",
-              data: {
-                model: "BananaPro",
-                aspectRatio: "1:1",
-                resolution: "1k",
-                count: 1,
-              },
-            },
-            [NodeType.TEXT_TO_VIDEO]: {
-              label: "Text to Video",
-              data: {
-                model: "Sora 2",
-                aspectRatio: "16:9",
-                resolution: "720p",
-                duration: "5s",
-                count: 1,
-              },
-            },
-            [NodeType.IMAGE_TO_IMAGE]: {
-              label: "Image to Image",
-              data: {
-                model: "BananaPro",
-                aspectRatio: "1:1",
-                resolution: "1k",
-                count: 1,
-              },
-            },
-            [NodeType.IMAGE_TO_VIDEO]: {
-              label: "Image to Video",
-              data: {
-                model: "Sora 2",
-                aspectRatio: "16:9",
-                resolution: "720p",
-                duration: "5s",
-                count: 1,
-              },
-            },
-            [NodeType.START_END_TO_VIDEO]: {
-              label: "Start-End to Video",
-              data: {
-                model: "Sora 2",
-                aspectRatio: "16:9",
-                resolution: "720p",
-                duration: "5s",
-                count: 1,
-                swapFrames: false,
-              },
-            },
-            [NodeType.CREATIVE_DESC]: {
-              label: "Creative Description",
-              data: { model: "BananaPro" },
-            },
-            [NodeType.STORYBOARD]: {
-              label: "Storyboard",
-              data: {},
-            },
-            [NodeType.ORIGINAL_IMAGE]: {
-              label: "Original Image",
-              data: {},
-            },
-            [NodeType.CHARACTER]: {
-              label: "Character",
-              data: {},
-            },
-            [NodeType.GROUP]: {
-              label: "Group",
-              data: {},
-            },
-          };
-
-          nodes.forEach((nodeConfig, index) => {
-            const position = {
-              x: startPosition.x,
-              y: startPosition.y + index * verticalSpacing,
-            };
-
-            const config = nodeTypeMap[nodeConfig.type];
-            const newNode: CanvasNode = {
-              id: nanoid(),
-              type: nodeConfig.type,
-              position,
-              data: {
-                label: config.label,
-                type: nodeConfig.type,
-                ...config.data,
-                ...nodeConfig.data,
-              },
-              style: {
-                width: DEFAULT_NODE_WIDTH,
-                height: DEFAULT_NODE_HEIGHT,
-              },
-            };
-
-            set({ nodes: [...get().nodes, newNode] });
-            newNodeIds.push(newNode.id);
-
-            // 创建连接边
-            const newEdge = {
-              id: `edge-${sourceNodeId}-${newNode.id}`,
-              source: sourceNodeId,
-              target: newNode.id,
-              sourceHandle: "output",
-              targetHandle: null,
-            };
-
-            set({ edges: [...get().edges, newEdge] });
-          });
-
-          return newNodeIds;
+        // Build the complete graph change before notifying subscribers.
+        addMultipleConnectedNodes: (configs, sourceNodeId, startPosition) => {
+          if (!configs.length) return [];
+          const newNodes = configs.map((config, index) => createCanvasNode(
+            config.type,
+            { x: startPosition.x, y: startPosition.y + index * 300 },
+            config.data,
+          ));
+          const newEdges = newNodes.map((node) => ({
+            id: `edge-${sourceNodeId}-${node.id}`,
+            source: sourceNodeId,
+            target: node.id,
+            sourceHandle: "output",
+            targetHandle: null,
+          }));
+          const allNodes = [...get().nodes, ...newNodes];
+          const validEdges = newEdges.filter((edge) => isValidCanvasConnection(edge, allNodes, get().edges));
+          set({ nodes: allNodes, edges: [...get().edges, ...validEdges] });
+          return newNodes.map((node) => node.id);
         },
 
         // 删除节点
@@ -600,7 +510,10 @@ export const useCanvasStore = create<CanvasState>()(
         },
 
         loadWorkflow: (workflow: WorkflowData) => {
+          canvasDraftStorage.flush();
           set({
+            selectedNodeIds: [],
+            contextMenu: null,
             nodes: workflow.nodes,
             edges: workflow.edges,
             projectName: workflow.name,
@@ -637,6 +550,7 @@ export const useCanvasStore = create<CanvasState>()(
         },
       }),
       {
+        storage: canvasDraftStorage.storage,
         name: "canvas-storage", // localStorage key
         partialize: (state) => ({
           // 只持久化这些字段
@@ -649,6 +563,6 @@ export const useCanvasStore = create<CanvasState>()(
         }),
       },
     ),
-    { name: "CanvasStore" },
+    { name: "CanvasStore", enabled: process.env.NODE_ENV !== "production" },
   ),
 );

@@ -2,22 +2,18 @@
 
 import { memo, useCallback, useState, useEffect } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
-import { Handle, Position } from "@xyflow/react";
+import { BaseNode, NodeSurface } from "./BaseNode";
 import { useCanvasStore } from "@/store/useCanvasStore";
 import { FileText } from "lucide-react";
 import type { NodeData } from "@/types";
-import { EditableTitle } from "./shared/EditableTitle";
-import { QuickAddNode } from "../canvas/QuickAddNode";
 import { Textarea } from "@/components/ui/textarea";
 
-const TextNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
+const TextNode = (props: NodeProps<Node<NodeData>>) => {
+  const { id, data, selected } = props;
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
-  const nodes = useCanvasStore((state) => state.nodes);
-  const selectedNodeIds = useCanvasStore((state) => state.selectedNodeIds);
-  const currentNode = nodes.find((n) => n.id === id);
-  const nodePosition = currentNode?.position || { x: 0, y: 0 };
+  const singleSelected = useCanvasStore((state) => state.selectedNodeIds.length === 1);
 
-  const shouldShowPanel = selected && selectedNodeIds.length === 1;
+  const shouldShowPanel = selected && singleSelected;
   const [localPrompt, setLocalPrompt] = useState(data.prompt || "");
 
   // 使用 key 或者不在 effect 中设置状态，而是在渲染时检查
@@ -39,28 +35,9 @@ const TextNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
   }, [id, localPrompt, data.prompt, updateNodeData]);
 
   return (
-    <>
-      <EditableTitle
-        nodeId={id}
-        defaultTitle="文本描述"
-        customTitle={data.customTitle}
-      />
+    <BaseNode {...props}>
 
-      <Handle type="target" position={Position.Left} id="input" />
-
-      <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center">
-        <QuickAddNode nodeId={id} nodePosition={nodePosition} />
-        <Handle type="source" position={Position.Right} id="output" />
-      </div>
-
-      <div
-        style={{ width: "320px", height: "240px" }}
-        className={`relative rounded-2xl border ${
-          selected
-            ? "border-purple-500 ring-2 ring-purple-500/30"
-            : "border-zinc-700/50"
-        } bg-[#1a1a1a] overflow-hidden shadow-xl group transition-all duration-200`}
-      >
+      <NodeSurface>
         <div className="relative w-full h-full p-4">
           <div className="w-full h-full flex flex-col items-center justify-center text-zinc-400">
             <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 bg-zinc-800/50 text-purple-500">
@@ -72,11 +49,11 @@ const TextNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
             </div>
           </div>
         </div>
-      </div>
+      </NodeSurface>
 
       {shouldShowPanel && (
         <div
-          className="absolute top-full left-1/2 -translate-x-1/2 min-w-100 pt-4 z-70 pointer-events-auto"
+          className="node-panel nodrag nopan nowheel absolute top-full left-1/2 -translate-x-1/2 min-w-100 pt-4 z-70 pointer-events-auto"
           onMouseDown={(e) => e.stopPropagation()}
         >
           <div className="bg-[#1a1a1a]/95 backdrop-blur-xl border border-zinc-700/50 rounded-2xl p-4 flex flex-col gap-3">
@@ -96,7 +73,7 @@ const TextNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
           </div>
         </div>
       )}
-    </>
+    </BaseNode>
   );
 };
 

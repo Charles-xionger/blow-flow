@@ -1,8 +1,9 @@
 "use client";
 
+import { memo } from "react";
 import React, { useState, useEffect } from "react";
-import { useReactFlow, useViewport } from "@xyflow/react";
-import { useCanvasStore } from "@/store/useCanvasStore";
+import { useReactFlow, useStore } from "@xyflow/react";
+import { canvasDraftStorage, useCanvasStore } from "@/store/useCanvasStore";
 import {
   Sparkles,
   Download,
@@ -16,22 +17,19 @@ import {
 import { SettingsModal } from "@/components/settings/SettingsModal";
 import { toast } from "sonner";
 
-export function TopBar() {
+export const TopBar = memo(function TopBar() {
   const reactFlowInstance = useReactFlow();
-  const viewport = useViewport(); // 监听 viewport 变化
-  const {
-    projectName,
-    setProjectName,
-    isDarkMode,
-    toggleTheme,
-    nodes,
-    edges,
-    clearCanvas,
-    setNodes,
-    setEdges,
-    currentWorkflowId,
-    setCurrentWorkflowId,
-  } = useCanvasStore();
+  const zoom = useStore((state) => Math.round(state.transform[2] * 100));
+  const projectName = useCanvasStore((state) => state.projectName);
+  const setProjectName = useCanvasStore((state) => state.setProjectName);
+  const isDarkMode = useCanvasStore((state) => state.isDarkMode);
+  const toggleTheme = useCanvasStore((state) => state.toggleTheme);
+  const nodeCount = useCanvasStore((state) => state.nodes.length);
+  const clearCanvas = useCanvasStore((state) => state.clearCanvas);
+  const setNodes = useCanvasStore((state) => state.setNodes);
+  const setEdges = useCanvasStore((state) => state.setEdges);
+  const currentWorkflowId = useCanvasStore((state) => state.currentWorkflowId);
+  const setCurrentWorkflowId = useCanvasStore((state) => state.setCurrentWorkflowId);
 
   const [isEditingProjectName, setIsEditingProjectName] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -44,13 +42,15 @@ export function TopBar() {
   }, []);
 
   // 从 viewport hook 获取实时缩放值
-  const zoom = Math.round(viewport.zoom * 100);
+
 
   const isDark = isDarkMode;
 
   // 保存工作流到数据库
   const handleSave = async () => {
-    if (nodes.length === 0) {
+    canvasDraftStorage.flush();
+    const { nodes, edges } = useCanvasStore.getState();
+    if (nodeCount === 0) {
       toast.error("无法保存", {
         description: "画布为空",
       });
@@ -103,6 +103,7 @@ export function TopBar() {
 
   // 下载/导出工作流
   const handleExport = () => {
+    const { nodes, edges } = useCanvasStore.getState();
     try {
       const workflow = {
         projectName,
@@ -176,13 +177,13 @@ export function TopBar() {
 
   // 清空画布
   const handleClear = () => {
-    if (nodes.length === 0) {
+    if (nodeCount === 0) {
       toast.info("画布已经是空的");
       return;
     }
 
     const confirmed = window.confirm(
-      `确定要清空画布吗？\n这将删除所有 ${nodes.length} 个节点。`,
+      `确定要清空画布吗？\n这将删除所有 ${nodeCount} 个节点。`,
     );
 
     if (confirmed) {
@@ -275,7 +276,7 @@ export function TopBar() {
           {/* 保存 */}
           <button
             onClick={handleSave}
-            disabled={isSaving || nodes.length === 0}
+            disabled={isSaving || nodeCount === 0}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
               isDark
                 ? "text-gray-400 hover:text-white hover:bg-white/5"
@@ -289,7 +290,7 @@ export function TopBar() {
           {/* 下载 */}
           <button
             onClick={handleExport}
-            disabled={nodes.length === 0}
+            disabled={nodeCount === 0}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
               isDark
                 ? "text-gray-400 hover:text-white hover:bg-white/5"
@@ -372,4 +373,4 @@ export function TopBar() {
       />
     </>
   );
-}
+});

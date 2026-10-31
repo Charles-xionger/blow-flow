@@ -2,18 +2,13 @@
 
 import { memo, useState } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
-import { Handle, Position } from "@xyflow/react";
-import { useCanvasStore } from "@/store/useCanvasStore";
+import { BaseNode, NodeSurface } from "./BaseNode";
 import { User, Edit, Sparkles } from "lucide-react";
 import type { NodeData } from "@/types";
-import { EditableTitle } from "./shared/EditableTitle";
-import { QuickAddNode } from "../canvas/QuickAddNode";
 import { CharacterModal } from "../character/CharacterModal";
 
-const CharacterNode = ({ id, data }: NodeProps<Node<NodeData>>) => {
-  const nodes = useCanvasStore((state) => state.nodes);
-  const currentNode = nodes.find((n) => n.id === id);
-  const nodePosition = currentNode?.position || { x: 0, y: 0 };
+const CharacterNode = (props: NodeProps<Node<NodeData>>) => {
+  const { data } = props;
 
   const [showCharacterModal, setShowCharacterModal] = useState(false);
 
@@ -35,30 +30,10 @@ const CharacterNode = ({ id, data }: NodeProps<Node<NodeData>>) => {
   };
 
   return (
-    <>
-      <EditableTitle
-        nodeId={id}
-        defaultTitle={data.label}
-        customTitle={data.customTitle}
-      />
-
-      {/* 输入Handle（可选，用于连接其他节点） */}
-      <Handle
-        type="target"
-        position={Position.Left}
-        style={{
-          width: "12px",
-          height: "12px",
-          background: "#8b5cf6",
-          border: "2px solid #1e1e1e",
-        }}
-      />
+    <BaseNode {...props}>
 
       {/* 节点主体 */}
-      <div
-        className="group relative bg-zinc-900 rounded-xl border-2 border-purple-500/30 overflow-hidden transition-all"
-        style={{ width: "320px", height: "240px" }}
-      >
+      <NodeSurface>
         {character ? (
           <div className="h-full flex flex-col">
             {/* 角色头像区域 */}
@@ -166,22 +141,7 @@ const CharacterNode = ({ id, data }: NodeProps<Node<NodeData>>) => {
             </button>
           </div>
         )}
-      </div>
-
-      {/* 输出Handle */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="output"
-        style={{
-          width: "12px",
-          height: "12px",
-          background: "#8b5cf6",
-          border: "2px solid #1e1e1e",
-        }}
-      >
-        <QuickAddNode nodeId={id} nodePosition={nodePosition} />
-      </Handle>
+      </NodeSurface>
 
       {/* 角色编辑模态框 */}
       {showCharacterModal && character && (
@@ -196,7 +156,7 @@ const CharacterNode = ({ id, data }: NodeProps<Node<NodeData>>) => {
           }}
         />
       )}
-    </>
+    </BaseNode>
   );
 };
 

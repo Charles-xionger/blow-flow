@@ -2,33 +2,22 @@
 
 import { memo, useCallback, useState, useEffect, useMemo } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
-import { Handle, Position } from "@xyflow/react";
+import { BaseNode, NodeSurface } from "./BaseNode";
 import { useCanvasStore } from "@/store/useCanvasStore";
 import { Film, Loader2, Wand2, Plus, Minus } from "lucide-react";
 import type { NodeData, NodeType } from "@/types";
-import { EditableTitle } from "./shared/EditableTitle";
-import { QuickAddNode } from "../canvas/QuickAddNode";
 import { Textarea } from "@/components/ui/textarea";
 import { getModelsByCategory } from "@/lib/model-registry";
 
-const CreativeDescNode = ({
-  id,
-  data,
-  selected,
-}: NodeProps<Node<NodeData>>) => {
+const CreativeDescNode = (props: NodeProps<Node<NodeData>>) => {
+  const { id, data, selected } = props;
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
   const addMultipleConnectedNodes = useCanvasStore(
     (state) => state.addMultipleConnectedNodes,
   );
-  const nodes = useCanvasStore((state) => state.nodes);
-  const selectedNodeIds = useCanvasStore((state) => state.selectedNodeIds);
-  const currentNode = nodes.find((n) => n.id === id);
-  const nodePosition = useMemo(
-    () => currentNode?.position || { x: 0, y: 0 },
-    [currentNode?.position],
-  );
+  const singleSelected = useCanvasStore((state) => state.selectedNodeIds.length === 1);
 
-  const shouldShowPanel = selected && selectedNodeIds.length === 1;
+  const shouldShowPanel = selected && singleSelected;
   const [localPrompt, setLocalPrompt] = useState(data.prompt || "");
   const [shotCount, setShotCount] = useState(data.shotCount || 4);
   const [selectedModel, setSelectedModel] = useState(data.model || "");
@@ -50,6 +39,7 @@ const CreativeDescNode = ({
     updateNodeData(id, { isLoading: true, error: undefined });
 
     try {
+      const nodePosition = useCanvasStore.getState().nodes.find((node) => node.id === id)?.position ?? { x: 0, y: 0 };
       const response = await fetch("/api/storyboard", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -105,7 +95,6 @@ const CreativeDescNode = ({
     selectedModel,
     updateNodeData,
     data.prompt,
-    nodePosition,
     addMultipleConnectedNodes,
   ]);
 
@@ -113,26 +102,9 @@ const CreativeDescNode = ({
   const hasResult = !!data.storyboardShots && !data.isLoading;
 
   return (
-    <>
-      <EditableTitle
-        nodeId={id}
-        defaultTitle="AI 分镜师"
-        customTitle={data.customTitle}
-      />
+    <BaseNode {...props}>
 
-      <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center">
-        <QuickAddNode nodeId={id} nodePosition={nodePosition} />
-        <Handle type="source" position={Position.Right} id="output" />
-      </div>
-
-      <div
-        style={{ width: "320px", height: "200px" }}
-        className={`relative rounded-2xl border ${
-          selected
-            ? "border-purple-500 ring-2 ring-purple-500/30"
-            : "border-zinc-700/50"
-        } bg-[#1a1a1a] overflow-hidden shadow-xl group transition-all duration-200`}
-      >
+      <NodeSurface>
         <div className="relative w-full h-full p-6 flex flex-col items-center justify-center">
           <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 bg-zinc-800/50 text-purple-500">
             <Film size={28} className="opacity-60" />
@@ -157,11 +129,11 @@ const CreativeDescNode = ({
             </span>
           </div>
         )}
-      </div>
+      </NodeSurface>
 
       {shouldShowPanel && (
         <div
-          className="absolute top-full left-1/2 -translate-x-1/2 min-w-100 pt-4 z-70 pointer-events-auto"
+          className="node-panel nodrag nopan nowheel absolute top-full left-1/2 -translate-x-1/2 min-w-100 pt-4 z-70 pointer-events-auto"
           onMouseDown={(e) => e.stopPropagation()}
         >
           <div className="bg-[#1a1a1a]/95 backdrop-blur-xl border border-zinc-700/50 rounded-2xl p-4 flex flex-col gap-3">
@@ -245,7 +217,7 @@ const CreativeDescNode = ({
           </div>
         </div>
       )}
-    </>
+    </BaseNode>
   );
 };
 

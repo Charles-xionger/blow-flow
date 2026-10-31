@@ -2,19 +2,22 @@
 
 import { Plus } from "lucide-react";
 import { useState } from "react";
+import { useReactFlow } from "@xyflow/react";
 import { useCanvasStore } from "@/store/useCanvasStore";
 import { NodeType } from "@/types";
 
 interface QuickAddNodeProps {
   nodeId: string;
-  nodePosition: { x: number; y: number };
 }
 
-export function QuickAddNode({ nodePosition }: QuickAddNodeProps) {
+export function QuickAddNode({ nodeId }: QuickAddNodeProps) {
+  const { getInternalNode } = useReactFlow();
   const [showMenu, setShowMenu] = useState(false);
   const addNode = useCanvasStore((state) => state.addNode);
 
   const handleAddNode = (type: NodeType) => {
+    const nodePosition = getInternalNode(nodeId)?.internals.positionAbsolute;
+    if (!nodePosition) return;
     const newPosition = {
       x: nodePosition.x + 400,
       y: nodePosition.y,
@@ -24,7 +27,7 @@ export function QuickAddNode({ nodePosition }: QuickAddNodeProps) {
   };
 
   return (
-    <div className="group/quick relative">
+    <div className="nodrag nopan nowheel group/quick relative">
       {/* 触发按钮 */}
       <button
         className="flex h-6 w-6 items-center justify-center rounded-full border border-gray-600 bg-[#1a1a1a] text-gray-400 opacity-0 transition-all hover:border-blue-500 hover:bg-blue-500/10 hover:text-blue-500 group-hover/quick:opacity-100"

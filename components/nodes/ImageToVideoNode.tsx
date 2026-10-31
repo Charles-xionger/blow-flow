@@ -2,13 +2,11 @@
 
 import { memo, useCallback, useState, useEffect } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
-import { Handle, Position } from "@xyflow/react";
+import { BaseNode, NodeSurface } from "./BaseNode";
 import { useCanvasStore } from "@/store/useCanvasStore";
 import { Video, Sparkles, AlertCircle, Loader2, Wand2 } from "lucide-react";
 import type { NodeData } from "@/types";
 import { getVideoModels } from "@/lib/model-registry";
-import { EditableTitle } from "./shared/EditableTitle";
-import { QuickAddNode } from "../canvas/QuickAddNode";
 import { Textarea } from "@/components/ui/textarea";
 import { ImageWithActions } from "@/components/ui/image-with-actions";
 
@@ -29,19 +27,13 @@ const aspectRatios = [
   { value: "9:16", label: "竖屏 (9:16)" },
 ];
 
-const ImageToVideoNode = ({
-  id,
-  data,
-  selected,
-}: NodeProps<Node<NodeData>>) => {
+const ImageToVideoNode = (props: NodeProps<Node<NodeData>>) => {
+  const { id, data, selected } = props;
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
-  const nodes = useCanvasStore((state) => state.nodes);
-  const selectedNodeIds = useCanvasStore((state) => state.selectedNodeIds);
-  const currentNode = nodes.find((n) => n.id === id);
-  const nodePosition = currentNode?.position || { x: 0, y: 0 };
+  const singleSelected = useCanvasStore((state) => state.selectedNodeIds.length === 1);
 
   // 只有在单选状态下才显示控制面板
-  const shouldShowPanel = selected && selectedNodeIds.length === 1;
+  const shouldShowPanel = selected && singleSelected;
 
   // 优化：只订阅与此节点相关的数据，避免不必要的重新渲染
   const inputImage = useCanvasStore(
@@ -176,32 +168,10 @@ const ImageToVideoNode = ({
   const hasResult = !!data.videoSrc && !data.isLoading;
 
   return (
-    <>
-      {/* 输入句柄 */}
-      <Handle type="target" position={Position.Left} id="input" />
-
-      {/* 可编辑标题 */}
-      <EditableTitle
-        nodeId={id}
-        defaultTitle={data.label}
-        customTitle={data.customTitle}
-      />
-
-      {/* 输出句柄 */}
-      <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center">
-        <QuickAddNode nodeId={id} nodePosition={nodePosition} />
-        <Handle type="source" position={Position.Right} id="output" />
-      </div>
+    <BaseNode {...props}>
 
       {/* 节点显示区域 */}
-      <div
-        style={{ width: "320px", height: "240px" }}
-        className={`relative rounded-2xl border ${
-          selected
-            ? "border-indigo-500 ring-2 ring-indigo-500/30"
-            : "border-zinc-700/50"
-        } bg-[#1a1a1a] overflow-hidden shadow-xl group transition-all duration-200`}
-      >
+      <NodeSurface>
         {hasResult ? (
           <div className="relative w-full h-full">
             <video
@@ -227,12 +197,12 @@ const ImageToVideoNode = ({
             <span className="text-white/80 text-sm font-medium">生成中...</span>
           </div>
         )}
-      </div>
+      </NodeSurface>
 
       {/* 控制面板 */}
       {shouldShowPanel && (
         <div
-          className="absolute top-full left-1/2 -translate-x-1/2 min-w-100 pt-4 z-70 pointer-events-auto"
+          className="node-panel nodrag nopan nowheel absolute top-full left-1/2 -translate-x-1/2 min-w-100 pt-4 z-70 pointer-events-auto"
           onMouseDown={(e) => e.stopPropagation()}
         >
           <div className="bg-[#1a1a1a]/95 backdrop-blur-xl border border-zinc-700/50 rounded-2xl p-4 flex flex-col gap-3">
@@ -385,7 +355,7 @@ const ImageToVideoNode = ({
           </div>
         </div>
       )}
-    </>
+    </BaseNode>
   );
 };
 

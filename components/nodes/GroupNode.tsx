@@ -45,7 +45,7 @@ export function GroupNode({ id, data, selected }: NodeProps<Node<NodeData>>) {
                 setIsEditingTitle(false);
               }
             }}
-            className="rounded border border-gray-600 bg-[#1a1a1a] px-2 py-1 text-sm text-white outline-none focus:border-blue-500"
+            className="nodrag nopan nowheel rounded border border-gray-600 bg-[#1a1a1a] px-2 py-1 text-sm text-white outline-none focus:border-blue-500"
             autoFocus
             onFocus={(e) => e.target.select()}
           />

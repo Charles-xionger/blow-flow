@@ -2,28 +2,20 @@
 
 import { memo, useCallback, useRef, useEffect } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
-import { Handle, Position } from "@xyflow/react";
+import { BaseNode, NodeSurface } from "./BaseNode";
 import { useCanvasStore } from "@/store/useCanvasStore";
 import { Image as ImageIcon, Upload, X } from "lucide-react";
 import type { NodeData } from "@/types";
-import { EditableTitle } from "./shared/EditableTitle";
-import { QuickAddNode } from "../canvas/QuickAddNode";
 import { ImageWithActions } from "@/components/ui/image-with-actions";
 
-const OriginalImageNode = ({
-  id,
-  data,
-  selected,
-}: NodeProps<Node<NodeData>>) => {
+const OriginalImageNode = (props: NodeProps<Node<NodeData>>) => {
+  const { id, data, selected } = props;
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
-  const nodes = useCanvasStore((state) => state.nodes);
-  const selectedNodeIds = useCanvasStore((state) => state.selectedNodeIds);
-  const currentNode = nodes.find((n) => n.id === id);
-  const nodePosition = currentNode?.position || { x: 0, y: 0 };
+  const singleSelected = useCanvasStore((state) => state.selectedNodeIds.length === 1);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 只有在单选状态下才显示控制面板
-  const shouldShowPanel = selected && selectedNodeIds.length === 1;
+  const shouldShowPanel = selected && singleSelected;
 
   const handleFileChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -127,29 +119,10 @@ const OriginalImageNode = ({
   const hasError = !!data.error;
 
   return (
-    <>
-      {/* 可编辑标题 */}
-      <EditableTitle
-        nodeId={id}
-        defaultTitle={data.label}
-        customTitle={data.customTitle}
-      />
-
-      {/* 输出句柄 */}
-      <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center">
-        <QuickAddNode nodeId={id} nodePosition={nodePosition} />
-        <Handle type="source" position={Position.Right} id="output" />
-      </div>
+    <BaseNode {...props}>
 
       {/* 节点显示区域 */}
-      <div
-        style={{ width: "320px", height: "240px" }}
-        className={`relative rounded-2xl border ${
-          selected
-            ? "border-amber-500 ring-2 ring-amber-500/30"
-            : "border-zinc-700/50"
-        } bg-[#1a1a1a] overflow-hidden shadow-xl group transition-all duration-200`}
-      >
+      <NodeSurface>
         {isLoading ? (
           <div className="w-full h-full flex flex-col items-center justify-center text-zinc-500">
             <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 bg-zinc-800/50">
@@ -182,12 +155,12 @@ const OriginalImageNode = ({
             <span className="text-xs opacity-40 mt-1">选中节点上传图片</span>
           </div>
         )}
-      </div>
+      </NodeSurface>
 
       {/* 控制面板 */}
       {shouldShowPanel && (
         <div
-          className="absolute top-full left-1/2 -translate-x-1/2 min-w-100 pt-4 z-70 pointer-events-auto"
+          className="node-panel nodrag nopan nowheel absolute top-full left-1/2 -translate-x-1/2 min-w-100 pt-4 z-70 pointer-events-auto"
           onMouseDown={(e) => e.stopPropagation()}
         >
           <div className="bg-[#1a1a1a]/95 backdrop-blur-xl border border-zinc-700/50 rounded-2xl p-4 flex flex-col gap-3">
@@ -232,7 +205,7 @@ const OriginalImageNode = ({
           </div>
         </div>
       )}
-    </>
+    </BaseNode>
   );
 };
 

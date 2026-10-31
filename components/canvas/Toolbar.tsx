@@ -7,7 +7,9 @@ import { useCanvasStore } from "@/store/useCanvasStore";
 import { toast } from "sonner";
 
 export function Toolbar() {
-  const { projectName, nodes, edges } = useCanvasStore();
+  const projectName = useCanvasStore((state) => state.projectName);
+  const nodes = useCanvasStore((state) => state.nodes);
+  const edges = useCanvasStore((state) => state.edges);
 
   const [isSaving, setIsSaving] = useState(false);
 

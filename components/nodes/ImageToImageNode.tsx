@@ -2,7 +2,8 @@
 
 import { memo, useCallback, useMemo, useState, useEffect } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
-import { Handle, Position } from "@xyflow/react";
+import { BaseNode, NodeSurface } from "./BaseNode";
+import { useNodeInputs } from "@/hooks/useNodeInputs";
 import { useCanvasStore } from "@/store/useCanvasStore";
 import {
   Image,
@@ -14,8 +15,6 @@ import {
 } from "lucide-react";
 import type { NodeData } from "@/types";
 import { getImageModels } from "@/lib/model-registry";
-import { EditableTitle } from "./shared/EditableTitle";
-import { QuickAddNode } from "../canvas/QuickAddNode";
 import { Textarea } from "@/components/ui/textarea";
 import { ImageWithActions } from "@/components/ui/image-with-actions";
 
@@ -31,46 +30,37 @@ const resolutions = [
   { value: "4096x4096", label: "4K (4096x4096)" },
 ];
 
-const ImageToImageNode = ({
-  id,
-  data,
-  selected,
-}: NodeProps<Node<NodeData>>) => {
+const ImageToImageNode = (props: NodeProps<Node<NodeData>>) => {
+  const { id, data, selected } = props;
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
-  const selectedNodeIds = useCanvasStore((state) => state.selectedNodeIds);
+  const singleSelected = useCanvasStore((state) => state.selectedNodeIds.length === 1);
 
   // 获取输入边和节点
-  const edges = useCanvasStore((state) => state.edges);
-  const nodes = useCanvasStore((state) => state.nodes);
-
-  const currentNode = nodes.find((n) => n.id === id);
-  const nodePosition = currentNode?.position || { x: 0, y: 0 };
+  const inputs = useNodeInputs(id);
 
   // 只有在单选状态下才显示控制面板
-  const shouldShowPanel = selected && selectedNodeIds.length === 1;
+  const shouldShowPanel = selected && singleSelected;
 
   // 计算输入图片（使用 useMemo 稳定引用）
   const inputImages = useMemo(() => {
-    const inputEdges = edges.filter((edge) => edge.target === id);
-    if (inputEdges.length === 0) return [];
+    if (inputs.length === 0) return [];
 
-    const images = inputEdges
-      .map((edge) => {
-        const sourceNode = nodes.find((n) => n.id === edge.source);
-        if (!sourceNode) return null;
+    const images = inputs
+      .map((sourceData) => {
+        if (!sourceData) return null;
 
         // 支持角色节点 - 使用角色的第一张参考图
-        if (sourceNode.data.characterData?.referenceImages?.[0]) {
-          return sourceNode.data.characterData.referenceImages[0];
+        if (sourceData.characterData?.referenceImages?.[0]) {
+          return sourceData.characterData.referenceImages[0];
         }
 
         // 支持普通图片节点
-        return sourceNode.data.imageSrc;
+        return sourceData.imageSrc;
       })
       .filter(Boolean) as string[];
 
     return images;
-  }, [edges, nodes, id]);
+  }, [inputs]);
 
   // 兼容旧代码，第一张图片作为主输入
   const inputImage = inputImages[0] || null;
@@ -154,32 +144,10 @@ const ImageToImageNode = ({
   const hasResult = !!data.imageSrc && !data.isLoading;
 
   return (
-    <>
-      {/* 输入句柄 */}
-      <Handle type="target" position={Position.Left} id="input" />
-
-      {/* 可编辑标题 */}
-      <EditableTitle
-        nodeId={id}
-        defaultTitle={data.label}
-        customTitle={data.customTitle}
-      />
-
-      {/* 输出句柄 */}
-      <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center">
-        <QuickAddNode nodeId={id} nodePosition={nodePosition} />
-        <Handle type="source" position={Position.Right} id="output" />
-      </div>
+    <BaseNode {...props}>
 
       {/* 节点显示区域 */}
-      <div
-        style={{ width: "320px", height: "240px" }}
-        className={`relative rounded-2xl border ${
-          selected
-            ? "border-purple-500 ring-2 ring-purple-500/30"
-            : "border-zinc-700/50"
-        } bg-[#1a1a1a] overflow-hidden shadow-xl group transition-all duration-200`}
-      >
+      <NodeSurface>
         {hasResult ? (
           <div className="relative w-full h-full">
             <ImageWithActions
@@ -204,12 +172,12 @@ const ImageToImageNode = ({
             <span className="text-white/80 text-sm font-medium">生成中...</span>
           </div>
         )}
-      </div>
+      </NodeSurface>
 
       {/* 控制面板 */}
       {shouldShowPanel && (
         <div
-          className="absolute top-full left-1/2 -translate-x-1/2 min-w-100 pt-4 z-70 pointer-events-auto"
+          className="node-panel nodrag nopan nowheel absolute top-full left-1/2 -translate-x-1/2 min-w-100 pt-4 z-70 pointer-events-auto"
           onMouseDown={(e) => e.stopPropagation()}
         >
           <div className="bg-[#1a1a1a]/95 backdrop-blur-xl border border-zinc-700/50 rounded-2xl p-4 flex flex-col gap-3">
@@ -383,7 +351,7 @@ const ImageToImageNode = ({
           </div>
         </div>
       )}
-    </>
+    </BaseNode>
   );
 };
 

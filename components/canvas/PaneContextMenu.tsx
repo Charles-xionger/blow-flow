@@ -20,7 +20,7 @@ interface PaneContextMenuProps {
 }
 
 export function PaneContextMenu({ x, y, onClose }: PaneContextMenuProps) {
-  const { addNode } = useCanvasStore();
+  const addNode = useCanvasStore((state) => state.addNode);
   const reactFlow = useReactFlow();
 
   const handleAddNode = (type: NodeType) => {

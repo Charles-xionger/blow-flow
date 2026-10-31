@@ -1,53 +1,45 @@
 "use client";
 
-import React, { memo } from "react";
-import { Handle, Position, NodeProps } from "@xyflow/react";
-import { NodeData } from "@/types";
+import { createContext, memo, useContext, type ReactNode } from "react";
+import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
+import { NodeType, type NodeData } from "@/types";
+import { EditableTitle } from "./shared/EditableTitle";
+import { QuickAddNode } from "../canvas/QuickAddNode";
+import { nodeDefinitions } from "@/lib/canvas/node-definitions";
 import { cn } from "@/lib/utils";
 
-interface BaseNodeProps extends NodeProps {
-  data: NodeData;
-  color?: string;
-}
+const SurfaceContext = createContext({ dragging: false, selected: false, loading: false, error: false, height: 240 });
 
-export const BaseNode = memo(
-  ({ data, selected, color = "blue" }: BaseNodeProps) => {
-    const colorClasses = {
-      blue: "border-blue-500 bg-blue-50 dark:bg-blue-900/20",
-      purple: "border-purple-500 bg-purple-50 dark:bg-purple-900/20",
-      green: "border-green-500 bg-green-50 dark:bg-green-900/20",
-      amber: "border-amber-500 bg-amber-50 dark:bg-amber-900/20",
-    };
-
-    return (
-      <div
-        className={cn(
-          "rounded-lg border-2 p-4 shadow-lg min-w-70 transition-all",
-          colorClasses[color as keyof typeof colorClasses] || colorClasses.blue,
-          selected && "ring-2 ring-offset-2 ring-primary",
-        )}
-      >
-        {/* 输入连接点 */}
-        <Handle type="target" position={Position.Left} className="w-3 h-3" />
-
-        {/* 节点标题 */}
-        <div className="font-semibold mb-2">{data.label}</div>
-
-        {/* 节点内容（占位） */}
-        <div className="text-sm text-muted-foreground">
-          {data.prompt || "未配置"}
+/** Business chrome only. xyflow owns positioning, dragging, selection and handles. */
+export const BaseNode = memo(function BaseNode({ children, ...props }: NodeProps<Node<NodeData>> & { children: ReactNode }) {
+  const { id, data, selected, dragging, isConnectable } = props;
+  const definition = nodeDefinitions[data.type];
+  return (
+    <SurfaceContext.Provider value={{ dragging, selected, loading: !!data.isLoading, error: !!data.error, height: definition.height }}>
+      <div className={cn("relative w-80", dragging && "[&_.node-panel]:invisible [&_.node-panel]:pointer-events-none")}>
+        <EditableTitle nodeId={id} defaultTitle={data.type === NodeType.TEXT ? "文本描述" : data.label} customTitle={data.customTitle} />
+        {definition.input && <Handle type="target" position={Position.Left} id="input" isConnectable={isConnectable} />}
+        <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center">
+          {!dragging && <QuickAddNode nodeId={id} />}
+          <Handle type="source" position={Position.Right} id="output" isConnectable={isConnectable} />
         </div>
-
-        {/* 加载状态 */}
-        {data.isLoading && (
-          <div className="mt-2 text-xs text-blue-500">生成中...</div>
-        )}
-
-        {/* 输出连接点 */}
-        <Handle type="source" position={Position.Right} className="w-3 h-3" />
+        {children}
       </div>
-    );
-  },
-);
+    </SurfaceContext.Provider>
+  );
+});
 
-BaseNode.displayName = "BaseNode";
+/** Keep dimensions and mounted form state stable while suppressing expensive painting. */
+export function NodeSurface({ children }: { children: ReactNode }) {
+  const { dragging, selected, loading, error, height } = useContext(SurfaceContext);
+  return (
+    <div style={{ width: 320, height }} className={cn(
+      "relative rounded-2xl border bg-[#1a1a1a] overflow-hidden shadow-xl group",
+      selected ? "border-purple-500 ring-2 ring-purple-500/30" : "border-zinc-700/50",
+      loading && "border-blue-500", error && "border-red-500",
+    )}>
+      <div className="h-full w-full" style={{ contentVisibility: dragging ? "hidden" : "visible" }}>{children}</div>
+      {dragging && <div className="absolute inset-0 flex items-center justify-center text-sm text-zinc-400">移动中…</div>}
+    </div>
+  );
+}

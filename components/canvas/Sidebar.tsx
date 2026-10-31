@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import React, { useState, useRef, useEffect } from "react";
 import { useCanvasStore } from "@/store/useCanvasStore";
 import { NodeType } from "@/types";
@@ -74,14 +75,12 @@ const SidebarButton: React.FC<SidebarButtonProps> = ({
   );
 };
 
-export function Sidebar() {
-  const {
-    addNode,
-    isDarkMode,
-    loadWorkflow,
-    currentWorkflowId,
-    clearWorkflow,
-  } = useCanvasStore();
+export const Sidebar = memo(function Sidebar() {
+  const addNode = useCanvasStore((state) => state.addNode);
+  const isDarkMode = useCanvasStore((state) => state.isDarkMode);
+  const loadWorkflow = useCanvasStore((state) => state.loadWorkflow);
+  const currentWorkflowId = useCanvasStore((state) => state.currentWorkflowId);
+  const clearWorkflow = useCanvasStore((state) => state.clearWorkflow);
   const [activePanel, setActivePanel] = useState<
     "ADD" | "HISTORY" | "PROJECT" | "CHARACTER" | null
   >(null);
@@ -666,4 +665,4 @@ export function Sidebar() {
       </Dialog>
     </>
   );
-}
+});

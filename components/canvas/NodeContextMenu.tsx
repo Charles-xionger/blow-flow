@@ -26,16 +26,14 @@ export function NodeContextMenu({
   y,
   onClose,
 }: NodeContextMenuProps) {
-  const {
-    nodes,
-    selectedNodeIds,
-    duplicateNode,
-    deleteNode,
-    deleteSelectedNodes,
-    groupNodes,
-    ungroupNodes,
-    addConnectedNode,
-  } = useCanvasStore();
+  const nodes = useCanvasStore((state) => state.nodes);
+  const selectedNodeIds = useCanvasStore((state) => state.selectedNodeIds);
+  const duplicateNode = useCanvasStore((state) => state.duplicateNode);
+  const deleteNode = useCanvasStore((state) => state.deleteNode);
+  const deleteSelectedNodes = useCanvasStore((state) => state.deleteSelectedNodes);
+  const groupNodes = useCanvasStore((state) => state.groupNodes);
+  const ungroupNodes = useCanvasStore((state) => state.ungroupNodes);
+  const addConnectedNode = useCanvasStore((state) => state.addConnectedNode);
 
   const [isDownloading, setIsDownloading] = useState(false);
 

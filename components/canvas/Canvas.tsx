@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useRef, useEffect, useState } from "react";
+import React, { useCallback, useRef, useEffect, useState, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   ReactFlow,
@@ -13,13 +13,17 @@ import {
   BackgroundVariant,
   MarkerType,
   SelectionMode,
+  type Connection,
+  type Edge,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
-import { useCanvasStore } from "@/store/useCanvasStore";
+import { canvasDraftStorage, useCanvasStore } from "@/store/useCanvasStore";
+import { isValidCanvasConnection } from "@/lib/canvas/connections";
 import { NodeType } from "@/types";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
+import { useCanvasInteractions } from "@/hooks/useCanvasInteractions";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { toast } from "sonner";
 
@@ -56,28 +60,27 @@ const nodeTypes = {
 
 function CanvasInner() {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
+  const interactionHandlers = useCanvasInteractions();
+
   const { screenToFlowPosition, getViewport } = useReactFlow();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [mounted, setMounted] = useState(false);
 
-  const {
-    nodes,
-    edges,
-    viewport,
-    setViewport,
-    onNodesChange,
-    onEdgesChange,
-    onConnect,
-    addNode,
-    isDarkMode,
-    projectName,
-    currentWorkflowId,
-    contextMenu,
-    showContextMenu,
-    hideContextMenu,
-    loadWorkflow,
-  } = useCanvasStore();
+  const nodes = useCanvasStore((state) => state.nodes);
+  const edges = useCanvasStore((state) => state.edges);
+  const viewport = useCanvasStore((state) => state.viewport);
+  const setViewport = useCanvasStore((state) => state.setViewport);
+  const onNodesChange = useCanvasStore((state) => state.onNodesChange);
+  const onEdgesChange = useCanvasStore((state) => state.onEdgesChange);
+  const onConnect = useCanvasStore((state) => state.onConnect);
+  const addNode = useCanvasStore((state) => state.addNode);
+  const isDarkMode = useCanvasStore((state) => state.isDarkMode);
+  const currentWorkflowId = useCanvasStore((state) => state.currentWorkflowId);
+  const contextMenu = useCanvasStore((state) => state.contextMenu);
+  const showContextMenu = useCanvasStore((state) => state.showContextMenu);
+  const hideContextMenu = useCanvasStore((state) => state.hideContextMenu);
+  const loadWorkflow = useCanvasStore((state) => state.loadWorkflow);
 
   const setCurrentWorkflowId = useCanvasStore(
     (state) => state.setCurrentWorkflowId,
@@ -176,6 +179,8 @@ function CanvasInner() {
 
   // 键盘快捷键：保存工作流
   const handleSave = useCallback(async () => {
+    const { nodes, edges, projectName, currentWorkflowId } = useCanvasStore.getState();
+    canvasDraftStorage.flush();
     if (nodes.length === 0) {
       toast.error("无法保存", {
         description: "画布为空",
@@ -227,14 +232,7 @@ function CanvasInner() {
         description: error instanceof Error ? error.message : "未知错误",
       });
     }
-  }, [
-    nodes,
-    edges,
-    projectName,
-    currentWorkflowId,
-    getViewport,
-    setCurrentWorkflowId,
-  ]);
+  }, [getViewport, setCurrentWorkflowId]);
 
   useKeyboardShortcuts(handleSave);
 
@@ -281,7 +279,7 @@ function CanvasInner() {
       const type = event.dataTransfer.getData(
         "application/reactflow-nodetype",
       ) as NodeType;
-      if (!type) return;
+      if (!Object.values(NodeType).includes(type) || type === NodeType.GROUP) return;
 
       const position = screenToFlowPosition({
         x: event.clientX,
@@ -298,8 +296,13 @@ function CanvasInner() {
     event.dataTransfer.dropEffect = "move";
   }, []);
 
+  const isValidConnection = useCallback((connection: Connection | Edge) => {
+    const { nodes, edges } = useCanvasStore.getState();
+    return isValidCanvasConnection(connection, nodes, edges);
+  }, []);
+
   // 默认边样式
-  const defaultEdgeOptions = {
+  const defaultEdgeOptions = useMemo(() => ({
     type: "default", // 使用默认曲线
     animated: true,
     style: {
@@ -312,7 +315,7 @@ function CanvasInner() {
       height: 20,
       color: mounted && isDarkMode ? "#666" : "#b1b1b7",
     },
-  };
+  }), [mounted, isDarkMode]);
 
   return (
     <div ref={reactFlowWrapper} className="w-full h-full">
@@ -329,10 +332,13 @@ function CanvasInner() {
         onSelectionContextMenu={onSelectionContextMenu}
         onPaneContextMenu={onPaneContextMenu}
         nodeTypes={nodeTypes}
-        connectionMode={ConnectionMode.Loose}
+        connectionMode={ConnectionMode.Strict}
+        isValidConnection={isValidConnection}
+        nodeDragThreshold={3}
         defaultEdgeOptions={defaultEdgeOptions}
         viewport={viewport}
-        onViewportChange={(newViewport) => setViewport(newViewport)}
+        onViewportChange={setViewport}
+        {...interactionHandlers}
         fitView={nodes.length === 0}
         className={mounted && isDarkMode ? "dark" : ""}
         selectionOnDrag={true}

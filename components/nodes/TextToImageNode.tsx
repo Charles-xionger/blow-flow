@@ -2,16 +2,16 @@
 
 import { memo, useCallback, useState, useEffect, useMemo } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
-import { Handle, Position } from "@xyflow/react";
+import { BaseNode, NodeSurface } from "./BaseNode";
+import { useNodeInputs } from "@/hooks/useNodeInputs";
 import { useCanvasStore } from "@/store/useCanvasStore";
 import { Image, Sparkles, Wand2, Loader2, Link2, User } from "lucide-react";
 import type { NodeData } from "@/types";
 import { toast } from "sonner";
 import { getImageModels } from "@/lib/model-registry";
-import { EditableTitle } from "./shared/EditableTitle";
-import { QuickAddNode } from "../canvas/QuickAddNode";
 import { Textarea } from "@/components/ui/textarea";
 import { ImageWithActions } from "@/components/ui/image-with-actions";
+
 const aspectRatios = [
   { value: "1:1", label: "1:1 方形" },
   { value: "16:9", label: "16:9 横屏" },
@@ -26,42 +26,38 @@ const resolutions = [
   { value: "4k", label: "4K" },
 ];
 
-const TextToImageNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
+const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
+  const { id, data, selected } = props;
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
-  const nodes = useCanvasStore((state) => state.nodes);
-  const selectedNodeIds = useCanvasStore((state) => state.selectedNodeIds);
+  const singleSelected = useCanvasStore((state) => state.selectedNodeIds.length === 1);
   const [imageModels, setImageModels] = useState<
     Array<{ value: string; label: string }>
   >([]);
 
   // 获取当前节点位置
-  const currentNode = nodes.find((n) => n.id === id);
-  const nodePosition = currentNode?.position || { x: 0, y: 0 };
 
   // 只有在单选状态下才显示控制面板
-  const shouldShowPanel = selected && selectedNodeIds.length === 1;
+  const shouldShowPanel = selected && singleSelected;
 
   // 从连接的节点读取数据（文本节点的prompt或角色节点的数据）
-  const edges = useCanvasStore((state) => state.edges);
+  const inputs = useNodeInputs(id);
 
   const { inputPrompt, characterData, referenceImages } = useMemo(() => {
-    const inputEdges = edges.filter((edge) => edge.target === id);
     let prompt = null;
     let character = null;
     let refImages: string[] = [];
 
-    for (const edge of inputEdges) {
-      const sourceNode = nodes.find((n) => n.id === edge.source);
-      if (!sourceNode) continue;
+    for (const sourceData of inputs) {
+      if (!sourceData) continue;
 
       // 文本节点提供prompt
-      if (sourceNode.data.prompt) {
-        prompt = sourceNode.data.prompt;
+      if (sourceData.prompt) {
+        prompt = sourceData.prompt;
       }
 
       // 角色节点提供角色数据和参考图
-      if (sourceNode.data.characterData) {
-        character = sourceNode.data.characterData;
+      if (sourceData.characterData) {
+        character = sourceData.characterData;
         refImages = character.referenceImages || [];
       }
     }
@@ -71,7 +67,7 @@ const TextToImageNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
       characterData: character,
       referenceImages: refImages,
     };
-  }, [edges, nodes, id]);
+  }, [inputs]);
 
   // 本地状态用于输入框，防止中文输入法问题
   const [localPrompt, setLocalPrompt] = useState(data.prompt || "");
@@ -215,16 +211,7 @@ const TextToImageNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
   const hasResult = !!data.imageSrc && !data.isLoading;
 
   return (
-    <>
-      {/* 可编辑标题 */}
-      <EditableTitle
-        nodeId={id}
-        defaultTitle={data.label}
-        customTitle={data.customTitle}
-      />
-
-      {/* 输入句柄 */}
-      <Handle type="target" position={Position.Left} id="input" />
+    <BaseNode {...props}>
 
       {/* 角色信息提示 */}
       {characterData && (
@@ -234,21 +221,8 @@ const TextToImageNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
         </div>
       )}
 
-      {/* 输出句柄 */}
-      <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center">
-        <QuickAddNode nodeId={id} nodePosition={nodePosition} />
-        <Handle type="source" position={Position.Right} id="output" />
-      </div>
-
       {/* 节点显示区域 */}
-      <div
-        style={{ width: "320px", height: "240px" }}
-        className={`relative rounded-2xl border ${
-          selected
-            ? "border-blue-500 ring-2 ring-blue-500/30"
-            : "border-zinc-700/50"
-        } bg-[#1a1a1a] overflow-hidden shadow-xl group transition-all duration-200`}
-      >
+      <NodeSurface>
         {hasResult ? (
           <div className="relative w-full h-full">
             <ImageWithActions
@@ -274,12 +248,12 @@ const TextToImageNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
             <span className="text-white/80 text-sm font-medium">生成中...</span>
           </div>
         )}
-      </div>
+      </NodeSurface>
 
       {/* 控制面板 */}
       {shouldShowPanel && (
         <div
-          className="absolute top-full left-1/2 -translate-x-1/2 min-w-100 pt-4 z-70 pointer-events-auto"
+          className="node-panel nodrag nopan nowheel absolute top-full left-1/2 -translate-x-1/2 min-w-100 pt-4 z-70 pointer-events-auto"
           onMouseDown={(e) => e.stopPropagation()}
         >
           <div className="bg-[#1a1a1a]/95 backdrop-blur-xl border border-zinc-700/50 rounded-2xl p-4 flex flex-col gap-3">
@@ -387,7 +361,7 @@ const TextToImageNode = ({ id, data, selected }: NodeProps<Node<NodeData>>) => {
           </div>
         </div>
       )}
-    </>
+    </BaseNode>
   );
 };
 

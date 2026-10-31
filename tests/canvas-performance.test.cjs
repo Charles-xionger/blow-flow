@@ -1,0 +1,119 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const Module = require('node:module');
+const ts = require('typescript');
+// Load the small TypeScript units without requiring a browser or a Next build.
+const cache = new Map();
+function load(relative) {
+  const filename = path.resolve(__dirname, '..', relative);
+  if (cache.has(filename)) return cache.get(filename).exports;
+  const mod = new Module(filename, module);
+  mod.filename = filename;
+  mod.paths = Module._nodeModulePaths(path.dirname(filename));
+  const baseRequire = mod.require.bind(mod);
+  mod.require = (id) => id.startsWith('@/')
+    ? load(id === '@/types' ? 'types/index.ts' : id.slice(2) + '.ts')
+    : baseRequire(id);
+  cache.set(filename, mod);
+  mod._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  }).outputText, filename);
+  return mod.exports;
+}
+const { createDraftStorage } = load('lib/canvas/draft-storage.ts');
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test('draft serializes once after a burst and never during active interaction', async () => {
+  const writes = [];
+  let serializations = 0;
+  const draft = createDraftStorage(() => ({ setItem: (key, value) => writes.push(value) }), assert.fail, 10, 30);
+  draft.beginInteraction('drag');
+  for (let i = 0; i < 100; i++) draft.storage.setItem('canvas-storage', {
+    state: { value: i, toJSON() { serializations++; return { value: i }; } }, version: 0,
+  });
+  await wait(50);
+  assert.equal(serializations, 0);
+  assert.equal(writes.length, 0);
+  draft.endInteraction('drag');
+  await wait(30);
+  assert.equal(serializations, 1);
+  assert.equal(JSON.parse(writes[0]).state.value, 99);
+});
+
+test('unchanged snapshot skips saving; flush and retry preserve latest value', () => {
+  let fail = true;
+  let errors = 0;
+  const writes = [];
+  const draft = createDraftStorage(() => ({ setItem: (key, value) => {
+    if (fail) throw Error('quota');
+    writes.push(value);
+  } }), () => errors++);
+  draft.storage.setItem('canvas-storage', { state: { value: 1 } });
+  draft.flush();
+  assert.equal(errors, 1);
+  fail = false;
+  draft.flush();
+  draft.storage.setItem('canvas-storage', { state: { value: 1 } });
+  draft.flush();
+  assert.equal(writes.length, 1);
+});
+
+test('legacy envelope loads; remove cancels scheduled writes', async () => {
+  let writes = 0;
+  const legacy = { state: { value: 7 }, version: 0 };
+  const draft = createDraftStorage(() => ({ getItem: () => JSON.stringify(legacy), setItem: () => writes++, removeItem() {} }), assert.fail, 10);
+  assert.deepEqual(draft.storage.getItem('canvas-storage'), legacy);
+  draft.storage.setItem('canvas-storage', { state: { value: 8 } });
+  draft.storage.removeItem('canvas-storage');
+  await wait(30);
+  assert.equal(writes, 0);
+});
+
+test('batch creation emits one complete graph; dragging preserves selection and unrelated data', () => {
+  const { useCanvasStore: store, canvasDraftStorage } = load('store/useCanvasStore.ts');
+  const { NodeType } = load('types/index.ts');
+  const source = store.getState().addNode(NodeType.TEXT);
+  let notifications = 0;
+  const unsubscribe = store.subscribe(() => notifications++);
+  const ids = store.getState().addMultipleConnectedNodes(
+    Array.from({ length: 20 }, () => ({ type: NodeType.TEXT_TO_IMAGE, data: {} })), source, { x: 400, y: 0 },
+  );
+  assert.equal(notifications, 1);
+  assert.equal(store.getState().edges.length, 20);
+  assert.equal(new Set(ids).size, 20);
+  store.getState().onNodesChange([{ id: source, type: 'select', selected: true }]);
+  const before = store.getState();
+  store.getState().onNodesChange([{ id: source, type: 'position', position: { x: 20, y: 30 }, dragging: true }]);
+  assert.equal(store.getState().selectedNodeIds, before.selectedNodeIds);
+  assert.equal(store.getState().nodes[1], before.nodes[1]);
+  assert.equal(store.getState().nodes[0].data, before.nodes[0].data);
+  unsubscribe();
+  canvasDraftStorage.flush();
+});
+
+test('connection policy rejects invalid ports, types, duplicates and cycles', () => {
+  const { isValidCanvasConnection: valid } = load('lib/canvas/connections.ts');
+  const { NodeType: T } = load('types/index.ts');
+  const nodes = [T.TEXT, T.TEXT_TO_IMAGE, T.IMAGE_TO_IMAGE, T.TEXT, T.ORIGINAL_IMAGE].map((type, i) => ({ id: String(i), data: { type } }));
+  const connection = (source, target, extra = {}) => ({ source, target, sourceHandle: 'output', targetHandle: 'input', ...extra });
+  assert.equal(valid(connection('0', '1'), nodes, []), true);
+  assert.equal(valid(connection('1', '2', { targetHandle: null }), nodes, []), true);
+  assert.equal(valid(connection('0', '0'), nodes, []), false);
+  assert.equal(valid(connection('missing', '1'), nodes, []), false);
+  assert.equal(valid(connection('0', '2'), nodes, []), false);
+  assert.equal(valid(connection('1', '4'), nodes, []), false);
+  assert.equal(valid(connection('0', '1', { sourceHandle: 'input' }), nodes, []), false);
+  assert.equal(valid(connection('0', '1'), nodes, [connection('0', '1')]), false);
+  assert.equal(valid(connection('0', '3'), nodes, [connection('3', '0')]), false);
+});
+
+test('store refuses invalid connections even without canvas preview validation', () => {
+  const { useCanvasStore: store, canvasDraftStorage } = load('store/useCanvasStore.ts');
+  const id = store.getState().nodes[0].id;
+  const before = store.getState().edges;
+  store.getState().onConnect({ source: id, target: id, sourceHandle: 'output', targetHandle: 'input' });
+  assert.equal(store.getState().edges, before);
+  canvasDraftStorage.flush();
+});
