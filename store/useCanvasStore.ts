@@ -1,4 +1,4 @@
-import { deleteNodeGeneration, generationAssociation } from "@/lib/generation/recovery";
+import { clearedGenerationAssociation, deleteNodeGeneration, generationAssociation } from "@/lib/generation/recovery";
 import { isValidCanvasConnection } from "@/lib/canvas/connections";
 import { createDraftStorage } from "@/lib/canvas/draft-storage";
 import { toast } from "sonner";
@@ -91,8 +91,7 @@ interface CanvasState {
 }
 
 function withoutTaskAssociation(data: NodeData): NodeData {
-  return { ...data, pendingGeneration: undefined, generationTaskId: undefined,
-    generationStatus: undefined, generationBlocked: false, isLoading: false, error: undefined };
+  return { ...data, ...clearedGenerationAssociation, isLoading: false, error: undefined };
 }
 
 function cancelDeletedNodes(nodes: CanvasNode[], canvasId: string | null) {

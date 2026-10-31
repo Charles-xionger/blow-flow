@@ -41,7 +41,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
 
   const [taskModels, setTaskModels] = useState<PublicModel[]>([]);
   const taskModel = taskModels.find(m => m.id === data.model);
-  const { start: createTask, resume: resumeTask, detach: detachTask } = useGenerationTask(id, data);
+  const { start: createTask, resume: resumeTask, retrySave: retrySaveTask, detach: detachTask } = useGenerationTask(id, data);
   const taskUnavailable = (data.usesGenerationTasks && !taskModel) || (!!taskModel && (!taskModel.configured || data.generationBlocked));
 
   // 获取当前节点位置
@@ -430,6 +430,11 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
             </div>}
             {data.generationBlocked && data.generationTaskId && <button type="button"
               onClick={() => void resumeTask()} className="text-sm text-blue-300">继续查询原任务</button>}
+            {(data.generationCanRetrySave || data.generationSaving) && data.generationTaskId && <button type="button"
+              disabled={!data.generationCanRetrySave || data.generationSaving}
+              onClick={() => void retrySaveTask()} className="text-sm text-blue-300 disabled:opacity-50">
+              {data.generationSaving ? "保存中…" : "重试保存（不重新生成）"}
+            </button>}
             {data.generationStatus && <div role="status" className="text-xs text-blue-300">{data.generationStatus}</div>}
             {data.error && (
               <div className="text-xs text-red-400 bg-red-500/10 px-3 py-2 rounded-lg border border-red-500/20">

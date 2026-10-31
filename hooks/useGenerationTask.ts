@@ -49,6 +49,7 @@ export function useGenerationTask(id: string, data: NodeData) {
       canvasDraftStorage.flush();
       await result;
     },
+    retrySave: async () => { await recovery.retrySave(); setPollVersion(v => v + 1); },
     resume: async () => { await recovery.resume(); setPollVersion(v => v + 1); },
   };
 }

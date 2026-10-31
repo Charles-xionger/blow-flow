@@ -1,3 +1,4 @@
+import { ArtifactSaveError, artifactTransferTiming } from './storage';
 import { randomUUID } from 'node:crypto';
 import { GenerationService, type TaskRecord, type TaskSnapshot } from './service';
 import { platformCall, submissionRejections, transientPlatformErrors, PlatformError, redact, submission, type PlatformFetch } from './runninghub';
@@ -16,6 +17,7 @@ export class GenerationWorker {
     if (!task) return false;
     const snapshot: TaskSnapshot = JSON.parse(task.snapshot);
     if (task.status === 'submitting') await this.submit(task, snapshot);
+    else if (task.status === 'succeeded') await this.saveArtifacts(task);
     else await this.query(task, snapshot);
     return true;
   }
@@ -29,10 +31,10 @@ export class GenerationWorker {
         WHERE status='submitting' AND lease_until <= ?`).run(now, now);
       db.prepare(`UPDATE generation_tasks SET status='timed_out', error='等待超时，平台状态未明确', updated_at=?
         WHERE status='running' AND deadline <= ? AND lease_until <= ?`).run(now, now, now);
-      db.prepare(`UPDATE generation_tasks SET save_status='failed', error='生成成功，保存中断', updated_at=?
-        WHERE save_status='saving' AND lease_until <= ?`).run(now, now);
       let task = db.prepare(`SELECT * FROM generation_tasks WHERE status='running' AND next_poll <= ?
         AND lease_until <= ? ORDER BY next_poll LIMIT 1`).get(now, now) as TaskRecord | undefined;
+      if (!task) task = db.prepare(`SELECT * FROM generation_tasks WHERE status='succeeded'
+        AND save_status IN ('pending','saving') AND lease_until <= ? ORDER BY updated_at LIMIT 1`).get(now) as TaskRecord | undefined;
       if (!task) {
         const queued = db.prepare(`SELECT * FROM generation_tasks WHERE status='queued' ORDER BY created_at, rowid`).all() as TaskRecord[];
         task = queued.find(candidate => {
@@ -52,7 +54,7 @@ export class GenerationWorker {
       const snapshot: TaskSnapshot = JSON.parse(task.snapshot);
       task.lease_token = randomUUID();
       // Lease exceeds the bounded HTTP request; stale query writers are fenced.
-      task.lease_until = now + snapshot.connection.requestTimeoutMs + 30_000;
+      task.lease_until = now + (task.status === 'succeeded' ? artifactTransferTiming.leaseMs : snapshot.connection.requestTimeoutMs + 30_000);
       db.prepare(`UPDATE generation_tasks SET status=?, deadline=?, lease_token=?, lease_until=?, updated_at=? WHERE id=?`)
         .run(task.status, task.deadline, task.lease_token, task.lease_until, now, task.id);
       return task;
@@ -89,6 +91,25 @@ export class GenerationWorker {
       this.update(task, { status: 'uncertain', error: '提交结果待核实，请勿重复生成', lease_until: 0 });
     }
   }
+  private async saveArtifacts(task: TaskRecord) {
+    const urls: string[] = JSON.parse(task.results);
+    const artifacts: string[] = JSON.parse(task.artifacts);
+    try {
+      for (let index = artifacts.length; index < urls.length; index++) {
+        // Renew for each bounded transfer and stop immediately if a new owner fenced us.
+        if (!this.update(task, { save_status: 'saving', lease_until: this.now() + artifactTransferTiming.leaseMs, error: null })) return;
+        artifacts.push(await this.io.save(urls[index], task.id, index));
+        if (!this.update(task, { artifacts: JSON.stringify(artifacts) })) return;
+      }
+      this.update(task, { save_status: 'saved', lease_until: 0, error: null });
+    } catch (error) {
+      const reason = error instanceof ArtifactSaveError ? error.reason : 'unknown';
+      this.diagnostic(task, JSON.parse(task.snapshot), { stage: 'artifact_save', index: artifacts.length, reason });
+      this.update(task, { save_status: 'failed',
+        error: `生成成功但结果保存失败：${error instanceof ArtifactSaveError ? error.message : '转存未完成'}；可重试保存`,
+        lease_until: 0 });
+    }
+  }
   private async query(task: TaskRecord, snapshot: TaskSnapshot) {
     try {
       const result = await platformCall(snapshot, 'outputs', { taskId: task.platform_id }, this.io.fetch,
@@ -110,18 +131,13 @@ export class GenerationWorker {
       });
       if (!urls.length) throw new PlatformError('unknown');
       if (!this.update(task, { status: 'succeeded', results: JSON.stringify(urls), save_status: 'saving',
-        lease_until: this.now() + 120_000, error: null })) return;
-      const artifacts: string[] = [];
-      try {
-        for (let i = 0; i < urls.length; i++) {
-          artifacts.push(await this.io.save(urls[i], task.id, i));
-          if (!this.update(task, { artifacts: JSON.stringify(artifacts) })) return;
-        }
-        this.update(task, { save_status: 'saved', lease_until: 0 });
-      } catch {
-        this.update(task, { save_status: 'failed', error: '生成成功，但图片保存失败', lease_until: 0 });
-      }
+        lease_until: this.now() + artifactTransferTiming.leaseMs, error: null })) return;
+      task.status = 'succeeded';
+      task.results = JSON.stringify(urls);
+      await this.saveArtifacts(task);
     } catch (error) {
+      // Persistence failures during transfer must never rewrite generation success.
+      if (task.status === 'succeeded') throw error;
       const errors = task.query_errors + 1;
       const retry = error instanceof PlatformError && error.kind === 'transient' && errors < snapshot.connection.maxQueryErrors;
       this.update(task, { query_errors: errors, lease_until: 0,

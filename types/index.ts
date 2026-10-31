@@ -37,6 +37,8 @@ export interface NodeData extends Record<string, unknown> {
   pendingGeneration?: CreateGeneration;
   generationStatus?: string;
   generationBlocked?: boolean;
+  generationCanRetrySave?: boolean;
+  generationSaving?: boolean;
   generationWidth?: number;
   generationHeight?: number;
 

@@ -357,20 +357,21 @@ test('killed executors recover queued, ambiguous submission, identified and savi
     const exited = once(child, 'exit'); child.kill('SIGKILL'); await exited;
     db = new Database(filename);
     const service = new GenerationService(db, config);
-    let submits = 0; let queries = 0;
+    let submits = 0; let queries = 0; let saves = 0;
     const worker = new GenerationWorker(service, {
-      now: () => now + 130_000,
+      now: () => now + 250_000,
       fetch: async (url, init) => {
         if (url.endsWith('/create')) { submits++; return Response.json({ code: 0, data: { taskId: '987654321' } }); }
         queries++; assert.equal(JSON.parse(init.body).taskId, '987654321');
         return Response.json({ code: 805 });
-      }, save: async () => assert.fail(),
+      }, save: async () => { saves++; return 'https://oss.test/recovered.png'; },
     });
     await worker.tick();
     assert.equal(service.get(task.id).status, { queued: 'running', submitting: 'uncertain', running: 'failed', saving: 'succeeded' }[phase]);
     assert.equal(submits, phase === 'queued' ? 1 : 0);
     assert.equal(queries, phase === 'running' ? 1 : 0);
-    if (phase === 'saving') assert.equal(service.get(task.id).saveStatus, 'failed');
+    assert.equal(saves, phase === 'saving' ? 1 : 0);
+    if (phase === 'saving') assert.equal(service.get(task.id).saveStatus, 'saved');
     db.close(); rmSync(dir, { recursive: true });
   }
 });

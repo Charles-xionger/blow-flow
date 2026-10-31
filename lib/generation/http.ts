@@ -1,7 +1,11 @@
 import { GenerationError, GenerationService } from './service';
 
-export async function generationHttp(request: Request, service: GenerationService, resource: 'models' | 'tasks', id?: string): Promise<Response> {
+export async function generationHttp(request: Request, service: GenerationService, resource: 'models' | 'tasks' | 'save', id?: string): Promise<Response> {
   try {
+    if (resource === 'save') {
+      if (request.method === 'POST' && id) return Response.json(service.retrySave(id));
+      return Response.json({ error: '不支持的操作' }, { status: 405 });
+    }
     if (resource === 'models' && request.method === 'GET') return Response.json(service.models());
     if (request.method === 'DELETE' && resource === 'tasks' && !id) {
       let value;

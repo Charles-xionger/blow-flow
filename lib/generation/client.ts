@@ -47,3 +47,10 @@ export async function deleteGenerationNode(canvasId: string, nodeId: string): Pr
     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ canvasId, nodeId }) });
   if (!response.ok) throw new Error('取消排队任务失败');
 }
+
+export async function retryGenerationSave(id: string): Promise<GenerationTask> {
+  const response = await fetch(`/api/generation/tasks/${encodeURIComponent(id)}/save`, { method: 'POST' });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || '重试保存失败');
+  return result;
+}

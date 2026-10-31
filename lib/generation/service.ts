@@ -86,6 +86,20 @@ export class GenerationService {
         AND json_extract(request_json, '$.nodeId')=?`).run(Date.now(), canvasId, nodeId);
     }).immediate();
   }
+  retrySave(id: string): GenerationTask {
+    return this.db.transaction(() => {
+      const task = this.db.prepare('SELECT * FROM generation_tasks WHERE id=?').get(id) as TaskRecord | undefined;
+      if (!task) throw new GenerationError('任务不存在', 404);
+      if (task.status !== 'succeeded' || !JSON.parse(task.results).length)
+        throw new GenerationError('任务尚无生成成功的结果，不能重试保存', 409);
+      // Pending/saving/saved are idempotent: a click never steals a live lease.
+      if (task.save_status === 'failed') {
+        this.db.prepare(`UPDATE generation_tasks SET save_status='pending', error=NULL,
+          lease_token=NULL, lease_until=0, updated_at=? WHERE id=?`).run(Date.now(), id);
+      }
+      return this.get(id);
+    }).immediate();
+  }
   resume(id: string, now = Date.now()): GenerationTask {
     return this.db.transaction(() => {
       const task = this.db.prepare('SELECT * FROM generation_tasks WHERE id=?').get(id) as TaskRecord | undefined;
