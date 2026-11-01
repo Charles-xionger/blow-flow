@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useMemo, useRef } from 'react';
-import { useCanvasStore, canvasDraftStorage } from '@/store/useCanvasStore';
+import { useCanvasStore, canvasDraftStorage, canvasAutosave } from '@/store/useCanvasStore';
 import type { NodeData } from '@/types';
 import { useGenerationNotifications } from '@/components/canvas/GenerationNotificationsProvider';
 import { generationRecovery } from '@/lib/generation/recovery';
@@ -27,7 +27,7 @@ export function useGenerationTask(id: string, data: NodeData) {
   const { recovery } = session;
   useEffect(() => {
     activeSession.current = session.token;
-    void recovery.recover().catch(() => {
+    void recovery.recover({ submitPending: !useCanvasStore.getState().generationRecoveryReadOnly?.includes(id) }).catch(() => {
       if (activeSession.current === session.token) useCanvasStore.getState().updateNodeData(id, { isLoading: false, error: '无法读取任务恢复记录' });
     });
     return () => { if (activeSession.current === session.token) activeSession.current = undefined; };
@@ -39,6 +39,7 @@ export function useGenerationTask(id: string, data: NodeData) {
   return {
     detach: recovery.detach,
     start: async (request: Parameters<typeof recovery.start>[0]) => {
+      await canvasAutosave.allowGenerationRecovery(id);
       const result = recovery.start(request);
       canvasDraftStorage.flush();
       await result;

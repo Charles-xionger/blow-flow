@@ -20,6 +20,9 @@ import { nanoid } from "nanoid";
 import { NodeData, NodeType, CanvasNode, WorkflowData } from "@/types";
 
 interface CanvasState {
+  recovery?: import('@/lib/canvas/local-repository').CanvasDraft['recovery'];
+  generationRecoveryReadOnly?: string[];
+  recoveryCopies?: { id: string; name: string }[];
   // 画布数据
   nodes: CanvasNode[];
   edges: Edge[];
@@ -555,6 +558,8 @@ export const useCanvasStore = create<CanvasState>()(
             projectName: "未命名项目",
             currentWorkflowId: null,
             serverVersion: 0,
+            recovery: undefined,
+            generationRecoveryReadOnly: undefined,
             saveStatus: "idle",
             saveError: null,
           });

@@ -77,7 +77,7 @@ export function generationRecovery(nodeId: string, view: ViewPort, storage: Stor
       } else view.update({ isLoading: false, error: '创建结果待确认，请恢复原请求', generationStatus: '创建待确认' });
     }
   }
-  async function recover() {
+  async function recover({ submitPending = true } = {}) {
     const saved = generationAssociation(nodeId, storage);
     if (!view.read()) return;
     if (saved?.detached) {
@@ -92,6 +92,11 @@ export function generationRecovery(nodeId: string, view: ViewPort, storage: Stor
     if (saved?.taskId) {
       view.update({ pendingGeneration: undefined, generationTaskId: saved.taskId });
     } else if (saved || view.read()?.pendingGeneration) {
+      if (!submitPending) {
+        view.update({ pendingGeneration: saved?.request || view.read()!.pendingGeneration, isLoading: false,
+          generationStatus: '旧草稿请求待核实', error: '旧生成请求未自动提交，请确认后恢复原请求' });
+        return;
+      }
       // Override a stale saved canvas with the durable latest request.
       const request = saved?.request || view.read()!.pendingGeneration!;
       view.update({ pendingGeneration: request });

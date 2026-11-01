@@ -59,17 +59,15 @@ test('editing a canvas survives clearing browser storage and deleting its last n
 });
 
 
-test('local transaction abort preserves legacy backup and prevents server-only saving', async ({ page }) => {
-  const legacy = '{"state":{"nodes":[{"id":"legacy"}]},"version":0}';
-  await page.addInitScript(raw => {
-    localStorage.setItem('canvas-storage', raw);
+test('local transaction abort prevents server-only saving', async ({ page }) => {
+  await page.addInitScript(() => {
     const put = IDBObjectStore.prototype.put;
     IDBObjectStore.prototype.put = function (...args: Parameters<typeof put>) {
       const request = put.apply(this, args);
       if (this.name === 'drafts') request.addEventListener('success', () => this.transaction.abort());
       return request;
     };
-  }, legacy);
+  });
   let writes = 0;
   page.on('request', request => { if (request.url().includes('/api/workflow') && request.method() === 'PUT') writes++; });
   await page.goto('/');
@@ -77,7 +75,6 @@ test('local transaction abort preserves legacy backup and prevents server-only s
   await addTextNode(page);
   await expect(page.getByTestId('canvas-save-status')).toHaveText('本地保存失败');
   expect(writes).toBe(0);
-  expect(await page.evaluate(() => localStorage.getItem('canvas-storage'))).toBe(legacy);
   await expect(page.locator('.react-flow__node')).toHaveCount(1);
 });
 

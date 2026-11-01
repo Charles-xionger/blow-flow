@@ -20,6 +20,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
+import { CanvasRecovery } from "./CanvasRecovery";
 import { canvasAutosave, useCanvasStore } from "@/store/useCanvasStore";
 import { isValidCanvasConnection } from "@/lib/canvas/connections";
 import { NodeType } from "@/types";
@@ -227,11 +228,13 @@ function CanvasInner() {
   if (!persistenceReady) return (
     <div className="flex h-full items-center justify-center" role="status">
       {saveError || "正在恢复画布…"}
+      <CanvasRecovery />
     </div>
   );
 
   return (
     <div ref={reactFlowWrapper} className="w-full h-full">
+      <CanvasRecovery />
       <ReactFlow
         nodes={nodes}
         edges={edges}

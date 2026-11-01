@@ -1,15 +1,19 @@
 import type { CanvasNode } from '@/types';
 import type { Edge, Viewport } from '@xyflow/react';
 import { createCanvasRepository, type CanvasDraft, type CanvasRepository } from './local-repository';
-import { canonicalJSON, type CanvasSnapshot } from './save-protocol';
+import { canonicalJSON } from './save-protocol';
 import { canvasSnapshot } from './snapshot';
+import { LEGACY_CANVAS_KEY } from './legacy-draft';
 import { canvasRequest, CanvasRequestError } from './sync-request';
 
-export type SaveStatus = 'loading' | 'idle' | 'saving' | 'pending' | 'syncing' | 'synced' | 'local-error' | 'sync-error';
+export type SaveStatus = 'loading' | 'idle' | 'saving' | 'pending' | 'syncing' | 'synced' | 'local-error' | 'sync-error' | 'recovery' | 'migration-error';
 type State = {
   nodes: CanvasNode[]; edges: Edge[]; viewport: Viewport; projectName: string;
   currentWorkflowId: string | null; canvasSession: number; serverVersion: number;
   selectedNodeIds?: string[];
+  recovery?: CanvasDraft['recovery'];
+  generationRecoveryReadOnly?: string[];
+  recoveryCopies?: { id: string; name: string }[];
   persistenceReady: boolean; saveStatus: SaveStatus; saveError: string | null;
 };
 type Store = {
@@ -47,7 +51,8 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
     latest: state, dirty: false, fingerprint: canonicalJSON(canvasSnapshot(state)) });
   const settledStatus = (target: Session) => {
     if (target.dirty) return status(target, 'saving');
-    status(target, !target.draft ? 'idle' : target.draft.localVersion > target.draft.confirmedLocalVersion ? 'pending' : 'synced');
+    if (target.draft?.recovery) return status(target, 'recovery');
+    status(target, !target.draft || !target.draft.localVersion && !target.draft.serverVersion ? 'idle' : target.draft.localVersion > target.draft.confirmedLocalVersion ? 'pending' : 'synced');
   };
   const schedule = () => {
     if (interactions.size) return;
@@ -105,6 +110,18 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
       for (const target of sessions) {
         if (!target.id) continue;
         try {
+          target.draft = await repository.read(target.id);
+          if (target.draft?.recovery) {
+            if (target.draft.recovery.kind === 'copy' || target.draft.recovery.kind === 'conflict' && !force) {
+              settledStatus(target); continue;
+            }
+            const remote = await readRemote(target.id);
+            target.draft = await repository.reconcile(target.id, remote.snapshot, remote.version);
+            if (store.getState().canvasSession === target.key) store.setState({
+              recovery: target.draft.recovery, serverVersion: target.draft.serverVersion });
+            settledStatus(target);
+            if (target.draft.recovery) continue;
+          }
           let operation = await repository.pending(target.id);
           while (operation) {
             if (operation.retry?.blocked && !force) throw new Error(operation.retry.error || '同步已暂停，本地内容已保留');
@@ -144,7 +161,10 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
             }
             operation = await repository.pending(target.id);
           }
-        } catch (error) { status(target, 'sync-error', error); throw error; }
+        } catch (error) {
+          if (target.draft?.recovery?.kind === 'unverified') retryLater(Date.now() + 5000);
+          status(target, 'sync-error', error); throw error;
+        }
       }
     })();
     try { await syncing; } finally { syncing = undefined; }
@@ -178,10 +198,18 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
       void commitLocal().catch(onError);
     };
   }
+  async function readRemote(id: string) {
+    const data = await canvasRequest(`/api/workflow/${encodeURIComponent(id)}`, {}, requestTimeoutMs);
+    if (!Number.isSafeInteger(data.version) || data.version < 1) throw new Error('读取画布失败');
+    return { snapshot: canvasSnapshot({ ...data, projectName: data.name }), version: data.version as number };
+  }
+  async function refreshCopies() {
+    store.setState({ recoveryCopies: (await repository.recoveries()).map(draft => ({ id: draft.id, name: draft.snapshot.name })) });
+  }
   function applyDraft(draft: CanvasDraft) {
     store.setState({ nodes: draft.snapshot.nodes as CanvasNode[], edges: draft.snapshot.edges,
       viewport: draft.snapshot.viewport, projectName: draft.snapshot.name, currentWorkflowId: draft.id,
-      serverVersion: draft.serverVersion, selectedNodeIds: [] });
+      serverVersion: draft.serverVersion, recovery: draft.recovery, generationRecoveryReadOnly: draft.generationRecoveryReadOnly, selectedNodeIds: [] });
   }
   async function open(id?: string | null) {
     const token = ++opening;
@@ -190,7 +218,11 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
       void sync().catch(onError);
     }
     store.setState({ persistenceReady: false, saveStatus: 'loading', saveError: null });
+    let migrated = false;
     try {
+      await repository.migrateLegacy(typeof localStorage === 'undefined' ? null : localStorage.getItem(LEGACY_CANVAS_KEY));
+      migrated = true;
+      await refreshCopies();
       let draft = await repository.read(id);
       if (token !== opening) return;
       if (draft) applyDraft(draft);
@@ -198,18 +230,18 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
       const pending = canvasId ? await repository.pending(canvasId) : undefined;
       let remoteError: unknown = pending?.retry?.error;
       if (canvasId && !draft && !online()) throw new Error('离线时无法读取尚未缓存的画布');
-      if (canvasId && online() && (!draft || draft.localVersion === draft.confirmedLocalVersion)) {
+      if (canvasId && online() && (!draft || draft.recovery?.kind === 'unverified' || draft.recovery?.kind === 'conflict' || draft.serverVersion > 0 && draft.localVersion === draft.confirmedLocalVersion)) {
         try {
-          const data = await canvasRequest(`/api/workflow/${encodeURIComponent(canvasId)}`, {}, requestTimeoutMs);
-          if (!Number.isSafeInteger(data.version)) throw new Error('读取画布失败');
+          const remote = await readRemote(canvasId);
           if (token !== opening) return;
-          const { name, nodes, edges, viewport } = data as CanvasSnapshot;
-          draft = await repository.adopt(canvasId, { name, nodes, edges, viewport }, data.version);
+          draft = draft?.recovery
+            ? await repository.reconcile(canvasId, remote.snapshot, remote.version)
+            : await repository.adopt(canvasId, remote.snapshot, remote.version);
         } catch (error) { if (!draft) throw error; remoteError = error; }
       }
       if (token !== opening) return;
       if (draft) applyDraft(draft);
-      else store.setState({ nodes: [], edges: [], projectName: '未命名项目', currentWorkflowId: null, serverVersion: 0 });
+      else store.setState({ nodes: [], edges: [], projectName: '未命名项目', currentWorkflowId: null, serverVersion: 0, recovery: undefined, generationRecoveryReadOnly: undefined });
       store.setState({ canvasSession: store.getState().canvasSession + 1 });
       active = session(store.getState()); active.draft = draft; sessions.add(active);
       store.setState({ persistenceReady: true });
@@ -217,7 +249,7 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
       void sync().catch(onError);
     } catch (error) {
       if (token !== opening) return;
-      store.setState({ saveStatus: 'local-error', saveError: error instanceof Error ? error.message : String(error) });
+      store.setState({ saveStatus: migrated ? 'local-error' : 'migration-error', saveError: error instanceof Error ? error.message : String(error) });
       onError(error);
     }
   }
@@ -231,7 +263,35 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
       throw new Error(store.getState().saveError || '已保存到本地，等待网络恢复后同步');
     }
   }
-  return { start, open, save, flush,
+  async function recover(choice: 'server' | 'copy') {
+    const target = active;
+    if (!target?.id || !target.draft?.recovery) throw new Error('画布无需恢复');
+    if (!store.getState().persistenceReady) throw new Error('正在恢复，请稍后重试');
+    // A recovery choice replaces the editor's content. Freeze it before the
+    // final commit so edits cannot escape the backup during the remote read.
+    store.setState({ persistenceReady: false, saveStatus: 'loading', saveError: null });
+    try {
+      await commitLocal();
+      let draft: CanvasDraft;
+      if (choice === 'server') {
+        const remote = await readRemote(target.id);
+        draft = await repository.adoptRemote(target.id, remote.snapshot, remote.version);
+      } else draft = await repository.saveRecoveryAsNew(target.id);
+      sessions.delete(target);
+      await open(draft.id);
+    } catch (error) {
+      store.setState({ persistenceReady: true });
+      status(target, 'sync-error', error);
+      throw error;
+    }
+  }
+  async function allowGenerationRecovery(nodeId: string) {
+    const id = store.getState().currentWorkflowId;
+    if (id) await repository.allowGenerationRecovery(id, nodeId);
+    if (store.getState().currentWorkflowId === id) store.setState({
+      generationRecoveryReadOnly: store.getState().generationRecoveryReadOnly?.filter(value => value !== nodeId) });
+  }
+  return { start, open, save, flush, recover, allowGenerationRecovery,
     beginInteraction(key: string) { interactions.add(key); clearTimers(); },
     endInteraction(key: string) { interactions.delete(key); if (active?.dirty) schedule(); },
   };
