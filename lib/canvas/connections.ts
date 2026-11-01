@@ -1,5 +1,5 @@
 import type { Connection, Edge } from "@xyflow/react";
-import type { CanvasNode } from "@/types";
+import { NodeType, type CanvasNode } from "@/types";
 import { nodeDefinitions } from "@/lib/canvas/node-definitions";
 
 /** Shared by xyflow's preview and store mutations; null handles support old drafts. */
@@ -13,7 +13,8 @@ export function isValidCanvasConnection(connection: Connection | Edge, nodes: Ca
   if (!from || !to) return false;
   const output = nodeDefinitions[from.data.type];
   const input = nodeDefinitions[to.data.type];
-  if (!output || !input?.input || !output.outputs.some((type) => input.accepts.includes(type))) return false;
+  const acceptsVideo = to.data.type === NodeType.IMAGE_TO_VIDEO && to.data.model === 'runninghub-h3';
+  if (!output || !input?.input || !output.outputs.some((type) => input.accepts.includes(type) || (acceptsVideo && type === 'video'))) return false;
   if (edges.some((edge) => edge.source === source && edge.target === target)) return false;
   const adjacency = new Map<string, string[]>();
   for (const edge of edges) {

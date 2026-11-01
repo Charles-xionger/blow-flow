@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOSSClient } from "@/services/ossService";
+import { mediaUploadLimit } from "@/lib/upload-limits";
 
 export async function POST(request: NextRequest) {
   try {
@@ -21,10 +22,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 检查文件大小（限制 10MB）
-    if (file.size > 10 * 1024 * 1024) {
+    if (file.size > mediaUploadLimit) {
       return NextResponse.json(
-        { success: false, error: "File size exceeds 10MB" },
+        { success: false, error: "图片大小不能超过 30 MB" },
         { status: 400 },
       );
     }

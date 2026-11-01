@@ -9,6 +9,10 @@ import type { NodeData } from "@/types";
 import { getVideoModels } from "@/lib/model-registry";
 import { Textarea } from "@/components/ui/textarea";
 import { ImageWithActions } from "@/components/ui/image-with-actions";
+import { generationModels } from '@/lib/generation/client';
+import type { PublicModel } from '@/lib/generation/types';
+import { useGenerationTask } from '@/hooks/useGenerationTask';
+import { VideoGenerationPanel } from './shared/VideoGenerationPanel';
 
 const durations = [
   { value: "5", label: "5秒" },
@@ -31,6 +35,9 @@ const ImageToVideoNode = (props: NodeProps<Node<NodeData>>) => {
   const { id, data, selected } = props;
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
   const singleSelected = useCanvasStore((state) => state.selectedNodeIds.length === 1);
+  const task = useGenerationTask(id, data);
+  const [taskModels, setTaskModels] = useState<PublicModel[]>([]);
+  const taskModel = taskModels.find(m => m.id === data.model);
 
   // 只有在单选状态下才显示控制面板
   const shouldShowPanel = selected && singleSelected;
@@ -70,16 +77,15 @@ const ImageToVideoNode = (props: NodeProps<Node<NodeData>>) => {
   // 加载视频模型列表
   useEffect(() => {
     setVideoModels(getVideoModels());
+    let active = true;
+    generationModels().then(models => { if (active) setTaskModels(models.filter(m => m.category === 'VIDEO')); }).catch(() => {});
+    return () => { active = false; };
   }, []);
 
   // 同步外部数据变化到本地状态
   useEffect(() => {
     setLocalPrompt(data.prompt || "");
   }, [data.prompt]);
-
-  useEffect(() => {
-    console.log("Video Models:", videoModels);
-  }, [videoModels]);
 
   const handleGeneratePrompt = useCallback(async () => {
     if (!inputImage) return;
@@ -124,11 +130,9 @@ const ImageToVideoNode = (props: NodeProps<Node<NodeData>>) => {
     async (skipCache = false) => {
       if (!data.prompt || !inputImage) return;
 
-      console.log("Generating video with prompt:", data);
-
-      updateNodeData(id, { isLoading: true, error: undefined });
-
       try {
+        await task.detach();
+        updateNodeData(id, { isLoading: true, error: undefined });
         const response = await fetch("/api/generate/image-to-video", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -162,10 +166,18 @@ const ImageToVideoNode = (props: NodeProps<Node<NodeData>>) => {
         });
       }
     },
-    [id, data, inputImage, updateNodeData],
+    [id, data, inputImage, updateNodeData, task],
   );
 
   const hasResult = !!data.videoSrc && !data.isLoading;
+
+  const modelOptions = [
+    ...taskModels.map(m => ({ id: m.id, label: m.name + (m.configured ? '' : '（未配置）'), task: true })),
+    ...videoModels.map(m => ({ id: m.id, label: m.label })),
+  ];
+  if (data.model && !modelOptions.some(m => m.id === data.model)) modelOptions.push({ id: data.model, label: data.model });
+  if (taskModel || data.usesGenerationTasks || data.model === 'runninghub-h3')
+    return <VideoGenerationPanel node={props} model={taskModel} models={modelOptions} task={task} />;
 
   return (
     <BaseNode {...props}>
@@ -268,14 +280,15 @@ const ImageToVideoNode = (props: NodeProps<Node<NodeData>>) => {
               {/* 第一行：模型和时长 */}
               <div className="flex items-center gap-2">
                 <select
-                  value={data.model || videoModels[0]?.value || ""}
+                  aria-label="视频模型"
+                  value={data.model || videoModels[0]?.id || ""}
                   onChange={(e) =>
-                    updateNodeData(id, { model: e.target.value })
+                    updateNodeData(id, { model: e.target.value, usesGenerationTasks: taskModels.some(m => m.id === e.target.value) })
                   }
                   className="flex-1 h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
                 >
-                  {videoModels.map((m) => (
-                    <option key={m.value} value={m.id}>
+                  {modelOptions.map((m) => (
+                    <option key={m.id} value={m.id}>
                       {m.label}
                     </option>
                   ))}

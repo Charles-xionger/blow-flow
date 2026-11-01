@@ -2,6 +2,7 @@ import { createCanvasAutosave, type SaveStatus } from "@/lib/canvas/autosave";
 import { CanvasStorageError } from "@/lib/canvas/storage-error";
 import { clearedGenerationAssociation, deleteNodeGeneration, generationAssociation } from "@/lib/generation/recovery";
 import { isValidCanvasConnection } from "@/lib/canvas/connections";
+import { remapReferenceIds } from '@/lib/generation/video';
 import { toast } from "sonner";
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
@@ -254,7 +255,7 @@ export const useCanvasStore = create<CanvasState>()(
           set({
             nodes: nodes.map(node => ({ ...node, id: ids.get(node.id)!,
               parentId: node.parentId ? ids.get(node.parentId) : undefined,
-              data: withoutTaskAssociation(node.data) })),
+              data: { ...withoutTaskAssociation(node.data), ...remapReferenceIds(node.data.videoReferenceOrder, node.data.videoReferenceAudio, ids) } })),
             edges: edges.filter(edge => ids.has(edge.source) && ids.has(edge.target))
               .map(edge => ({ ...edge, id: nanoid(), source: ids.get(edge.source)!, target: ids.get(edge.target)! })),
             selectedNodeIds: [],

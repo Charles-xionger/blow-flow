@@ -1,8 +1,9 @@
 import { validGenerationDimensions } from './dimensions';
+import { validReferenceUrl } from './reference-files';
 import { validateGenerationConfig } from './config';
 import type Database from 'better-sqlite3';
 import { randomBytes, randomUUID } from 'node:crypto';
-import type { ConnectionConfig, CreateGeneration, GenerationConfig, GenerationInput, GenerationTask, ModelConfig, PublicModel } from './types';
+import type { ConnectionConfig, CreateGeneration, GenerationConfig, GenerationInput, GenerationReference, GenerationTask, ModelConfig, PublicModel } from './types';
 
 export class GenerationError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -12,6 +13,7 @@ export interface TaskRecord {
   status: GenerationTask['status']; save_status: GenerationTask['saveStatus']; platform_id: string | null;
   created_at: number; updated_at: number; deadline: number | null; next_poll: number; lease_until: number;
   revision: number; lease_token: string | null; query_errors: number; results: string; artifacts: string; error: string | null;
+  submission_started: number;
 }
 export interface TaskSnapshot { model: ModelConfig; connection: ConnectionConfig }
 
@@ -38,6 +40,8 @@ export class GenerationService {
       const columns = db.pragma('table_info(generation_tasks)') as { name: string }[];
       if (!columns.some(c => c.name === 'revision'))
         db.exec('ALTER TABLE generation_tasks ADD COLUMN revision INTEGER NOT NULL DEFAULT 0');
+      if (!columns.some(c => c.name === 'submission_started'))
+        db.exec('ALTER TABLE generation_tasks ADD COLUMN submission_started INTEGER NOT NULL DEFAULT 1');
       db.exec(`CREATE TRIGGER IF NOT EXISTS generation_public_revision
         AFTER UPDATE OF status, save_status, artifacts, error, deadline ON generation_tasks
         WHEN NEW.status IS NOT OLD.status OR NEW.save_status IS NOT OLD.save_status
@@ -72,14 +76,15 @@ export class GenerationService {
       const d = model.capabilities.dimensions;
       if (!validGenerationDimensions(d, request.input.width, request.input.height))
         throw new GenerationError(`尺寸必须为 ${d.min}–${d.max} 范围内 ${d.step} 的倍数`);
+      validateModelInput(model, request.input);
       const id = randomUUID();
       const now = Date.now();
       // 48 random bits are exactly representable both by JSON and ComfyUI.
       const input = { ...request.input, seed: randomBytes(6).readUIntBE(0, 6) };
       this.db.prepare(`INSERT INTO generation_tasks
-        (id, request_id, request_json, connection_id, snapshot, input, status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?)`).run(id, request.requestId, requestJson,
-        connection.id, JSON.stringify({ model, connection }), JSON.stringify(input), now, now);
+        (id, request_id, request_json, connection_id, snapshot, input, status, created_at, updated_at, submission_started)
+        VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)`).run(id, request.requestId, requestJson,
+        connection.id, JSON.stringify({ model, connection }), JSON.stringify(input), now, now, model.category === 'VIDEO' ? 0 : 1);
       return this.get(id);
     }).immediate();
   }
@@ -102,8 +107,8 @@ export class GenerationService {
     text(canvasId); text(nodeId);
     this.db.transaction(() => {
       this.db.prepare('INSERT OR IGNORE INTO generation_deleted_nodes VALUES (?,?)').run(canvasId, nodeId);
-      this.db.prepare(`UPDATE generation_tasks SET status='cancelled', updated_at=?
-        WHERE status='queued' AND json_extract(request_json, '$.canvasId')=?
+      this.db.prepare(`UPDATE generation_tasks SET status='cancelled', lease_token=NULL, lease_until=0, updated_at=?
+        WHERE (status='queued' OR (status='submitting' AND submission_started=0)) AND json_extract(request_json, '$.canvasId')=?
         AND json_extract(request_json, '$.nodeId')=?`).run(Date.now(), canvasId, nodeId);
     }).immediate();
   }
@@ -140,7 +145,8 @@ export class GenerationService {
     const snapshot: TaskSnapshot = JSON.parse(task.snapshot);
     return { ...request, id: task.id, modelVersion: snapshot.model.version, status: task.status,
       saveStatus: task.save_status, revision: task.revision, createdAt: task.created_at, updatedAt: task.updated_at,
-      deadline: task.deadline, artifacts: JSON.parse(task.artifacts), error: task.error };
+      deadline: task.deadline, artifacts: JSON.parse(task.artifacts), error: task.error,
+      ...(snapshot.model.category === 'VIDEO' ? { outputType: 'video' as const } : {}) };
   }
 }
 
@@ -159,10 +165,41 @@ function validateRequest(value: unknown): CreateGeneration {
   const r = object(value);
   onlyKeys(r, ['requestId', 'modelId', 'input', 'canvasId', 'nodeId']);
   const input = object(r.input);
-  onlyKeys(input, ['prompt', 'width', 'height', 'referenceImages']);
+  onlyKeys(input, ['prompt', 'width', 'height', 'referenceImages', 'duration', 'references']);
   if (input.referenceImages !== undefined && (!Array.isArray(input.referenceImages) || input.referenceImages.length))
     throw new GenerationError('此模型不支持参考图');
   if (typeof input.width !== 'number' || typeof input.height !== 'number') throw new GenerationError('尺寸必须为数字');
+  if (input.duration !== undefined && (typeof input.duration !== 'number' || !Number.isFinite(input.duration)))
+    throw new GenerationError('时长必须为数字');
+  let references: GenerationReference[] | undefined;
+  if (input.references !== undefined) {
+    if (!Array.isArray(input.references) || input.references.length > 15) throw new GenerationError('参考素材数量超限');
+    references = input.references.map(value => {
+      const ref = object(value);
+      onlyKeys(ref, ['kind', 'url', 'useAudio']);
+      if (!['image', 'video', 'audio'].includes(String(ref.kind))) throw new GenerationError('无效的素材类型');
+      if (typeof ref.url !== 'string' || !validReferenceUrl(ref.url)) throw new GenerationError('请先将参考素材上传到本项目存储');
+      if (ref.useAudio !== undefined && (ref.kind !== 'video' || typeof ref.useAudio !== 'boolean')) throw new GenerationError('无效的参考声音设置');
+      return { kind: ref.kind as GenerationReference['kind'], url: ref.url,
+        ...(ref.kind === 'video' ? { useAudio: ref.useAudio !== false } : {}) };
+    });
+  }
   return { requestId: text(r.requestId), modelId: text(r.modelId), canvasId: text(r.canvasId), nodeId: text(r.nodeId),
-    input: { prompt: text(input.prompt), width: input.width, height: input.height } satisfies GenerationInput };
+    input: { prompt: text(input.prompt), width: input.width, height: input.height,
+      ...(input.duration !== undefined ? { duration: input.duration as number } : {}),
+      ...(references !== undefined ? { references } : {}) } satisfies GenerationInput };
+}
+
+function validateModelInput(model: ModelConfig, input: GenerationInput) {
+  const video = model.capabilities.video;
+  if (!video) {
+    if (input.duration !== undefined || input.references !== undefined) throw new GenerationError('此模型不支持视频或参考素材参数');
+    return;
+  }
+  if (!Number.isInteger(input.duration) || input.duration! < video.minDuration || input.duration! > video.maxDuration)
+    throw new GenerationError(`目标时长须为 ${video.minDuration}–${video.maxDuration} 的整数秒`);
+  for (const [kind, limit] of [['image', video.maxImages], ['video', video.maxVideos], ['audio', video.maxAudios]] as const) {
+    if ((input.references || []).filter(r => r.kind === kind).length > limit)
+      throw new GenerationError(`参考${{ image: '图片', video: '视频', audio: '音频' }[kind]}最多 ${limit} 个`);
+  }
 }

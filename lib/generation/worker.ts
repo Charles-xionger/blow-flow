@@ -1,4 +1,5 @@
 import { RunningHubSockets } from './runninghub-sockets';
+import { uploadReferences, ReferencePreparationError, referencePreparationLeaseMs } from './reference-upload';
 import { ArtifactSaveError, artifactTransferTiming } from './storage';
 import { randomUUID } from 'node:crypto';
 import { GenerationService, type TaskRecord, type TaskSnapshot } from './service';
@@ -6,7 +7,8 @@ import { platformCall, submissionRejections, transientPlatformErrors, PlatformEr
 
 export interface WorkerIO {
   fetch: PlatformFetch;
-  save: (url: string, taskId: string, index: number) => Promise<string>;
+  save: (url: string, taskId: string, index: number, mediaType?: 'image' | 'video') => Promise<string>;
+  inspectReference?: Parameters<typeof uploadReferences>[4];
   now?: () => number;
 }
 export class GenerationWorker {
@@ -48,6 +50,9 @@ export class GenerationWorker {
     const now = this.now();
     return db.transaction(() => {
       // A crashed submitter might already have paid: never reclaim for submission.
+      // Preparation has not called create; it may safely restart downloads/uploads.
+      db.prepare(`UPDATE generation_tasks SET status='queued', error=NULL, lease_token=NULL, lease_until=0, updated_at=?
+        WHERE status='submitting' AND submission_started=0 AND lease_until <= ?`).run(now, now);
       db.prepare(`UPDATE generation_tasks SET status='uncertain', error='提交结果待核实', updated_at=?
         WHERE status='submitting' AND lease_until <= ?`).run(now, now);
       db.prepare(`UPDATE generation_tasks SET status='timed_out', error='等待超时，平台状态未明确', updated_at=?
@@ -94,8 +99,19 @@ export class GenerationWorker {
       .run(task.id, this.now(), redact(response, secrets));
   }
   private async submit(task: TaskRecord, snapshot: TaskSnapshot) {
+    let started = snapshot.model.category !== 'VIDEO';
     try {
-      const result = await platformCall(snapshot, 'create', submission(snapshot, JSON.parse(task.input)), this.io.fetch,
+      const input = JSON.parse(task.input);
+      const references = snapshot.model.category === 'VIDEO'
+        ? await uploadReferences(snapshot, input.references || [], this.io.fetch,
+          () => this.update(task, { lease_until: this.now() + referencePreparationLeaseMs(snapshot.connection.requestTimeoutMs) }), this.io.inspectReference)
+        : [];
+      const body = submission(snapshot, input, references);
+      // Fence before the paid boundary. An expired owner never submits after takeover.
+      if (!this.update(task, { submission_started: 1, lease_until: this.now() + snapshot.connection.requestTimeoutMs + 30_000,
+        deadline: this.now() + snapshot.connection.queryTimeoutMs })) return;
+      started = true;
+      const result = await platformCall(snapshot, 'create', body, this.io.fetch,
         r => this.diagnostic(task, snapshot, r));
       const data = result.data as { taskId?: unknown; taskStatus?: string } | undefined;
       const platformId = data && ['string', 'number'].includes(typeof data.taskId) && /^\d+$/.test(String(data.taskId))
@@ -109,8 +125,11 @@ export class GenerationWorker {
       const accepted = this.update(task, { platform_id: platformId, status: data?.taskStatus === 'FAILED' ? 'failed' : 'running',
         error: data?.taskStatus === 'FAILED' ? '平台生成失败' : null, lease_until: 0, next_poll: this.now() });
       if (accepted && data?.taskStatus !== 'FAILED') this.track(task, snapshot, data);
-    } catch {
-      this.update(task, { status: 'uncertain', error: '提交结果待核实，请勿重复生成', lease_until: 0 });
+    } catch (error) {
+      if (error instanceof ReferencePreparationError && error.diagnostic) this.diagnostic(task, snapshot, error.diagnostic);
+      this.update(task, started
+        ? { status: 'uncertain', error: '提交结果待核实，请勿重复生成', lease_until: 0 }
+        : { status: 'failed', error: `${error instanceof ReferencePreparationError ? error.message : '素材准备失败'}；尚未提交生成`, lease_until: 0 });
     }
   }
   private async saveArtifacts(task: TaskRecord) {
@@ -120,7 +139,8 @@ export class GenerationWorker {
       for (let index = artifacts.length; index < urls.length; index++) {
         // Renew for each bounded transfer and stop immediately if a new owner fenced us.
         if (!this.update(task, { save_status: 'saving', lease_until: this.now() + artifactTransferTiming.leaseMs, error: null })) return;
-        artifacts.push(await this.io.save(urls[index], task.id, index));
+        const snapshot: TaskSnapshot = JSON.parse(task.snapshot);
+        artifacts.push(await this.io.save(urls[index], task.id, index, snapshot.model.category === 'VIDEO' ? 'video' : 'image'));
         if (!this.update(task, { artifacts: JSON.stringify(artifacts) })) return;
       }
       this.update(task, { save_status: 'saved', lease_until: 0, error: null });
@@ -149,7 +169,12 @@ export class GenerationWorker {
       }
       if (result.code !== 0) throw new PlatformError(transientPlatformErrors.has(result.code) ? 'transient' : 'business');
       if (!Array.isArray(result.data) || !result.data.length) throw new PlatformError('unknown');
-      const files = result.data.filter((f: { nodeId?: string }) => String(f.nodeId) === snapshot.model.outputNode);
+      const files = result.data.filter((f: { nodeId?: string; fileType?: string; fileUrl?: string }) => {
+        if (String(f.nodeId) !== snapshot.model.outputNode) return false;
+        if (snapshot.model.category !== 'VIDEO') return true;
+        return ['mp4', 'video/mp4'].includes(String(f.fileType).toLowerCase())
+          || (!f.fileType && typeof f.fileUrl === 'string' && /\.mp4(?:$|\?)/i.test(f.fileUrl));
+      });
       const urls: string[] = files.map((f: { fileUrl?: unknown }) => {
         if (typeof f.fileUrl !== 'string' || !/^https?:\/\//.test(f.fileUrl)) throw new PlatformError('unknown');
         return f.fileUrl;

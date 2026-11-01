@@ -90,7 +90,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
   useEffect(() => {
     setImageModels(getImageModels());
     let active = true;
-    generationModels().then(models => { if (active) setTaskModels(models); }).catch(() => {});
+    generationModels().then(models => { if (active) setTaskModels(models.filter(m => m.category === 'IMAGE')); }).catch(() => {});
     return () => { active = false; };
   }, []);
 

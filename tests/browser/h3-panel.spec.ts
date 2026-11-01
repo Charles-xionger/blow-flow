@@ -1,0 +1,122 @@
+import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
+import path from 'node:path';
+import type { CreateGeneration, GenerationTask } from '../../lib/generation/types';
+
+const assets = 'https://h3-fixture.test';
+const fixture = (extension: string) => path.join(process.cwd(), 'tests/fixtures/h3/reference.' + extension);
+async function mocks(page: Page) {
+  await page.route('**/api/generation/models', async route => {
+    const response = await route.fetch();
+    const models = await response.json();
+    await route.fulfill({ json: models.map((model: Record<string, unknown>) => ({ ...model, configured: true })) });
+  });
+  await page.route(assets + '/**', route => {
+    const ext = new URL(route.request().url()).pathname.split('.').pop()!;
+    return route.fulfill({ path: fixture(ext), contentType: { png: 'image/png', mp4: 'video/mp4', wav: 'audio/wav' }[ext] });
+  });
+}
+async function open(page: Page, request: APIRequestContext, connected = false, data: Record<string, unknown> = {}) {
+  await mocks(page);
+  await page.setViewportSize({ width: 1280, height: 1100 });
+  await page.addInitScript(() => localStorage.setItem('canvas-theme', 'dark'));
+  const id = crypto.randomUUID();
+  const response = await request.put(`/api/workflow/${id}`, { data: { id, requestId: crypto.randomUUID(), baseVersion: 0,
+    snapshot: { name: 'H3 集成验收', nodes: [
+      { id: 'h3', type: 'imageToVideo', position: { x: 420, y: 60 }, data: { label: 'H3', type: 'imageToVideo', model: 'runninghub-h3',
+        usesGenerationTasks: true, prompt: '人物走过田野', ...data } },
+      ...(connected ? [
+        { id: 'source-image', type: 'originalImage', position: { x: -100, y: 40 }, data: { type: 'originalImage', label: '角色图', imageSrc: assets + '/linked.png' } },
+        { id: 'source-video', type: 'textToVideo', position: { x: -100, y: 420 }, data: { type: 'textToVideo', label: '动作视频', videoSrc: assets + '/linked.mp4' } },
+      ] : [])
+    ], edges: connected ? ['image', 'video'].map(kind => ({ id: 'link-' + kind, source: 'source-' + kind, target: 'h3', sourceHandle: 'output', targetHandle: 'input' })) : [],
+    viewport: { x: 0, y: 0, zoom: 1 } } } });
+  expect(response.ok()).toBeTruthy();
+  await page.goto(`/?project=${id}`);
+  const node = page.locator('.react-flow__node[data-id="h3"]');
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
+  await node.click();
+  await expect(page.getByTestId('video-generation-panel')).toBeVisible();
+  return { id, node, read: async () => (await (await request.get(`/api/workflow/${id}`)).json()).data.nodes.find((n: { id: string }) => n.id === 'h3').data };
+}
+
+test('H3 combines canvas references and uploads, persists ordering and submits the displayed video parameters', async ({ page, request }, testInfo) => {
+  const { read } = await open(page, request, true);
+  const refs = page.getByTestId('video-reference');
+  await expect(refs).toHaveCount(2);
+  const uploadResults = [
+    { kind: 'image', url: assets + '/upload.png' }, { kind: 'audio', url: assets + '/voice.wav' },
+  ];
+  await page.route('**/api/upload/reference', route => route.fulfill({ json: uploadResults.shift() }));
+  await page.getByTestId('reference-file-input').setInputFiles([fixture('png'), fixture('wav')]);
+  await expect(refs).toHaveCount(4);
+  await expect(refs.nth(3)).toContainText('<Audio 2>');
+  await page.getByRole('checkbox', { name: '<Video 1> 参考原声' }).uncheck();
+  await expect(refs.nth(3)).toContainText('<Audio 1>');
+  await page.getByRole('button', { name: '上移素材 3' }).click();
+  await page.getByRole('button', { name: '上移素材 2' }).click();
+  await expect(refs.first()).toContainText('reference.png');
+  await page.getByRole('combobox', { name: '视频分辨率' }).selectOption('1080p');
+  await page.getByRole('combobox', { name: '视频画幅' }).selectOption('9:16');
+  await page.getByRole('combobox', { name: '视频目标时长' }).selectOption('7');
+  await expect(page.getByTestId('video-actual-size')).toContainText('1088 × 1920 · 预计 7.29 秒');
+  await refs.first().getByRole('button', { name: '<Picture 1>', exact: true }).click();
+  await expect(page.getByPlaceholder('描述视频内容，点击素材编号插入引用…')).toHaveValue('人物走过田野<Picture 1>');
+  await expect.poll(async () => (await read()).videoReferenceAudio?.['node:source-video']).toBe(false);
+  await expect.poll(async () => (await read()).videoResolution).toBe('1080p');
+  await page.reload();
+  await page.locator('.react-flow__node[data-id="h3"]').click();
+  await expect(refs).toHaveCount(4); await expect(refs.first()).toContainText('reference.png');
+  await expect(page.getByRole('checkbox', { name: '<Video 1> 参考原声' })).not.toBeChecked();
+  await page.screenshot({ path: testInfo.outputPath('h3-full-panel.png'), animations: 'disabled' });
+  let submitted: CreateGeneration | undefined;
+  await page.route('**/api/generation/tasks', async route => {
+    submitted = route.request().postDataJSON();
+    await route.fulfill({ status: 400, json: { error: '测试捕获参数，未提交平台' } });
+  });
+  await page.getByRole('button', { name: '生成', exact: true }).click();
+  await expect.poll(() => submitted?.input.width).toBe(1088);
+  expect(submitted?.input.height).toBe(1920); expect(submitted?.input.duration).toBe(7);
+  expect(submitted?.input.references).toEqual([
+    { kind: 'image', url: assets + '/upload.png' }, { kind: 'image', url: assets + '/linked.png' },
+    { kind: 'video', url: assets + '/linked.mp4', useAudio: false }, { kind: 'audio', url: assets + '/voice.wav' },
+  ]);
+  await page.getByRole('button', { name: '移除素材 3' }).click();
+  await expect(refs).toHaveCount(3);
+  await expect(page.locator('.react-flow__edge[data-id="link-video"]')).toHaveCount(0);
+});
+
+test('H3 restores a saved MP4 after refresh without submitting generation again', async ({ page, request }, testInfo) => {
+  let result: GenerationTask | undefined; let submits = 0;
+  await page.route('**/api/generation/tasks', async route => {
+    submits++;
+    const submitted: CreateGeneration = route.request().postDataJSON();
+    result = { ...submitted, id: 'h3-task', outputType: 'video', modelVersion: '1', status: 'succeeded', saveStatus: 'saved',
+      revision: 3, createdAt: Date.now(), updatedAt: Date.now(), deadline: null, artifacts: [assets + '/saved.mp4'], error: null };
+    await route.fulfill({ json: { ...result, status: 'queued', revision: 0, artifacts: [] } });
+  });
+  await page.route('**/api/generation/tasks/h3-task', route => route.fulfill({ json: result }));
+  await page.route('**/api/generation/events', route => route.fulfill({ contentType: 'text/event-stream', body: `event: snapshot\ndata: ${JSON.stringify(result ? [result] : [])}\n\n` }));
+  const { read } = await open(page, request);
+  await page.getByRole('button', { name: '生成', exact: true }).click();
+  await expect(page.getByTestId('video-preview').locator('video')).toHaveAttribute('src', assets + '/saved.mp4');
+  await expect.poll(async () => (await read()).videoSrc).toBe(assets + '/saved.mp4');
+  expect((await read()).imageSrc).toBeUndefined();
+  await page.reload(); await page.locator('.react-flow__node[data-id="h3"]').click();
+  await expect(page.getByTestId('video-preview').locator('video')).toHaveAttribute('src', assets + '/saved.mp4');
+  await expect(page.getByTestId('video-generation-panel').getByRole('status')).toHaveText('已保存');
+  await page.screenshot({ path: testInfo.outputPath('h3-recovered-video.png'), animations: 'disabled' });
+  expect(submits).toBe(1);
+});
+
+test('upload limits prevent extra requests and H3 selection preserves legacy video controls', async ({ page, request }) => {
+  let uploads = 0;
+  await page.route('**/api/upload/reference', route => { uploads++; return route.fulfill({ json: {} }); });
+  await open(page, request);
+  await page.getByTestId('reference-file-input').setInputFiles(Array.from({ length: 10 }, (_, i) => ({ name: `image-${i}.png`, mimeType: 'image/png', buffer: Buffer.from('fixture') })));
+  await expect(page.getByTestId('video-generation-panel').getByRole('alert')).toContainText('最多支持 9 张图片'); expect(uploads).toBe(0);
+  await page.getByRole('combobox', { name: '视频模型' }).selectOption('sora-2');
+  await expect(page.getByTestId('video-generation-panel')).toHaveCount(0);
+  await expect(page.getByText('请连接一个图片节点作为输入')).toBeVisible();
+  await page.getByRole('combobox', { name: '视频模型' }).selectOption('runninghub-h3');
+  await expect(page.getByTestId('video-generation-panel')).toBeVisible();
+});

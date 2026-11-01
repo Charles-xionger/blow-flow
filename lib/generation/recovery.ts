@@ -16,7 +16,7 @@ export interface GenerationView {
   pendingGeneration?: CreateGeneration; generationTaskId?: string;
   generationStatus?: string; generationBlocked?: boolean; isLoading?: boolean;
   generationCanRetrySave?: boolean; generationSaving?: boolean;
-  error?: string; imageSrc?: string; outputArtifacts?: string[];
+  error?: string; imageSrc?: string; videoSrc?: string; outputArtifacts?: string[];
 }
 export const clearedGenerationAssociation = {
   pendingGeneration: undefined, generationTaskId: undefined, generationStatus: undefined,
@@ -45,7 +45,7 @@ export function generationRecovery(nodeId: string, view: ViewPort, storage: Stor
       isLoading: generationActive(task), error: task.error || undefined,
       generationCanRetrySave: task.status === 'succeeded' && task.saveStatus === 'failed',
       generationSaving: task.status === 'succeeded' && ['pending', 'saving'].includes(task.saveStatus),
-      ...(task.artifacts.length ? { imageSrc: task.artifacts[0], outputArtifacts: task.artifacts } : {}) });
+      ...(task.artifacts.length ? { [task.outputType === 'video' ? 'videoSrc' : 'imageSrc']: task.artifacts[0], outputArtifacts: task.artifacts } : {}) });
   }
   async function start(request: CreateGeneration) {
     if (!view.read()) return;

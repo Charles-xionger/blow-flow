@@ -1,5 +1,6 @@
 import type { TaskSnapshot } from './service';
 import type { GenerationInput } from './types';
+import { connectVideoReferences, type UploadedReference } from './video-workflow';
 
 export class PlatformError extends Error {
   constructor(public kind: 'transient' | 'business' | 'unknown') { super(kind); }
@@ -21,7 +22,7 @@ export function parsePlatformJson(raw: string): PlatformReply {
   return JSON.parse(safe);
 }
 
-export function submission(snapshot: TaskSnapshot, input: GenerationInput & { seed: number }) {
+export function submission(snapshot: TaskSnapshot, input: GenerationInput & { seed: number }, references: UploadedReference[] = []) {
   const graph = structuredClone(snapshot.model.workflow);
   const values = { ...input, customResolution: true };
   const nodeInfoList = Object.entries(snapshot.model.mapping).map(([key, mapping]) => {
@@ -29,6 +30,7 @@ export function submission(snapshot: TaskSnapshot, input: GenerationInput & { se
     graph[mapping.nodeId].inputs[mapping.fieldName] = fieldValue;
     return { ...mapping, fieldValue };
   });
+  if (snapshot.model.category === 'VIDEO') connectVideoReferences(graph, snapshot, input, references);
   // Pin the whole exported graph, including bypass, weights and LoRAs, so editing
   // the remote workflow after enqueueing cannot alter an existing task's meaning.
   return { workflowId: snapshot.model.workflowId, workflow: JSON.stringify(graph), nodeInfoList };

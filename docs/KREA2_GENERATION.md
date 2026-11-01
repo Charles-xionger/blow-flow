@@ -1,6 +1,6 @@
 # Krea2 生成任务与恢复（工单 01–03）
 
-新增模型 `runninghub-krea2` 使用独立任务接口；显示名称可更改，适配器固定为 `runninghub-workflow`。现有模型及 `/api/generate/*` 保持原行为。H3 尚未发布。
+新增模型 `runninghub-krea2` 使用独立任务接口；显示名称可更改，适配器固定为 `runninghub-workflow`。现有模型及 `/api/generate/*` 保持原行为。H3 使用同一任务服务，配置与多模态参考说明见 [H3 接入文档](H3_GENERATION.md)。
 
 ## 启动
 
@@ -39,6 +39,24 @@ node -r ./scripts/register-typescript.cjs -e 'console.log(JSON.stringify(require
 设置 `GENERATION_CONFIG_PATH` 为该 JSON 的绝对路径。连接字段 `baseUrl` 填明确站点地址，`apiKeyEnv` 只填环境变量名称；多个模型可共用 `connectionId`。模型需要稳定 `id`、显示 `name`、`version`、显式 `adapter`、导出图及映射。修改模型时更新 `version` 并重启 worker。现有任务继续使用创建时的完整快照；更换账号时创建新连接 ID，保留旧任务使用的凭据环境变量。
 
 每个连接默认 `concurrency: 1`。可调整并发、`requestTimeoutMs`（默认 30 秒）、`pollIntervalMs`（5 秒）、`queryTimeoutMs`（30 分钟）和 `maxQueryErrors`（3 次）。并发占位与认领在 SQLite IMMEDIATE 事务内完成；多进程 worker 不会重复提交同一任务。所有未明确结束的任务（包括待核实、等待超时）计入占位。提高并发应在所有进程使用相同配置后进行。
+
+### 可选的平台网络选路
+
+如果系统 DNS／VPN 将 RunningHub 流量送往上传缓慢的节点，可以在 `.env.local` 指定已验证的连接 IP 和出口网卡，然后重启 worker：
+
+```dotenv
+RUNNINGHUB_BASE_URL=https://www.runninghub.ai
+RUNNINGHUB_CONNECT_IP=43.168.19.45
+RUNNINGHUB_LOCAL_INTERFACE=en0
+```
+
+此 IP 是本次实测可用的香港 CDN 节点示例，备用实测地址为 `43.175.132.232`；CDN 地址会变化，部署前须重新核实，不把它视为永久服务地址。`en0` 是本机的 Wi-Fi 网卡，其他部署环境应使用实际网卡名。worker 启动时读取该网卡当前地址，换网后应重启；指定网卡不存在或没有匹配的 IP 地址族时启动失败，不悄悄切回其他出口。绑定本地地址的路由效果取决于操作系统与 VPN，迁移机器后需重新验证。
+
+`lib/generation/transport.ts` 通过 Undici 的连接解析设置选择 IP，保留域名 URL、Host、TLS SNI 和证书验证。该设置只应用于与 `RUNNINGHUB_BASE_URL` 相同 origin 的 HTTP 请求；未填写 BASE_URL 时网络选路的目标默认为 `https://www.runninghub.ai`。使用自定义 `GENERATION_CONFIG_PATH` 时，BASE_URL 应与希望覆盖的连接 origin 一致。素材上传、任务创建和 HTTP 状态查询共用同一个传输实例，OSS 下载、其他平台、产物转存与平台返回的 WebSocket 地址保持原有路由。WebSocket 不通时仍由原有 HTTP 查询兜底。
+
+两个选路变量均不配置时沿用系统网络。仅填写 `RUNNINGHUB_CONNECT_IP` 可以覆盖 DNS，但系统级 VPN 仍可能接管连接；本机实测需要同时绑定 Wi-Fi 地址才能恢复上传速度。网络层不自动重放请求，提交响应不明确仍遵循原有待核实逻辑。不要把 BASE_URL 改成裸 IP，也不要关闭 TLS 校验。
+
+配置验证可仅执行素材上传，不创建视频任务。`tests/generation-transport.test.cjs` 覆盖真实本地 HTTP 链路、Host 与 multipart 保留、出口绑定、TLS SNI／证书主机名校验、其他 origin 隔离、重定向拒绝及提交断线不重放。
 
 ## API 和状态
 

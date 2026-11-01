@@ -7,6 +7,7 @@ import { useCanvasStore } from "@/store/useCanvasStore";
 import { Image as ImageIcon, Upload, X } from "lucide-react";
 import type { NodeData } from "@/types";
 import { ImageWithActions } from "@/components/ui/image-with-actions";
+import { mediaUploadLimit } from "@/lib/upload-limits";
 
 const OriginalImageNode = (props: NodeProps<Node<NodeData>>) => {
   const { id, data, selected } = props;
@@ -20,10 +21,15 @@ const OriginalImageNode = (props: NodeProps<Node<NodeData>>) => {
   const handleFileChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
+      e.target.value = "";
       if (!file) return;
+      if (file.size > mediaUploadLimit) {
+        updateNodeData(id, { error: "图片大小不能超过 30 MB", isLoading: false });
+        return;
+      }
 
       // 显示加载状态
-      updateNodeData(id, { isLoading: true });
+      updateNodeData(id, { isLoading: true, error: undefined });
 
       try {
         // 上传到服务器
@@ -42,6 +48,7 @@ const OriginalImageNode = (props: NodeProps<Node<NodeData>>) => {
           updateNodeData(id, {
             imageSrc: result.data.url,
             isLoading: false,
+            error: undefined,
           });
         } else {
           throw new Error(result.error);
@@ -67,9 +74,13 @@ const OriginalImageNode = (props: NodeProps<Node<NodeData>>) => {
           const file = item.getAsFile();
           if (file) {
             e.preventDefault();
+            if (file.size > mediaUploadLimit) {
+              updateNodeData(id, { error: "图片大小不能超过 30 MB", isLoading: false });
+              break;
+            }
 
             // 显示加载状态
-            updateNodeData(id, { isLoading: true });
+            updateNodeData(id, { isLoading: true, error: undefined });
 
             try {
               // 上传到服务器
@@ -88,6 +99,7 @@ const OriginalImageNode = (props: NodeProps<Node<NodeData>>) => {
                 updateNodeData(id, {
                   imageSrc: result.data.url,
                   isLoading: false,
+                  error: undefined,
                 });
               } else {
                 throw new Error(result.error);
@@ -182,7 +194,7 @@ const OriginalImageNode = (props: NodeProps<Node<NodeData>>) => {
                   点击上传或粘贴图片
                 </span>
                 <span className="text-xs text-zinc-500">
-                  支持 JPG、PNG、GIF 格式
+                  支持 JPG、PNG、WEBP、GIF 格式，最大 30 MB
                 </span>
               </button>
             ) : (
@@ -194,7 +206,7 @@ const OriginalImageNode = (props: NodeProps<Node<NodeData>>) => {
                   重新上传
                 </button>
                 <button
-                  onClick={() => updateNodeData(id, { imageSrc: undefined })}
+                  onClick={() => updateNodeData(id, { imageSrc: undefined, error: undefined })}
                   className="shrink-0 h-10 px-4 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 transition-all"
                 >
                   <X size={16} />

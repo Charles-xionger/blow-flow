@@ -1,5 +1,6 @@
 import type { CreateGeneration } from "@/lib/generation/types";
 import type { ImageSizePreset } from "@/lib/generation/image-dimensions";
+import type { VideoReference, VideoResolution } from "@/lib/generation/video";
 import { Edge, Node } from "@xyflow/react";
 
 // 节点类型枚举
@@ -43,6 +44,12 @@ export interface NodeData extends Record<string, unknown> {
   generationWidth?: number;
   generationHeight?: number;
   generationSizePreset?: ImageSizePreset;
+  videoReferences?: VideoReference[];
+  videoReferenceOrder?: string[];
+  videoReferenceAudio?: Record<string, boolean>;
+  videoResolution?: VideoResolution;
+  videoAspectRatio?: string;
+  videoDuration?: number;
 
   // 状态
   isLoading?: boolean;

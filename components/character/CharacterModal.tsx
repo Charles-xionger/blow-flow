@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { X, Upload, Trash2, Loader2, Sparkles } from "lucide-react";
 import type { Character } from "@/types";
 import { toast } from "sonner";
+import { mediaUploadLimit } from "@/lib/upload-limits";
 
 interface CharacterModalProps {
   character: Character | null;
@@ -79,15 +80,13 @@ export function CharacterModal({
           continue;
         }
 
-        // 验证文件大小（最大10MB）
-        if (file.size > 10 * 1024 * 1024) {
-          toast.error(`${file.name} 文件过大，最大支持10MB`);
+        if (file.size > mediaUploadLimit) {
+          toast.error(`${file.name} 文件过大，最大支持30MB`);
           continue;
         }
 
-        // 转换为base64并上传
         const formData = new FormData();
-        formData.append("image", file);
+        formData.append("file", file);
 
         const response = await fetch("/api/upload/image", {
           method: "POST",
@@ -96,8 +95,8 @@ export function CharacterModal({
 
         const result = await response.json();
 
-        if (result.success && result.url) {
-          setReferenceImages((prev) => [...prev, result.url]);
+        if (result.success && result.data?.url) {
+          setReferenceImages((prev) => [...prev, result.data.url]);
         } else {
           toast.error(`上传 ${file.name} 失败: ${result.error}`);
         }
@@ -344,7 +343,7 @@ export function CharacterModal({
               </div>
 
               <p className="text-xs text-gray-500">
-                支持 JPG、PNG、WEBP 格式，最大10MB
+                支持 JPG、PNG、WEBP 格式，最大30MB
               </p>
             </div>
 

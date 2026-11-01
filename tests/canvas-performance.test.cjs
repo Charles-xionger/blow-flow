@@ -152,6 +152,17 @@ test('store refuses invalid connections even without canvas preview validation',
   canvasDraftStorage.flush();
 });
 
+test('video reference connections are enabled for H3 without changing legacy model input types', () => {
+  const { isValidCanvasConnection: valid } = load('lib/canvas/connections.ts');
+  const { NodeType: T } = load('types/index.ts');
+  const nodes = [{ id: 'video', data: { type: T.TEXT_TO_VIDEO } },
+    { id: 'target', data: { type: T.IMAGE_TO_VIDEO, model: 'runninghub-h3' } }];
+  const connection = { source: 'video', target: 'target', sourceHandle: 'output', targetHandle: 'input' };
+  assert.equal(valid(connection, nodes, []), true);
+  nodes[1].data.model = 'sora-2';
+  assert.equal(valid(connection, nodes, []), false);
+});
+
 test('switching canvases does not cancel; explicit deletion persists cancellation and duplicating does not copy task identity', async () => {
   const { useCanvasStore: store, canvasDraftStorage } = load('store/useCanvasStore.ts');
   const { NodeType } = load('types/index.ts');

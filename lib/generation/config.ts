@@ -1,6 +1,7 @@
 import { validGenerationDimensions } from './dimensions';
 import fs from 'node:fs';
 import workflow from '../../config/workflows/krea2.json';
+import h3Workflow from '../../config/workflows/h3.json';
 import type { GenerationConfig } from './types';
 
 export const defaultConfig: GenerationConfig = {
@@ -11,7 +12,16 @@ export const defaultConfig: GenerationConfig = {
     mapping: { prompt: { nodeId: '102', fieldName: 'prompt' }, width: { nodeId: '10', fieldName: 'custom_width' },
       height: { nodeId: '10', fieldName: 'custom_height' }, seed: { nodeId: '97', fieldName: 'seed' },
       customResolution: { nodeId: '10', fieldName: 'use_custom_resolution' } },
-    capabilities: { prompt: true, referenceImages: false, dimensions: { min: 64, max: 8192, step: 8, defaultWidth: 1920, defaultHeight: 1080 } } }],
+    capabilities: { prompt: true, referenceImages: false, dimensions: { min: 64, max: 8192, step: 8, defaultWidth: 1920, defaultHeight: 1080 } } },
+    { id: 'runninghub-h3', name: 'H3', category: 'VIDEO', adapter: 'runninghub-workflow', version: '1',
+      connectionId: 'runninghub-international', workflowId: '2116745173157138433', workflow: h3Workflow, outputNode: '148',
+      mapping: { prompt: { nodeId: '238', fieldName: 'value' }, width: { nodeId: '136', fieldName: 'width' },
+        height: { nodeId: '136', fieldName: 'height' }, seed: { nodeId: '129', fieldName: 'noise_seed' },
+        duration: { nodeId: '227', fieldName: 'value' } },
+      references: { nodeId: '136', imageLoader: '199', videoLoader: '185', audioLoader: '182' },
+      capabilities: { prompt: true, referenceImages: true,
+        dimensions: { min: 32, max: 4096, step: 32, defaultWidth: 1280, defaultHeight: 736 },
+        video: { minDuration: 5, maxDuration: 15, defaultDuration: 7, fps: 24, maxImages: 9, maxVideos: 3, maxAudios: 3 } } }],
 };
 
 // Admin-only file; secrets are environment references, never model properties.
@@ -44,28 +54,43 @@ export function validateGenerationConfig(config: GenerationConfig): void {
   }
   const models = new Set<string>();
   for (const m of config.models) {
-    keys(m, ['id', 'name', 'category', 'adapter', 'version', 'connectionId', 'workflowId', 'workflow', 'outputNode', 'mapping', 'capabilities']);
-    if (!m.id || models.has(m.id) || !m.version || !m.name || !connections.has(m.connectionId) || m.adapter !== 'runninghub-workflow' || m.category !== 'IMAGE' || typeof m.workflowId !== 'string')
+    keys(m, ['id', 'name', 'category', 'adapter', 'version', 'connectionId', 'workflowId', 'workflow', 'outputNode', 'mapping', 'capabilities', 'references']);
+    if (!m.id || models.has(m.id) || !m.version || !m.name || !connections.has(m.connectionId) || m.adapter !== 'runninghub-workflow' || !['IMAGE', 'VIDEO'].includes(m.category) || typeof m.workflowId !== 'string')
       throw new Error('Invalid generation model');
     models.add(m.id);
-    keys(m.capabilities, ['prompt', 'referenceImages', 'dimensions']);
-    if (m.capabilities.prompt !== true || m.capabilities.referenceImages !== false) throw new Error('Unsupported capabilities');
+    keys(m.capabilities, ['prompt', 'referenceImages', 'dimensions', 'video']);
+    if (m.capabilities.prompt !== true || m.capabilities.referenceImages !== (m.category === 'VIDEO')) throw new Error('Unsupported capabilities');
     const d = m.capabilities.dimensions;
     keys(d, ['min', 'max', 'step', 'defaultWidth', 'defaultHeight']);
-    if (![d.min, d.max, d.step, d.defaultWidth, d.defaultHeight].every(Number.isSafeInteger) || d.min < 64 || d.max > 8192 || d.max < d.min || d.step < 8 || d.step % 8 ||
+    if (![d.min, d.max, d.step, d.defaultWidth, d.defaultHeight].every(Number.isSafeInteger) || d.min < (m.category === 'VIDEO' ? 32 : 64) || d.max > 8192 || d.max < d.min || d.step < 8 || d.step % 8 ||
       !validGenerationDimensions(d, d.defaultWidth, d.defaultHeight)) throw new Error('Invalid model dimensions');
-    keys(m.mapping, ['prompt', 'width', 'height', 'seed', 'customResolution']);
-    for (const key of ['prompt', 'width', 'height', 'seed', 'customResolution'] as const) {
+    keys(m.mapping, ['prompt', 'width', 'height', 'seed', 'customResolution', 'duration']);
+    for (const key of ['prompt', 'width', 'height', 'seed', m.category === 'VIDEO' ? 'duration' : 'customResolution'] as const) {
       const mapping = m.mapping[key];
+      if (!mapping) throw new Error('Missing workflow mapping');
       keys(mapping, ['nodeId', 'fieldName']);
       if (!m.workflow[mapping.nodeId] || !(mapping.fieldName in m.workflow[mapping.nodeId].inputs)) throw new Error('Invalid workflow mapping');
     }
     if (!m.workflow[m.outputNode]) throw new Error('Invalid output node');
-    // This adapter is for the credential-free Krea2 graph, not arbitrary API nodes.
+    if (m.category === 'VIDEO') {
+      const v = m.capabilities.video;
+      const r = m.references;
+      if (!v || !r) throw new Error('Missing video capabilities');
+      keys(v, ['minDuration', 'maxDuration', 'defaultDuration', 'fps', 'maxImages', 'maxVideos', 'maxAudios']);
+      if (!Object.values(v).every(Number.isSafeInteger) || v.minDuration < 1 || v.maxDuration > 15 || v.maxDuration < v.minDuration ||
+        v.defaultDuration < v.minDuration || v.defaultDuration > v.maxDuration || v.fps !== 24 ||
+        v.maxImages < 0 || v.maxImages > 9 || v.maxVideos < 0 || v.maxVideos > 3 || v.maxAudios < 0 || v.maxAudios > 3 || d.step !== 32)
+        throw new Error('Invalid H3 capabilities');
+      keys(r, ['nodeId', 'imageLoader', 'videoLoader', 'audioLoader']);
+      if (m.workflow[r.nodeId]?.class_type !== 'MiniMaxH3ReferenceToVideo' ||
+        m.workflow[r.imageLoader]?.class_type !== 'LoadImage' || m.workflow[r.videoLoader]?.class_type !== 'VHS_LoadVideo' ||
+        m.workflow[r.audioLoader]?.class_type !== 'LoadAudio') throw new Error('Invalid reference mapping');
+    } else if (m.capabilities.video || m.references || m.mapping.duration) throw new Error('Unexpected video configuration');
+    // Only credential-free graphs are accepted; unrelated names such as min_tokens are not credentials.
     const scan = (value: unknown): void => {
       if (!value || typeof value !== 'object') return;
       for (const [key, child] of Object.entries(value)) {
-        if (/api.?key|token|authorization|password|secret/i.test(key)) throw new Error('Credentials are not allowed in workflow snapshots');
+        if (/api.?key|access.?token|auth.?token|^token$|authorization|password|secret/i.test(key)) throw new Error('Credentials are not allowed in workflow snapshots');
         scan(child);
       }
     };
