@@ -41,9 +41,3 @@ export function imageSizeSelection(width: number, height: number, limits: Dimens
   const divisor = gcd(width, height) || 1;
   return { preset, ratio, label: ratio ?? `${width / divisor}:${height / divisor}` };
 }
-
-export function imagePreviewSize(width: number, height: number): ImageDimensions {
-  if (!(width > 0 && height > 0 && Number.isFinite(width) && Number.isFinite(height))) return { width: 320, height: 240 };
-  const scale = Math.min(320 / width, 320 / height);
-  return { width: width * scale, height: height * scale };
-}

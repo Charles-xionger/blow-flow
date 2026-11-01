@@ -16,7 +16,6 @@ import { validGenerationDimensions } from "@/lib/generation/dimensions";
 import { generationModels } from "@/lib/generation/client";
 import type { PublicModel } from "@/lib/generation/types";
 import { useGenerationTask } from "@/hooks/useGenerationTask";
-import { imagePreviewSize } from "@/lib/generation/image-dimensions";
 import { ImageSizeSettings } from "./shared/ImageSizeSettings";
 import { ImageModelSettings } from "./shared/ImageModelSettings";
 import { ImageGenerationPanel } from "./shared/ImageGenerationPanel";
@@ -269,13 +268,9 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
   const hasResult = !!data.imageSrc && !data.isLoading;
   const generationWidth = data.generationWidth ?? taskModel?.capabilities.dimensions.defaultWidth;
   const generationHeight = data.generationHeight ?? taskModel?.capabilities.dimensions.defaultHeight;
-  const [ratioWidth, ratioHeight] = (data.aspectRatio || '1:1').split(':').map(Number);
-  const displaySize = taskModel && generationWidth && generationHeight
-    ? imagePreviewSize(generationWidth, generationHeight) : imagePreviewSize(ratioWidth, ratioHeight);
 
   return (
-    <BaseNode {...props} displaySize={displaySize} titleAccessory={taskModel && <span
-      className="shrink-0 text-[10px] text-zinc-400 tabular-nums">{generationWidth} × {generationHeight} px</span>}>
+    <BaseNode {...props}>
 
       {/* 角色信息提示 */}
       {characterData && (
@@ -297,12 +292,10 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
             />
           </div>
         ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center text-zinc-500">
-            <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 bg-zinc-800/50 text-zinc-500">
+          <div role="img" aria-label="尚无生成图片" className="w-full h-full flex items-center justify-center text-zinc-500">
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center bg-zinc-800/50 text-zinc-500">
               <ImageIcon size={28} className="opacity-60" aria-hidden />
             </div>
-            <span className="text-sm font-medium opacity-60">生图</span>
-            <span className="text-xs opacity-40 mt-1">{selected ? "输入提示词开始创作" : "选中节点开始创作"}</span>
           </div>
         )}
 
@@ -401,10 +394,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
               </button>
             </div>
 
-            {taskModel && <div className="text-[11px] text-zinc-500">
-              <span>仅文生图 · 不支持参考图</span>
-              {!taskModel.configured && <span> · 请管理员配置平台连接</span>}
-            </div>}
+            {taskModel && !taskModel.configured && <div className="text-[11px] text-zinc-500">请管理员配置平台连接</div>}
             {data.generationBlocked && data.generationTaskId && <button type="button"
               onClick={() => void resumeTask()} className="text-sm text-blue-300">继续查询原任务</button>}
             {(data.generationCanRetrySave || data.generationSaving) && data.generationTaskId && <button type="button"

@@ -19,7 +19,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { ImageWithActions } from "@/components/ui/image-with-actions";
 import { ImageGenerationPanel } from "./shared/ImageGenerationPanel";
 import { ImageModelSettings } from "./shared/ImageModelSettings";
-import { imagePreviewSize } from "@/lib/generation/image-dimensions";
 import imageStyles from "./shared/ImageGeneration.module.css";
 
 const aspectRatios = [
@@ -146,10 +145,9 @@ const ImageToImageNode = (props: NodeProps<Node<NodeData>>) => {
   );
 
   const hasResult = !!data.imageSrc && !data.isLoading;
-  const [ratioWidth, ratioHeight] = (data.aspectRatio || '1:1').split(':').map(Number);
 
   return (
-    <BaseNode {...props} displaySize={imagePreviewSize(ratioWidth, ratioHeight)}>
+    <BaseNode {...props}>
 
       {/* 节点显示区域 */}
       <NodeSurface testId="image-preview">
@@ -162,12 +160,10 @@ const ImageToImageNode = (props: NodeProps<Node<NodeData>>) => {
             />
           </div>
         ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center text-zinc-500">
-            <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 bg-zinc-800/50 text-zinc-500">
+          <div role="img" aria-label="尚无生成图片" className="w-full h-full flex items-center justify-center text-zinc-500">
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center bg-zinc-800/50 text-zinc-500">
               <ImageIcon size={28} className="opacity-60" aria-hidden />
             </div>
-            <span className="text-sm font-medium opacity-60">图生图</span>
-            <span className="text-xs opacity-40 mt-1">{selected ? "输入提示词开始创作" : "选中节点开始创作"}</span>
           </div>
         )}
 
