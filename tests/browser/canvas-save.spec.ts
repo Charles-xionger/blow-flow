@@ -25,7 +25,7 @@ async function localDraft(page: Page, id: string) {
 }
 
 test('an existing empty project name remains editable after a rejected save', async ({ page, request }) => {
-  await page.goto('/');
+  await page.goto('/canvas');
   await expect(page.getByTestId('canvas-save-status')).toHaveText('尚未保存');
   await addTextNode(page);
   await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
@@ -76,7 +76,7 @@ test('an existing empty project name remains editable after a rejected save', as
 });
 
 test('clearing a project name while renaming never submits an invalid snapshot', async ({ page, request }) => {
-  await page.goto('/');
+  await page.goto('/canvas');
   await expect(page.getByTestId('canvas-save-status')).toHaveText('尚未保存');
   await addTextNode(page);
   await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
@@ -111,7 +111,7 @@ test('clearing a project name while renaming never submits an invalid snapshot',
 });
 
 test('editing a canvas survives clearing browser storage and deleting its last node', async ({ page, request, context }) => {
-  await page.goto('/');
+  await page.goto('/canvas');
   await expect(page.getByTestId('canvas-save-status')).toHaveText('尚未保存');
   await addTextNode(page);
   await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
@@ -156,7 +156,7 @@ test('local transaction abort prevents server-only saving', async ({ page }) => 
   });
   let writes = 0;
   page.on('request', request => { if (request.url().includes('/api/workflow') && request.method() === 'PUT') writes++; });
-  await page.goto('/');
+  await page.goto('/canvas');
   await expect(page.getByTestId('canvas-save-status')).toHaveText('尚未保存');
   await addTextNode(page);
   await expect(page.getByTestId('canvas-save-status')).toHaveText('本地保存失败');
@@ -165,7 +165,7 @@ test('local transaction abort prevents server-only saving', async ({ page }) => 
 });
 
 test('restoration preserves pending local edits instead of replacing them with server content', async ({ page, request }) => {
-  await page.goto('/');
+  await page.goto('/canvas');
   await expect(page.getByTestId('canvas-save-status')).toHaveText('尚未保存');
   await addTextNode(page);
   await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
@@ -201,7 +201,7 @@ test('real API rejects legacy writes and replays versioned requests without adva
 });
 
 test('API offline edits survive refresh and automatically sync into a clean browser', async ({ page, request, context }) => {
-  await page.goto('/');
+  await page.goto('/canvas');
   await expect(page.getByTestId('canvas-save-status')).toHaveText('尚未保存');
   await addTextNode(page);
   await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
@@ -239,7 +239,7 @@ test('API offline edits survive refresh and automatically sync into a clean brow
 
 for (const mode of ['create', 'update'] as const) {
   test(`lost ${mode} acknowledgement replays after refresh without duplicate versions and keeps newer edits`, async ({ page, request, context }) => {
-    await page.goto('/');
+    await page.goto('/canvas');
     await expect(page.getByTestId('canvas-save-status')).toHaveText('尚未保存');
     if (mode === 'update') {
       await addTextNode(page);
@@ -298,7 +298,7 @@ for (const mode of ['create', 'update'] as const) {
 }
 
 test('browser reconnect wakes locally committed edits without manual saving', async ({ page, context, request }) => {
-  await page.goto('/');
+  await page.goto('/canvas');
   await expect(page.getByTestId('canvas-save-status')).toHaveText('尚未保存');
   await addTextNode(page);
   await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');

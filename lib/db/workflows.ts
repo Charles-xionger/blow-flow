@@ -1,6 +1,7 @@
 import { getDatabase } from "./index";
 import type { Node, Edge, Viewport } from "@xyflow/react";
 import { createHash } from "node:crypto";
+import { projectCover } from "../workspace/cover";
 import { canonicalJSON, CanvasSaveError, validateSaveOperation, type SaveOperation, type SaveAcknowledgement } from "../canvas/save-protocol";
 
 export interface WorkflowData {
@@ -75,15 +76,16 @@ export function saveWorkflow(operation: SaveOperation): SaveAcknowledgement {
       if (receipt.digest !== digest) throw new CanvasSaveError("Request ID already used with different content", 409);
       return { id, requestId, version: receipt.version };
     }
-    const existing = db.prepare("SELECT version FROM workflows WHERE id = ?").get(id) as { version: number } | undefined;
+    const existing = db.prepare("SELECT version, data, cover_url FROM workflows WHERE id = ?").get(id) as { version: number; data: string; cover_url: string | null } | undefined;
     if ((existing?.version ?? 0) !== baseVersion) throw new CanvasSaveError("Canvas version conflict; local content has been preserved", 409);
     const version = baseVersion + 1;
     const now = Date.now();
     const data = JSON.stringify({ nodes: snapshot.nodes, edges: snapshot.edges, viewport: snapshot.viewport });
-    db.prepare(`INSERT INTO workflows (id, name, data, created_at, updated_at, version) VALUES (?, ?, ?, ?, ?, ?)
+    const cover = projectCover(snapshot.nodes, existing ? JSON.parse(existing.data).nodes : [], existing?.cover_url);
+    db.prepare(`INSERT INTO workflows (id, name, data, created_at, updated_at, version, cover_url, node_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET name = excluded.name, data = excluded.data,
-        updated_at = excluded.updated_at, version = excluded.version`)
-      .run(id, snapshot.name, data, now, now, version);
+        updated_at = excluded.updated_at, version = excluded.version, cover_url = excluded.cover_url, node_count = excluded.node_count`)
+      .run(id, snapshot.name, data, now, now, version, cover, snapshot.nodes.length);
     db.prepare("INSERT INTO canvas_save_receipts (canvas_id, request_id, digest, version) VALUES (?, ?, ?, ?)")
       .run(id, requestId, digest, version);
     return { id, requestId, version };

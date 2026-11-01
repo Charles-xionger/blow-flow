@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
+import { projectCover } from "../workspace/cover";
 
 let db: Database.Database | null = null;
 
@@ -46,6 +47,26 @@ function initializeTables(db: Database.Database) {
     if (!columns.some(column => column.name === "deleted_at")) {
       db.exec("ALTER TABLE workflows ADD COLUMN deleted_at INTEGER");
     }
+    if (!columns.some(column => column.name === "folder_id")) {
+      db.exec("ALTER TABLE workflows ADD COLUMN folder_id TEXT");
+    }
+    if (!columns.some(column => column.name === "purged_at")) {
+      db.exec("ALTER TABLE workflows ADD COLUMN purged_at INTEGER");
+    }
+    if (!columns.some(column => column.name === "cover_url")) {
+      db.exec("ALTER TABLE workflows ADD COLUMN cover_url TEXT");
+      db.exec("ALTER TABLE workflows ADD COLUMN node_count INTEGER NOT NULL DEFAULT 0");
+      const rows = db.prepare("SELECT id, data FROM workflows").all() as { id: string; data: string }[];
+      const update = db.prepare("UPDATE workflows SET cover_url = ?, node_count = ? WHERE id = ?");
+      for (const row of rows) {
+        const { nodes = [] } = JSON.parse(row.data);
+        update.run(projectCover(nodes), nodes.length, row.id);
+      }
+    }
+    db.exec(`CREATE TABLE IF NOT EXISTS project_folders (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_workflows_folder ON workflows(folder_id, deleted_at);`);
     db.exec(`CREATE TABLE IF NOT EXISTS canvas_save_receipts (
       canvas_id TEXT NOT NULL,
       request_id TEXT NOT NULL,

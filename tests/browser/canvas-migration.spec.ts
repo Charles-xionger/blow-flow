@@ -29,7 +29,7 @@ test('first startup migrates a new legacy canvas once, preserving its backup and
     localStorage.setItem('generation-node-v1:unrelated', 'keep-generation-record');
     localStorage.setItem('theme', 'dark');
   });
-  await page.goto('/');
+  await page.goto('/canvas');
   await expect(page.getByText('升级前保留的文字', { exact: true })).toBeVisible();
   await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
   const [first] = (await records(page)).drafts;
@@ -51,7 +51,7 @@ for (const choice of ['server', 'copy'] as const) {
     await seed(page, legacy(id));
     let writes = 0;
     page.on('request', req => { if (req.url().endsWith(`/api/workflow/${id}`) && req.method() === 'PUT') writes++; });
-    await page.goto('/');
+    await page.goto('/canvas');
     await expect(page.getByText('本地草稿与服务端不同，双方内容均已保留。')).toBeVisible();
     expect(writes).toBe(0);
     expect((await records(page)).operations).toHaveLength(0);
@@ -80,7 +80,7 @@ test('matching legacy and server snapshots establish a baseline without any remo
   await seed(page, legacy(id));
   let writes = 0;
   page.on('request', req => { if (req.method() === 'PUT') writes++; });
-  await page.goto('/');
+  await page.goto('/canvas');
   await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
   expect(writes).toBe(0);
   expect((await (await request.get(`/api/workflow/${id}`)).json()).data.version).toBe(1);
@@ -92,7 +92,7 @@ test('matching legacy and server snapshots establish a baseline without any remo
 for (const raw of ['{broken', JSON.stringify({ version: 0, state: { nodes: [{ id: 'broken' }] } })]) {
   test(`invalid legacy data stays exportable without recording migration success: ${raw.slice(0, 12)}`, async ({ page }) => {
     await seed(page, raw);
-    await page.goto('/');
+    await page.goto('/canvas');
     await expect(page.getByRole('button', { name: '重试迁移' })).toBeVisible();
     expect((await records(page)).marker).toBeUndefined();
     expect((await records(page)).drafts).toHaveLength(0);
@@ -129,7 +129,7 @@ test('an interrupted migration rolls back its marker and imported draft, then re
   });
   let writes = 0;
   page.on('request', req => { if (req.method() === 'PUT') writes++; });
-  await page.goto('/');
+  await page.goto('/canvas');
   await expect(page.getByRole('button', { name: '重试迁移' })).toBeVisible();
   expect(await records(page)).toEqual({ drafts: [], operations: [], marker: undefined });
   expect(writes).toBe(0);
@@ -152,7 +152,7 @@ test('migration and recovery copies never submit a pending generation request', 
     if (route.request().method() === 'POST') { submissions.push(route.request().url()); await route.abort(); }
     else await route.continue();
   });
-  await page.goto('/');
+  await page.goto('/canvas');
   await expect(page.getByText('本地草稿与服务端不同，双方内容均已保留。')).toBeVisible();
   await expect(page.locator('.react-flow__node')).toHaveCount(1);
   expect(submissions).toEqual([]);
@@ -167,7 +167,7 @@ test('migration and recovery copies never submit a pending generation request', 
 });
 
 test('an existing IndexedDB draft survives collision and the legacy copy remains reachable after restart', async ({ page, request }) => {
-  await page.goto('/');
+  await page.goto('/canvas');
   await expect(page.getByTestId('canvas-save-status')).toHaveText('尚未保存');
   await page.locator('.react-flow').dispatchEvent('drop', {
     dataTransfer: await page.evaluateHandle(() => { const transfer = new DataTransfer(); transfer.setData('application/reactflow-nodetype', 'text'); return transfer; }),
@@ -200,7 +200,7 @@ test('API offline migration is readable and cannot upload even after local editi
   await page.route('**/api/workflow/**', route => route.abort());
   let writes = 0;
   page.on('request', req => { if (req.method() === 'PUT') writes++; });
-  await page.goto('/');
+  await page.goto('/canvas');
   await expect(page.getByText('升级前保留的文字', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: '升级前草稿', exact: true }).click();
   await page.getByPlaceholder('项目名称...').fill('离线迁移编辑');
@@ -222,7 +222,7 @@ test('adopting remote content freezes editing until the local backup and replace
   const id = crypto.randomUUID();
   await request.put(`/api/workflow/${id}`, { data: { id, requestId: crypto.randomUUID(), baseVersion: 0, snapshot: { ...snapshot, name: '采用的远端' } } });
   await seed(page, legacy(id));
-  await page.goto('/');
+  await page.goto('/canvas');
   await expect(page.getByText('本地草稿与服务端不同，双方内容均已保留。')).toBeVisible();
   await page.getByRole('button', { name: '升级前草稿', exact: true }).click();
   await page.getByPlaceholder('项目名称...').fill('选择前最后的编辑');

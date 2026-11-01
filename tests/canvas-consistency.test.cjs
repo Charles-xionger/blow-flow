@@ -71,3 +71,52 @@ test('a recovery choice using a late server read cannot erase deletion or replac
   assert.equal((await repo.read('canvas')).recovery.kind, 'deleted');
   assert.equal((await repo.recoveries()).length, 1);
 });
+
+test('a late deletion response cannot invalidate a project restored at a newer server version', async () => {
+  const repo = createCanvasRepository('restored-response-' + crypto.randomUUID());
+  await repo.adopt('canvas', snapshot('original'), 1);
+  await repo.commit('canvas', snapshot('accepted before deletion'), 1, 0);
+  const sent = await repo.pending('canvas');
+  const deleted = await repo.markRecovery('canvas', 'deleted');
+  await repo.reconcileDeleted('canvas', snapshot('accepted before deletion'), 4, deleted.recovery.observationId);
+  await repo.markRecovery('canvas', 'deleted', sent.requestId, 'late HTTP 410', sent.baseVersion);
+  const reopened = await repo.read('canvas');
+  assert.equal(reopened.recovery, undefined);
+  assert.equal(reopened.serverVersion, 4);
+  assert.equal(reopened.snapshot.name, 'accepted before deletion');
+  assert.equal(await repo.pending('canvas'), undefined);
+});
+
+test('restoring a deleted project preserves unsynced content until the user chooses the server version', async () => {
+  const repo = createCanvasRepository('restore-conflict-' + crypto.randomUUID());
+  await repo.adopt('canvas', snapshot('server content'), 1);
+  await repo.commit('canvas', snapshot('unsynced local content'), 1, 0);
+  const deleted = await repo.markRecovery('canvas', 'deleted');
+  const restored = await repo.reconcileDeleted('canvas', snapshot('server content'), 3, deleted.recovery.observationId);
+  assert.equal(restored.recovery.kind, 'conflict');
+  assert.equal(restored.snapshot.name, 'unsynced local content');
+  await repo.adoptRemote('canvas', snapshot('server content'), 3);
+  assert.equal((await repo.read('canvas')).snapshot.name, 'server content');
+  assert.equal((await repo.read('canvas')).recovery, undefined);
+  assert.ok((await repo.recoveries()).some(copy => copy.snapshot.name === 'unsynced local content'));
+});
+
+test('a restoration read cannot erase a deletion observed after that read began', async () => {
+  const repo = createCanvasRepository('restore-race-' + crypto.randomUUID());
+  await repo.adopt('canvas', snapshot('v1'), 1);
+  const first = await repo.markRecovery('canvas', 'deleted');
+  await repo.markRecovery('canvas', 'deleted');
+  const stale = await repo.reconcileDeleted('canvas', snapshot('v3'), 3, first.recovery.observationId);
+  assert.equal(stale.recovery.kind, 'deleted');
+  assert.equal(stale.snapshot.name, 'v1');
+});
+
+test('a normal save acknowledgement does not hide a deletion reported by another copy of that request', async () => {
+  const repo = createCanvasRepository('delete-after-ack-' + crypto.randomUUID());
+  await repo.adopt('canvas', snapshot('v1'), 1);
+  await repo.commit('canvas', snapshot('v2'), 1, 0);
+  const sent = await repo.pending('canvas');
+  await repo.acknowledge(sent, { id: 'canvas', requestId: sent.requestId, version: 2 });
+  await repo.markRecovery('canvas', 'deleted', sent.requestId, 'deleted after acknowledgement', sent.baseVersion);
+  assert.equal((await repo.read('canvas')).recovery.kind, 'deleted');
+});

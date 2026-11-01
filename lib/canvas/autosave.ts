@@ -151,8 +151,10 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
     // the worker bound to the original canvas for every response and retry.
     const target = { ...editor };
     if (!target.id || !online()) return;
+    let observedServerVersion: number | undefined;
     try {
       target.draft = await repository.read(target.id);
+      observedServerVersion = target.draft ? Math.max(target.draft.serverVersion, target.draft.restorationVersion ?? 0) : undefined;
       if (target.draft?.recovery) {
         if (target.draft.recovery.kind !== 'unverified') {
           publishDraft(target.draft);
@@ -184,6 +186,7 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
           nextAttemptAt: Date.now() + requestTimeoutMs + backoff, error: retry?.error });
         if (!persisted) break;
         if (persisted.requestId !== operation.requestId) { operation = persisted; continue; }
+        observedServerVersion = operation.baseVersion;
         try {
           const ack = await canvasRequest(`/api/workflow/${encodeURIComponent(operation.id)}`, {
             method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -212,8 +215,9 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
       }
     } catch (error) {
       if (error instanceof CanvasRequestError && error.status === 410 && target.id) {
-        target.draft = await repository.markRecovery(target.id, 'deleted', undefined, error.message);
+        target.draft = await repository.markRecovery(target.id, 'deleted', undefined, error.message, observedServerVersion);
         publishDraft(target.draft);
+        if (target.draft.recovery?.kind !== 'deleted') { settledStatus(target); return; }
       }
       if (target.draft?.recovery?.kind === 'unverified') retryLater(Date.now() + 5000);
       status(target, error instanceof CanvasStorageError ? 'local-error' : 'sync-error', error); throw error;
@@ -282,7 +286,7 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
     };
   }
   async function readRemote(id: string) {
-    const data = await canvasRequest(`/api/workflow/${encodeURIComponent(id)}`, {}, requestTimeoutMs);
+    const data = await canvasRequest(`/api/workflow/${encodeURIComponent(id)}`, { cache: 'no-store' }, requestTimeoutMs);
     if (!Number.isSafeInteger(data.version) || data.version < 1) throw new Error('读取画布失败');
     return { snapshot: canvasSnapshot({ ...data, projectName: data.name }), version: data.version as number };
   }
@@ -315,19 +319,27 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
       const pending = canvasId ? await repository.pending(canvasId) : undefined;
       let remoteError: unknown = pending?.retry?.error;
       if (canvasId && !draft && !online()) throw new Error('离线时无法读取尚未缓存的画布');
-      if (canvasId && online() && (!draft || draft.recovery?.kind === 'unverified' || !draft.recovery && draft.serverVersion > 0 && draft.localVersion === draft.confirmedLocalVersion)) {
+      if (canvasId && online() && (!draft || draft.recovery?.kind === 'deleted' || draft.recovery?.kind === 'unverified' || !draft.recovery && draft.serverVersion > 0 && draft.localVersion === draft.confirmedLocalVersion)) {
+        const observedServerVersion = draft ? Math.max(draft.serverVersion, draft.restorationVersion ?? 0) : undefined;
         try {
           const remote = await readRemote(canvasId);
           if (token !== opening) return;
-          draft = draft?.recovery
+          draft = draft?.recovery?.kind === 'deleted'
+            ? await repository.reconcileDeleted(canvasId, remote.snapshot, remote.version, draft.recovery.observationId)
+            : draft?.recovery
             ? await repository.reconcile(canvasId, remote.snapshot, remote.version)
             : await repository.adopt(canvasId, remote.snapshot, remote.version);
+          remoteError = (await repository.pending(canvasId))?.retry?.error;
         } catch (error) {
           if (!draft || error instanceof CanvasStorageError) throw error;
-          if (error instanceof CanvasRequestError && error.status === 410) draft = await repository.markRecovery(canvasId, 'deleted');
-          remoteError = error;
+          if (error instanceof CanvasRequestError && error.status === 410) {
+            draft = await repository.markRecovery(canvasId, 'deleted', undefined, error.message, observedServerVersion);
+            remoteError = draft.recovery?.kind === 'deleted' ? error : undefined;
+          } else remoteError = error;
         }
       }
+      if (token !== opening) return;
+      await refreshCopies();
       if (token !== opening) return;
       if (draft) applyDraft(draft);
       else store.setState({ nodes: [], edges: [], projectName: '未命名项目', currentWorkflowId: null, serverVersion: 0, recovery: undefined, generationRecoveryReadOnly: undefined });

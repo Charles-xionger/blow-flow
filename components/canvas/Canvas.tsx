@@ -111,9 +111,13 @@ function CanvasInner() {
   const saveError = useCanvasStore(state => state.saveError);
   const projectId = searchParams.get("project");
   const isLoadingRef = useRef(false);
+  const hasOpenedRef = useRef(false);
 
   useEffect(() => {
-    if (useCanvasStore.getState().persistenceReady && projectId === useCanvasStore.getState().currentWorkflowId) return;
+    // Re-entering from the workspace must read renames/restores from the server.
+    // A URL update caused by this editor itself must not reopen its own session.
+    if (hasOpenedRef.current && useCanvasStore.getState().persistenceReady && projectId === useCanvasStore.getState().currentWorkflowId) return;
+    hasOpenedRef.current = true;
     isLoadingRef.current = true;
     void canvasAutosave.open(projectId).finally(() => { isLoadingRef.current = false; });
   }, [projectId]);
@@ -121,7 +125,7 @@ function CanvasInner() {
   useEffect(() => {
     if (!persistenceReady || isLoadingRef.current) return;
     if (currentWorkflowId !== projectId) {
-      router.replace(currentWorkflowId ? `/?project=${encodeURIComponent(currentWorkflowId)}` : "/", { scroll: false });
+      router.replace(currentWorkflowId ? `/canvas?project=${encodeURIComponent(currentWorkflowId)}` : "/canvas", { scroll: false });
     }
   }, [currentWorkflowId, persistenceReady, projectId, router]);
 

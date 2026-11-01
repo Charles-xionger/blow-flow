@@ -1,24 +1,8 @@
-import { Suspense } from "react";
-import Canvas from "@/components/canvas/Canvas";
-import { ThemeInitializer } from "@/components/ThemeInitializer";
+import { redirect } from "next/navigation";
 
-export default function Home() {
-  return (
-    <>
-      <ThemeInitializer />
-      <div className="flex h-screen">
-        <div className="flex-1">
-          <Suspense
-            fallback={
-              <div className="flex items-center justify-center h-full bg-zinc-950 text-white">
-                Loading...
-              </div>
-            }
-          >
-            <Canvas />
-          </Suspense>
-        </div>
-      </div>
-    </>
-  );
+// The homepage will be designed separately. Keep historical canvas links usable.
+export default async function Home({ searchParams }: { searchParams: Promise<{ project?: string | string[] }> }) {
+  const { project } = await searchParams;
+  const id = Array.isArray(project) ? project[0] : project;
+  redirect(id ? `/canvas?project=${encodeURIComponent(id)}` : "/workspace");
 }

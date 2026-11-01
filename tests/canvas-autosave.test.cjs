@@ -52,6 +52,23 @@ test('autosave creates once, updates edits, and persists deleting the last node'
   assert.equal(store.getState().saveStatus, 'synced');
 });
 
+test('a restored project matching its pending draft clears the old deletion error and reports synced', async t => {
+  const { store, saver, repository } = await setup(t);
+  store.setState({ nodes: [node('one')] });
+  await saver.save();
+  const id = store.getState().currentWorkflowId;
+  store.setState({ projectName: 'Restored content' });
+  global.fetch = async () => Response.json({ success: false, error: '画布已被删除' }, { status: 410 });
+  await assert.rejects(saver.flush(), /删除/);
+  const snapshot = (await repository.read(id)).snapshot;
+  global.fetch = async () => Response.json({ success: true, data: { id, ...snapshot, version: 4 } });
+  await saver.open(id);
+  assert.equal(store.getState().recovery, undefined);
+  assert.equal(await repository.pending(id), undefined);
+  assert.equal(store.getState().saveStatus, 'synced');
+  assert.equal(store.getState().saveError, null);
+});
+
 test('edits commit locally during a slow save; late confirmation cannot mark newer edits synced', async t => {
   const { store, saver, repository } = await setup(t);
   const calls = []; let release;

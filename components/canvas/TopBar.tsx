@@ -3,6 +3,7 @@
 import { memo } from "react";
 import React, { useState, useEffect } from "react";
 import { useReactFlow, useStore } from "@xyflow/react";
+import { useRouter } from "next/navigation";
 import { canvasAutosave, useCanvasStore } from "@/store/useCanvasStore";
 import {
   Sparkles,
@@ -13,11 +14,13 @@ import {
   Moon,
   Settings as SettingsIcon,
   Trash2,
+  ArrowLeft,
 } from "lucide-react";
 import { SettingsModal } from "@/components/settings/SettingsModal";
 import { toast } from "sonner";
 
 export const TopBar = memo(function TopBar() {
+  const router = useRouter();
   const reactFlowInstance = useReactFlow();
   const zoom = useStore((state) => Math.round(state.transform[2] * 100));
   const saveStatus = useCanvasStore(state => state.saveStatus);
@@ -35,6 +38,22 @@ export const TopBar = memo(function TopBar() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [isLeaving, setIsLeaving] = useState(false);
+
+  const returnToWorkspace = async () => {
+    setIsLeaving(true);
+    try {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+      await canvasAutosave.prepareSwitch();
+      // The durable local checkpoint gates leaving; unrelated recovery drafts
+      // and network failures must not trap the user in a healthy canvas.
+      void canvasAutosave.flush().catch(() => {});
+      router.push("/workspace");
+    } catch (error) {
+      toast.error("暂时无法返回，请先完成保存", { description: error instanceof Error ? error.message : "请重试" });
+      setIsLeaving(false);
+    }
+  };
 
   // 等待客户端挂载完成，避免 hydration 错误
   useEffect(() => {
@@ -185,6 +204,8 @@ export const TopBar = memo(function TopBar() {
           }`}
         >
           {/* Logo */}
+          <button type="button" title="返回工作空间" aria-label="返回工作空间" disabled={isLeaving} onClick={returnToWorkspace}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-500/10 disabled:opacity-50"><ArrowLeft size={17} /></button>
           <div
             className={`w-8 h-8 rounded-xl flex items-center justify-center ${
               isDark

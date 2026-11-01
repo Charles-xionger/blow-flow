@@ -9,9 +9,10 @@ export interface CanvasDraft {
   localVersion: number;
   confirmedLocalVersion: number;
   serverVersion: number;
+  restorationVersion?: number;
   updatedAt: number;
   generationRecoveryReadOnly?: string[];
-  recovery?: { kind: 'unverified' | 'conflict' | 'copy' | 'deleted'; sourceId?: string };
+  recovery?: { kind: 'unverified' | 'conflict' | 'copy' | 'deleted'; sourceId?: string; observationId?: string };
 }
 export interface SaveRetry {
   attempts: number;
@@ -152,6 +153,30 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
         return draft;
       });
     },
+    reconcileDeleted(id: string, snapshot: CanvasSnapshot, serverVersion: number, observationId?: string): Promise<CanvasDraft> {
+      return transaction('readwrite', async tx => {
+        const drafts = tx.objectStore('drafts');
+        const draft = await result<CanvasDraft>(drafts.get(id));
+        // Only a read started after this deletion observation can establish that
+        // the original project was restored. Another deletion invalidates it.
+        if (draft.recovery?.kind !== 'deleted' || draft.recovery.observationId !== observationId ||
+            serverVersion <= Math.max(draft.serverVersion, draft.restorationVersion ?? 0)) return draft;
+        const matches = canonicalJSON(draft.snapshot) === canonicalJSON(snapshot);
+        if (!matches && draft.localVersion > draft.confirmedLocalVersion) {
+          draft.recovery = { kind: 'conflict' };
+          draft.restorationVersion = serverVersion;
+          drafts.put(draft);
+          return draft;
+        }
+        const version = draft.localVersion + 1;
+        const restored: CanvasDraft = { ...draft, snapshot, serverVersion, restorationVersion: serverVersion, localVersion: version,
+          confirmedLocalVersion: version, updatedAt: Date.now() };
+        delete restored.recovery;
+        drafts.put(restored);
+        tx.objectStore('operations').delete(id);
+        return restored;
+      });
+    },
     adoptRemote(id: string, snapshot: CanvasSnapshot, serverVersion: number): Promise<CanvasDraft> {
       return transaction('readwrite', async tx => {
         const drafts = tx.objectStore('drafts');
@@ -164,6 +189,7 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
         const version = previous.localVersion + 1;
         const draft: CanvasDraft = { id, snapshot, serverVersion, localVersion: version,
           confirmedLocalVersion: version, updatedAt: Date.now(),
+          restorationVersion: previous.restorationVersion,
           generationRecoveryReadOnly: [...new Set([...(previous.generationRecoveryReadOnly ?? []), ...snapshot.nodes.map(node => node.id)])] };
         drafts.put(draft);
         tx.objectStore('operations').delete(id);
@@ -205,7 +231,8 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
         }
         const draft: CanvasDraft = { id, snapshot, localVersion: (previous?.localVersion ?? 0) + 1,
           confirmedLocalVersion: previous?.confirmedLocalVersion ?? 0,
-          serverVersion: previous?.serverVersion ?? serverVersion, updatedAt: Date.now(), recovery: previous?.recovery, generationRecoveryReadOnly: previous?.generationRecoveryReadOnly };
+          serverVersion: previous?.serverVersion ?? serverVersion, restorationVersion: previous?.restorationVersion,
+          updatedAt: Date.now(), recovery: previous?.recovery, generationRecoveryReadOnly: previous?.generationRecoveryReadOnly };
         drafts.put(draft);
         const operations = tx.objectStore('operations');
         // An unconfirmed operation is immutable, even if the user edits again.
@@ -227,7 +254,8 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
         if (previous && (previous.recovery || previous.serverVersion > serverVersion ||
             previous.localVersion > previous.confirmedLocalVersion)) return previous;
         const version = previous ? previous.localVersion + (canonicalJSON(previous.snapshot) === canonicalJSON(snapshot) ? 0 : 1) : 0;
-        const draft = { id, snapshot, serverVersion, localVersion: version, confirmedLocalVersion: version, updatedAt: Date.now(), generationRecoveryReadOnly: previous?.generationRecoveryReadOnly };
+        const draft = { id, snapshot, serverVersion, restorationVersion: previous?.restorationVersion,
+          localVersion: version, confirmedLocalVersion: version, updatedAt: Date.now(), generationRecoveryReadOnly: previous?.generationRecoveryReadOnly };
         drafts.put(draft);
         return draft;
       });
@@ -235,16 +263,19 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
     all(): Promise<CanvasDraft[]> {
       return transaction('readonly', tx => result(tx.objectStore('drafts').getAll()));
     },
-    markRecovery(id: string, kind: 'conflict' | 'deleted', requestId?: string, error?: string): Promise<CanvasDraft> {
+    markRecovery(id: string, kind: 'conflict' | 'deleted', requestId?: string, error?: string, observedServerVersion?: number): Promise<CanvasDraft> {
       return transaction('readwrite', async tx => {
         const drafts = tx.objectStore('drafts');
         const draft = await result<CanvasDraft>(drafts.get(id));
         const operations = tx.objectStore('operations');
         const pending = await result<PendingSave | undefined>(operations.get(id));
-        // Late conflict responses cannot invalidate a newer operation; deletion
-        // is final for the identity and always dominates earlier receipts.
+        // A deletion response from before a confirmed restoration must not
+        // poison that restored project. Unversioned explicit deletion still wins.
+        if (kind === 'deleted' && observedServerVersion !== undefined && (draft.restorationVersion ?? 0) > observedServerVersion) return draft;
+        // Late conflict responses cannot invalidate a newer operation.
         if (kind !== 'deleted' && requestId && pending?.requestId !== requestId) return draft;
-        if (draft.recovery?.kind !== 'deleted') draft.recovery = { kind };
+        if (kind === 'deleted') draft.recovery = { kind, observationId: crypto.randomUUID() };
+        else if (draft.recovery?.kind !== 'deleted') draft.recovery = { kind };
         drafts.put(draft);
         if (pending) operations.put({ ...pending, retry: { attempts: pending.retry?.attempts ?? 0,
           nextAttemptAt: 0, blocked: 'permanent', error: error ?? pending.retry?.error ?? '同步已暂停，本地内容已保留' } });

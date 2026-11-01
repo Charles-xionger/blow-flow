@@ -118,7 +118,7 @@ test('a real blocked schema upgrade explains which tabs to close and recovers af
       return open.call(this, name, name === 'ai-flow-canvas' ? 2 : version!);
     };
   });
-  await page.goto('/');
+  await page.goto('/canvas');
   await expect(page.getByRole('button', { name: '重试恢复', exact: true })).toBeVisible();
   await expect(page.getByRole('alert').filter({ hasText: '请关闭其他打开此应用的标签页后重试' })).toBeVisible();
   await expect(page.locator('.react-flow')).not.toBeVisible();
@@ -141,7 +141,7 @@ test('quota failure during migration exports the original backup and retries the
   }, raw);
   const writes: string[] = [];
   page.on('request', req => { if (req.method() === 'PUT') writes.push(req.url()); });
-  await page.goto('/');
+  await page.goto('/canvas');
   await expect(page.getByRole('button', { name: '重试迁移', exact: true })).toBeVisible();
   await expect(page.getByRole('alert').filter({ hasText: '本地存储空间不足' })).toBeVisible();
   await expect(page.locator('.react-flow')).not.toBeVisible();
@@ -157,7 +157,7 @@ test('quota failure during migration exports the original backup and retries the
   expect(await page.evaluate(() => localStorage.getItem('canvas-storage'))).toBe(raw);
 });
 
-for (const action of ['clear', 'new', 'import'] as const) {
+for (const action of ['clear', 'new', 'import', 'return'] as const) {
   test(`${action} cannot hide an unsaved canvas when its local checkpoint fails`, async ({ page, request }) => {
     const id = crypto.randomUUID();
     await request.put(`/api/workflow/${id}`, { data: { id, requestId: crypto.randomUUID(), baseVersion: 0, snapshot } });
@@ -177,10 +177,12 @@ for (const action of ['clear', 'new', 'import'] as const) {
     } else if (action === 'new') {
       await page.getByRole('button', { name: '项目', exact: true }).click();
       await page.getByRole('button', { name: /新建项目/ }).click();
-    } else {
+    } else if (action === 'import') {
       const chooser = page.waitForEvent('filechooser');
       await page.getByRole('button', { name: '导入', exact: true }).click();
       await (await chooser).setFiles({ name: 'new.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ ...snapshot, projectName: '不应替换当前创作' })) });
+    } else {
+      await page.getByRole('button', { name: '返回工作空间', exact: true }).click();
     }
     await expect(page.getByTestId('canvas-save-status')).toHaveText('本地保存失败');
     await expect(page.getByRole('button', { name: '切换前未保存的内容', exact: true })).toBeVisible();
