@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from 'react';
+import { promptIsEmpty, promptText } from "@/lib/canvas/prompt";
 import { mediaUploadLimit } from '@/lib/upload-limits';
 import type { Node, NodeProps } from '@xyflow/react';
 import { useShallow } from 'zustand/react/shallow';
@@ -109,10 +110,10 @@ export function VideoGenerationPanel({ node, model, models, task }: Props) {
   async function generate() {
     if (busy) return;
     if (data.pendingGeneration) { await task.start(data.pendingGeneration); return; }
-    if (!model || blocked || !data.prompt?.trim()) return;
+    if (!model || blocked || promptIsEmpty(data.prompt)) return;
     await task.start({ requestId: crypto.randomUUID(), modelId: model.id,
       canvasId: useCanvasStore.getState().currentWorkflowId || 'draft', nodeId: id,
-      input: { prompt: data.prompt, ...dims, duration,
+      input: { prompt: promptText(data.prompt), ...dims, duration,
         references: references.map(({ kind, url, useAudio }) => ({ kind, url, ...(kind === 'video' ? { useAudio: !!useAudio } : {}) })) } });
   }
 
@@ -135,7 +136,7 @@ export function VideoGenerationPanel({ node, model, models, task }: Props) {
                 ? <video src={ref.url} controls preload="metadata" /> : <audio src={ref.url} controls preload="metadata" />}
             </div>
             <div className={styles.referenceInfo}>
-              <div className={styles.tags}>{labels[index].match(/<[^>]+>/g)?.map(tag => <button key={tag} title="插入提示词" onClick={() => change({ prompt: (data.prompt || '') + tag })}>{tag}</button>)}</div>
+              <div className={styles.tags}>{labels[index].match(/<[^>]+>/g)?.map(tag => <button key={tag} title="插入提示词" onClick={() => change({ prompt: promptText(data.prompt) + tag })}>{tag}</button>)}</div>
               <span className={styles.name} title={ref.name}>{ref.name}{ref.sourceNodeId ? ' · 连线' : ''}</span>
               {ref.kind === 'video' ? <label className={styles.muted}><input type="checkbox" checked={!!ref.useAudio} disabled={ref.hasAudio === false}
                 aria-label={`${labels[index].split(' · ')[0]} 参考原声`} onChange={e => toggleAudio(ref, e.target.checked)} /> {ref.hasAudio === false ? '无音轨' : '参考原声'}</label> : null}
@@ -151,7 +152,7 @@ export function VideoGenerationPanel({ node, model, models, task }: Props) {
         <input ref={fileInput} type="file" multiple hidden accept=".jpg,.jpeg,.png,.webp,.mp4,.avi,.mov,.mkv,.mp3,.wav,.flac"
           data-testid="reference-file-input" onChange={e => void upload(e.target.files)} />
         <button className={styles.upload} disabled={uploading} onClick={() => fileInput.current?.click()}><Upload size={14} />{uploading ? '正在上传素材…' : '上传图片 / 视频 / 音频'}</button>
-        <CompositionTextarea className={styles.prompt} value={data.prompt || ''} onChange={prompt => change({ prompt })}
+        <CompositionTextarea className={styles.prompt} value={promptText(data.prompt)} onChange={prompt => change({ prompt })}
           placeholder="描述视频内容，点击素材编号插入引用…" rows={3} />
         <div className={styles.settings}>
           <label>分辨率<select aria-label="视频分辨率" value={resolution} onChange={e => change({ videoResolution: e.target.value as VideoResolution })}>
@@ -169,7 +170,7 @@ export function VideoGenerationPanel({ node, model, models, task }: Props) {
             onChange={e => change({ model: e.target.value, usesGenerationTasks: !!models.find(m => m.id === e.target.value)?.task })}>
             {models.map(m => <option value={m.id} key={m.id}>{m.label}</option>)}
           </select>
-          <button className={styles.generate} onClick={() => void generate()} disabled={busy || (!data.pendingGeneration && (blocked || !data.prompt?.trim()))}>
+          <button className={styles.generate} onClick={() => void generate()} disabled={busy || (!data.pendingGeneration && (blocked || promptIsEmpty(data.prompt)))}>
             {data.isLoading ? '处理中…' : data.pendingGeneration ? '恢复原请求' : '生成'}</button>
         </div>
         {data.generationStatus ? <p role="status" className={styles.muted}>{data.generationStatus}</p> : null}

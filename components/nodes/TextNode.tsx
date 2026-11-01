@@ -3,6 +3,7 @@
 import { memo, useCallback, useState, useEffect } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { BaseNode, NodeSurface } from "./BaseNode";
+import { promptText } from "@/lib/canvas/prompt";
 import { useCanvasStore } from "@/store/useCanvasStore";
 import { FileText } from "lucide-react";
 import type { NodeData } from "@/types";
@@ -14,14 +15,14 @@ const TextNode = (props: NodeProps<Node<NodeData>>) => {
   const singleSelected = useCanvasStore((state) => state.selectedNodeIds.length === 1);
 
   const shouldShowPanel = selected && singleSelected;
-  const [localPrompt, setLocalPrompt] = useState(data.prompt || "");
+  const [localPrompt, setLocalPrompt] = useState(promptText(data.prompt));
 
   // 使用 key 或者不在 effect 中设置状态，而是在渲染时检查
   useEffect(() => {
     // 使用 setTimeout 将 setState 推迟到下一个事件循环，避免同步调用
     const timer = setTimeout(() => {
       if (data.prompt !== localPrompt) {
-        setLocalPrompt(data.prompt || "");
+        setLocalPrompt(promptText(data.prompt));
       }
     }, 0);
 
@@ -45,7 +46,7 @@ const TextNode = (props: NodeProps<Node<NodeData>>) => {
             </div>
             <div className="text-sm font-medium opacity-60 mb-2">文本描述</div>
             <div className="text-xs text-zinc-500 text-center px-4 max-h-32 overflow-y-auto">
-              {data.prompt || "暂无内容"}
+              {promptText(data.prompt) || "暂无内容"}
             </div>
           </div>
         </div>

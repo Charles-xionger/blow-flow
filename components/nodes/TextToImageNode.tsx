@@ -9,7 +9,7 @@ import { Image as ImageIcon, Sparkles, Loader2, Link2 } from "lucide-react";
 import type { NodeData } from "@/types";
 import { toast } from "sonner";
 import { getImageModels } from "@/lib/model-registry";
-import { Textarea } from "@/components/ui/textarea";
+import { promptIsEmpty, promptSegments, promptText } from "@/lib/canvas/prompt";
 
 import { validGenerationDimensions } from "@/lib/generation/dimensions";
 import { generationModels } from "@/lib/generation/client";
@@ -18,6 +18,7 @@ import { useGenerationTask } from "@/hooks/useGenerationTask";
 import { ImageSizeSettings } from "./shared/ImageSizeSettings";
 import { ImageModelSettings } from "./shared/ImageModelSettings";
 import { NodeConsole } from "./shared/NodeConsole";
+import { PromptEditor } from "./shared/PromptEditor";
 import { ImageToolbarActions } from "./shared/ImageToolbarActions";
 
 const aspectRatios = [
@@ -58,8 +59,8 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
       if (!sourceData) continue;
 
       // 文本节点提供prompt
-      if (sourceData.prompt) {
-        prompt = sourceData.prompt;
+      if (!promptIsEmpty(sourceData.prompt)) {
+        prompt = promptText(sourceData.prompt);
       }
 
       // 角色节点提供角色数据和参考图
@@ -76,8 +77,8 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
     };
   }, [inputs]);
 
-  // 本地状态用于输入框，防止中文输入法问题
-  const [localPrompt, setLocalPrompt] = useState(data.prompt || "");
+  const segments = useMemo(() => promptSegments(data.prompt), [data.prompt]);
+  const ownPrompt = promptText(data.prompt);
 
   // 加载图片模型列表
   useEffect(() => {
@@ -86,11 +87,6 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
     generationModels().then(models => { if (active) setTaskModels(models.filter(m => m.category === 'IMAGE')); }).catch(() => {});
     return () => { active = false; };
   }, []);
-
-  // 同步外部数据变化到本地状态
-  useEffect(() => {
-    setLocalPrompt(data.prompt || "");
-  }, [data.prompt]);
 
   // 保存为角色
   const handleSaveAsCharacter = async () => {
@@ -105,7 +101,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           imageUrl: data.imageSrc,
-          prompt: localPrompt || data.prompt || "",
+          prompt: ownPrompt,
         }),
       });
 
@@ -156,13 +152,8 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
   };
 
   const handleGenerate = useCallback(async () => {
-    // 先同步本地输入到 store
-    if (localPrompt !== data.prompt) {
-      updateNodeData(id, { prompt: localPrompt });
-    }
-
-    let promptToUse = inputPrompt || localPrompt;
-    if (!promptToUse) return;
+    let promptToUse = inputPrompt || ownPrompt;
+    if (promptIsEmpty(promptToUse)) return;
 
     // 如果有角色数据，注入角色描述到提示词
     if (characterData) {
@@ -238,7 +229,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
   }, [
     id,
     inputPrompt,
-    localPrompt,
+    ownPrompt,
     characterData,
     referenceImages,
     taskModel,
@@ -249,7 +240,6 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
     data.generationWidth,
     data.generationHeight,
     data.inputImages,
-    data.prompt,
     data.model,
     data.aspectRatio,
     data.resolution,
@@ -266,7 +256,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
     <NodeShell {...props} stageTestId="image-preview"
       toolbar={<ImageToolbarActions src={hasResult ? data.imageSrc : undefined} alt="Generated" onSaveAsCharacter={handleSaveAsCharacter} />}
       console={
-        <NodeConsole data={data} onRun={handleGenerate} runDisabled={taskUnavailable || (!inputPrompt && !localPrompt)}
+        <NodeConsole data={data} onRun={handleGenerate} runDisabled={taskUnavailable || (!inputPrompt && promptIsEmpty(data.prompt))}
           notice={taskModel && !taskModel.configured ? "请管理员配置平台连接" : undefined}
           onResume={() => void resumeTask()} onRetrySave={() => void retrySaveTask()}
           connections={(characterData || inputPrompt) && (
@@ -277,16 +267,8 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
             </div>
           )}
           editor={
-            <Textarea
-              className="min-h-14 max-h-40 resize-none rounded-none border-0 bg-transparent p-0 px-1 text-sm text-inherit shadow-none focus-visible:ring-0 dark:bg-transparent"
-              placeholder="描述你想要生成的图片..."
-              value={localPrompt}
-              onChange={(e) => {
-                setLocalPrompt(e.target.value);
-                updateNodeData(id, { prompt: e.target.value });
-              }}
-              onBlur={() => updateNodeData(id, { prompt: localPrompt })}
-            />
+            <PromptEditor value={segments} placeholder="描述你想要生成的图片..."
+              onChange={prompt => updateNodeData(id, { prompt })} />
           }
           config={<>
             <select

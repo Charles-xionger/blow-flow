@@ -3,6 +3,7 @@
 import { memo, useCallback, useState, useEffect, useMemo } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { BaseNode, NodeSurface } from "./BaseNode";
+import { promptText } from "@/lib/canvas/prompt";
 import { useCanvasStore } from "@/store/useCanvasStore";
 import { Film, Loader2, Wand2, Plus, Minus } from "lucide-react";
 import type { NodeData, NodeType } from "@/types";
@@ -18,7 +19,7 @@ const CreativeDescNode = (props: NodeProps<Node<NodeData>>) => {
   const singleSelected = useCanvasStore((state) => state.selectedNodeIds.length === 1);
 
   const shouldShowPanel = selected && singleSelected;
-  const [localPrompt, setLocalPrompt] = useState(data.prompt || "");
+  const [localPrompt, setLocalPrompt] = useState(promptText(data.prompt));
   const [shotCount, setShotCount] = useState(data.shotCount || 4);
   const [selectedModel, setSelectedModel] = useState(data.model || "");
 
@@ -26,7 +27,7 @@ const CreativeDescNode = (props: NodeProps<Node<NodeData>>) => {
   const textModels = useMemo(() => getModelsByCategory("TEXT"), []);
 
   useEffect(() => {
-    setLocalPrompt(data.prompt || "");
+    setLocalPrompt(promptText(data.prompt));
   }, [data.prompt]);
 
   const handleGenerateStoryboard = useCallback(async () => {

@@ -3,6 +3,7 @@
 import { memo, useCallback, useState, useEffect } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { BaseNode, NodeSurface } from "./BaseNode";
+import { promptText } from "@/lib/canvas/prompt";
 import { useCanvasStore } from "@/store/useCanvasStore";
 import { Video, Sparkles, AlertCircle, Loader2, Wand2 } from "lucide-react";
 import type { NodeData } from "@/types";
@@ -71,7 +72,7 @@ const ImageToVideoNode = (props: NodeProps<Node<NodeData>>) => {
   >([]);
 
   // 本地状态用于输入框，防止中文输入法问题
-  const [localPrompt, setLocalPrompt] = useState(data.prompt || "");
+  const [localPrompt, setLocalPrompt] = useState(promptText(data.prompt));
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
 
   // 加载视频模型列表
@@ -84,7 +85,7 @@ const ImageToVideoNode = (props: NodeProps<Node<NodeData>>) => {
 
   // 同步外部数据变化到本地状态
   useEffect(() => {
-    setLocalPrompt(data.prompt || "");
+    setLocalPrompt(promptText(data.prompt));
   }, [data.prompt]);
 
   const handleGeneratePrompt = useCallback(async () => {
@@ -128,7 +129,7 @@ const ImageToVideoNode = (props: NodeProps<Node<NodeData>>) => {
 
   const handleGenerate = useCallback(
     async (skipCache = false) => {
-      if (!data.prompt || !inputImage) return;
+      if (!promptText(data.prompt) || !inputImage) return;
 
       try {
         await task.detach();
@@ -137,7 +138,7 @@ const ImageToVideoNode = (props: NodeProps<Node<NodeData>>) => {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            prompt: data.prompt,
+            prompt: promptText(data.prompt),
             inputImage,
             model: data.model || "wan2.6-i2v-flash",
             duration: parseInt(data.duration || "5"),

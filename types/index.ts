@@ -1,3 +1,4 @@
+import type { Prompt } from "@/lib/canvas/prompt";
 import type { CreateGeneration } from "@/lib/generation/types";
 import type { ImageSizePreset } from "@/lib/generation/image-dimensions";
 import type { VideoReference, VideoResolution } from "@/lib/generation/video";
@@ -26,7 +27,7 @@ export interface NodeData extends Record<string, unknown> {
   customTitle?: string; // 用户自定义标题
 
   // 输入
-  prompt?: string;
+  prompt?: Prompt;
   inputImages?: string[];
 
   // 输出

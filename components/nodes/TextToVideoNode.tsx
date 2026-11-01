@@ -3,6 +3,7 @@
 import { memo, useCallback, useState, useEffect } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { BaseNode, NodeSurface } from "./BaseNode";
+import { promptText } from "@/lib/canvas/prompt";
 import { useCanvasStore } from "@/store/useCanvasStore";
 import { Video, Sparkles, Wand2, Loader2, Link2 } from "lucide-react";
 import type { NodeData } from "@/types";
@@ -43,14 +44,14 @@ const TextToVideoNode = (props: NodeProps<Node<NodeData>>) => {
         const sourceNode = state.nodes.find(
           (n) => n.id === inputEdges[0].source,
         );
-        return sourceNode?.data.prompt;
+        return promptText(sourceNode?.data.prompt);
       },
       [id],
     ),
   );
 
   // 本地状态用于输入框，防止中文输入法问题
-  const [localPrompt, setLocalPrompt] = useState(data.prompt || "");
+  const [localPrompt, setLocalPrompt] = useState(promptText(data.prompt));
 
   // 加载视频模型列表
   useEffect(() => {
@@ -59,7 +60,7 @@ const TextToVideoNode = (props: NodeProps<Node<NodeData>>) => {
 
   // 同步外部数据变化到本地状态
   useEffect(() => {
-    setLocalPrompt(data.prompt || "");
+    setLocalPrompt(promptText(data.prompt));
   }, [data.prompt]);
 
   const handleGenerate = useCallback(

@@ -3,6 +3,7 @@
 import { memo, useCallback, useMemo, useState, useEffect } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { BaseNode, NodeSurface } from "./BaseNode";
+import { promptText } from "@/lib/canvas/prompt";
 import { useNodeInputs } from "@/hooks/useNodeInputs";
 import { useCanvasStore } from "@/store/useCanvasStore";
 import {
@@ -73,7 +74,7 @@ const ImageToImageNode = (props: NodeProps<Node<NodeData>>) => {
   >([]);
 
   // 本地状态用于输入框，防止中文输入法问题
-  const [localPrompt, setLocalPrompt] = useState(data.prompt || "");
+  const [localPrompt, setLocalPrompt] = useState(promptText(data.prompt));
 
   // 加载图片模型列表
   useEffect(() => {
@@ -82,7 +83,7 @@ const ImageToImageNode = (props: NodeProps<Node<NodeData>>) => {
 
   // 同步外部数据变化到本地状态
   useEffect(() => {
-    setLocalPrompt(data.prompt || "");
+    setLocalPrompt(promptText(data.prompt));
   }, [data.prompt]);
 
   const handleGenerate = useCallback(
