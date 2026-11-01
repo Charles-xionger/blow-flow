@@ -24,6 +24,57 @@ async function localDraft(page: Page, id: string) {
   }), id);
 }
 
+test('an existing empty project name remains editable after a rejected save', async ({ page, request }) => {
+  await page.goto('/');
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('尚未保存');
+  await addTextNode(page);
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
+  const id = new URL(page.url()).searchParams.get('project')!;
+  // Reproduce the durable draft left by the old rename-on-every-keystroke UI.
+  await page.evaluate(id => new Promise<void>((resolve, reject) => {
+    const open = indexedDB.open('ai-flow-canvas');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction(['drafts', 'operations'], 'readwrite');
+      const drafts = tx.objectStore('drafts');
+      const get = drafts.get(id);
+      get.onsuccess = () => {
+        const draft = get.result;
+        draft.snapshot.name = '';
+        draft.localVersion++;
+        drafts.put(draft);
+        tx.objectStore('operations').put({ id, requestId: crypto.randomUUID(),
+          baseVersion: draft.serverVersion, localVersion: draft.localVersion, snapshot: draft.snapshot });
+      };
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onabort = () => { db.close(); reject(tx.error); };
+    };
+  }), id);
+  await page.reload();
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('同步失败/冲突');
+  await expect(page.getByTestId('canvas-save-status')).toHaveAttribute('title', /Invalid canvas save/);
+  await page.getByRole('button', { name: '未命名项目', exact: true }).click({ timeout: 3000 });
+  const input = page.getByPlaceholder('项目名称...');
+  await input.fill('取消的修改');
+  await input.press('Escape');
+  await page.getByRole('button', { name: '未命名项目', exact: true }).click();
+  await expect(input).toHaveValue('');
+  await input.fill('   ');
+  await input.press('Enter');
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
+  expect((await (await request.get(`/api/workflow/${id}`)).json()).data.name).toBe('未命名项目');
+  await page.getByRole('button', { name: '未命名项目', exact: true }).click();
+  await input.fill('  恢复后的名称  ');
+  await input.press('Enter');
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
+  const saved = (await (await request.get(`/api/workflow/${id}`)).json()).data;
+  expect(saved.name).toBe('恢复后的名称');
+  expect(saved.nodes).toHaveLength(1);
+  await page.reload();
+  await expect(page.getByRole('button', { name: '恢复后的名称', exact: true })).toBeVisible();
+});
+
 test('clearing a project name while renaming never submits an invalid snapshot', async ({ page, request }) => {
   await page.goto('/');
   await expect(page.getByTestId('canvas-save-status')).toHaveText('尚未保存');

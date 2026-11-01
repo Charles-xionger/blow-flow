@@ -45,10 +45,13 @@ export const TopBar = memo(function TopBar() {
 
 
   const isDark = isDarkMode;
+  const displayProjectName = projectName.trim() || "未命名项目";
 
   const commitProjectName = () => {
-    const name = projectNameDraft.trim();
-    if (name) setProjectName(name);
+    // Keep a valid name when an edit is cleared, including drafts saved by
+    // older clients that already contain an empty name.
+    const name = projectNameDraft.trim() || displayProjectName;
+    if (name !== projectName) setProjectName(name);
     setIsEditingProjectName(false);
   };
 
@@ -212,17 +215,18 @@ export const TopBar = memo(function TopBar() {
             />
           ) : (
             <button
+              title="修改项目名称"
               onClick={() => {
                 setProjectNameDraft(projectName);
                 setIsEditingProjectName(true);
               }}
-              className={`text-sm font-medium max-w-35 truncate transition-colors ${
+              className={`min-w-16 px-2 py-1 text-sm font-medium max-w-35 truncate transition-colors ${
                 isDark
                   ? "text-gray-200 hover:text-white"
                   : "text-gray-800 hover:text-black"
               }`}
             >
-              {projectName}
+              {displayProjectName}
             </button>
           )}
         </div>
