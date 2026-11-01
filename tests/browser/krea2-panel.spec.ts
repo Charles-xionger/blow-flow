@@ -1,19 +1,76 @@
 import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
 
-async function openCanvas(page: Page, request: APIRequestContext, data: Record<string, unknown> = {}) {
+async function openCanvas(page: Page, request: APIRequestContext, data: Record<string, unknown> = {}, zoom = 1) {
   const id = crypto.randomUUID();
   const response = await request.put(`/api/workflow/${id}`, { data: {
     id, requestId: crypto.randomUUID(), baseVersion: 0,
-    snapshot: { name: 'Krea2 面板验收', nodes: [{ id: 'image-node', type: 'textToImage',
-      position: { x: 400, y: 100 }, data: { type: 'textToImage', label: 'Text to Image',
+    snapshot: { name: 'Krea2 面板验收', nodes: [{ id: 'image-node', type: data.type ?? 'textToImage',
+      position: { x: 400, y: 100 }, style: { width: 320, height: 240 }, data: { type: 'textToImage', label: 'Text to Image',
         model: 'runninghub-krea2', usesGenerationTasks: true, ...data } }],
-      edges: [], viewport: { x: 0, y: 0, zoom: 1 } },
+      edges: [], viewport: { x: -200, y: 0, zoom } },
   } });
   expect(response.ok()).toBeTruthy();
   await page.goto(`/?project=${id}`);
   await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
   await page.locator('.react-flow__node').click();
   return { id, read: async () => (await (await request.get(`/api/workflow/${id}`)).json()).data.nodes[0].data };
+}
+
+test('image models share attached panel sizing and spacing at every canvas zoom', async ({ page, request }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 1100 });
+  await page.addInitScript(() => localStorage.setItem('canvas-theme', 'dark'));
+  for (const zoom of [1, 1.75]) {
+    const geometries: { width: number; gap: number }[] = [];
+    for (const data of [
+      { model: 'runninghub-krea2', usesGenerationTasks: true },
+      { model: 'BananaPro', usesGenerationTasks: false },
+      { model: 'BananaPro', usesGenerationTasks: false, type: 'imageToImage' },
+    ]) {
+      await openCanvas(page, request, data, zoom);
+      const node = page.locator('.react-flow__node');
+      const panel = page.getByTestId('image-generation-panel');
+      await expect(panel).toBeVisible();
+      const nodeBox = await node.boundingBox();
+      const previewBox = await page.getByTestId('image-preview').boundingBox();
+      expect(nodeBox!.height).toBeCloseTo(previewBox!.height, 0);
+      expect(nodeBox!.width).toBeCloseTo(previewBox!.width, 0);
+      const panelBox = await panel.boundingBox();
+      expect(panelBox!.width / zoom).toBeCloseTo(400, 0);
+      expect(panelBox!.y - nodeBox!.y - nodeBox!.height).toBeCloseTo(16 * zoom, 0);
+      if (zoom === 1.75) await page.screenshot({ path: testInfo.outputPath(`${data.type ?? data.model}-attached.png`), animations: 'disabled' });
+      geometries.push({ width: panelBox!.width, gap: panelBox!.y - nodeBox!.y - nodeBox!.height });
+    }
+    expect(geometries[1].width).toBeCloseTo(geometries[0].width, 0);
+    expect(geometries[2].width).toBeCloseTo(geometries[0].width, 0);
+  }
+});
+
+for (const type of ['textToImage', 'imageToImage']) {
+  test(`${type} uses the shared size controls without changing its API parameter values`, async ({ page, request }) => {
+    let submitted: { aspectRatio: string; resolution: string } | undefined;
+    await page.route('**/api/generate/image', async route => {
+      submitted = route.request().postDataJSON();
+      await route.fulfill({ status: 400, json: { success: false, error: '测试已捕获参数' } });
+    });
+    const { read } = await openCanvas(page, request, { type, model: 'BananaPro', usesGenerationTasks: false, prompt: '一朵花' });
+    const settings = page.getByRole('button', { name: '图像设置' });
+    await settings.click();
+    const dialog = page.getByRole('dialog', { name: '图像设置' });
+    await expect(dialog.getByRole('button', { name: '自定义', exact: true })).toHaveCount(0);
+    await dialog.getByRole('button', { name: '2K', exact: true }).click();
+    await dialog.getByRole('button', { name: '16:9', exact: true }).click();
+    const resolution = type === 'textToImage' ? '2k' : '2048x2048';
+    await expect.poll(async () => (await read()).resolution).toBe(resolution);
+    await expect.poll(async () => (await read()).aspectRatio).toBe('16:9');
+    await expect.poll(async () => { const box = await page.getByTestId('image-preview').boundingBox(); return box!.width / box!.height; }).toBeCloseTo(16 / 9, 1);
+    await page.keyboard.press('Escape');
+    await expect(settings).toContainText('2K · 16:9');
+    if (type === 'textToImage') {
+      await page.getByRole('button', { name: '生成', exact: true }).click();
+      await expect.poll(() => submitted?.resolution).toBe('2k');
+      expect(submitted?.aspectRatio).toBe('16:9');
+    }
+  });
 }
 
 test('Krea2 size presets persist actual dimensions and keep the preview proportional', async ({ page, request }, testInfo) => {

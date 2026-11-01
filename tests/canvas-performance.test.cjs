@@ -95,6 +95,38 @@ test('batch creation emits one complete graph; dragging preserves selection and 
   canvasDraftStorage.flush();
 });
 
+test('group bounds follow measured image previews rather than legacy fixed dimensions', () => {
+  const { useCanvasStore: store } = load('store/useCanvasStore.ts');
+  const { NodeType } = load('types/index.ts');
+  const id = store.getState().addNode(NodeType.TEXT_TO_IMAGE, { x: 20, y: 40 });
+  store.getState().onNodesChange([{ id, type: 'dimensions', dimensions: { width: 180, height: 320 } }]);
+  store.getState().groupNodes([id]);
+  const child = store.getState().nodes.find(node => node.id === id);
+  const group = store.getState().nodes.find(node => node.id === child.parentId);
+  assert.deepEqual(group.style, { width: 260, height: 400 });
+  assert.deepEqual(child.position, { x: 40, y: 40 });
+});
+
+test('rendering image previews preserves unrelated node references and stored style metadata', () => {
+  const { canvasRenderNodes } = load('lib/canvas/render-nodes.ts');
+  const { NodeType } = load('types/index.ts');
+  const a = { id: 'a', type: NodeType.TEXT_TO_IMAGE, position: { x: 0, y: 0 }, data: {},
+    parentId: 'group', extent: 'parent', style: { width: 320, height: 240, opacity: 0.8 } };
+  const b = { ...a, id: 'b' };
+  const group = { id: 'group', type: NodeType.GROUP, position: { x: 0, y: 0 }, data: {}, style: { width: 900, height: 800 } };
+  const before = canvasRenderNodes([a, b, group]);
+  const after = canvasRenderNodes([{ ...a, position: { x: 30, y: 50 } }, b, group]);
+  assert.equal(after[1], before[1]);
+  assert.equal(after[2], group);
+  assert.notEqual(after[0], before[0]);
+  assert.equal(after[0].style.width, undefined);
+  assert.equal(after[0].style.height, undefined);
+  assert.equal(after[0].style.opacity, 0.8);
+  assert.equal(after[0].parentId, 'group');
+  assert.equal(after[0].extent, 'parent');
+  assert.deepEqual(a.style, { width: 320, height: 240, opacity: 0.8 });
+});
+
 test('connection policy rejects invalid ports, types, duplicates and cycles', () => {
   const { isValidCanvasConnection: valid } = load('lib/canvas/connections.ts');
   const { NodeType: T } = load('types/index.ts');

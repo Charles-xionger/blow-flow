@@ -6,7 +6,7 @@ import { BaseNode, NodeSurface } from "./BaseNode";
 import { useNodeInputs } from "@/hooks/useNodeInputs";
 import { useCanvasStore } from "@/store/useCanvasStore";
 import {
-  Image,
+  Image as ImageIcon,
   Sparkles,
   AlertCircle,
   Loader2,
@@ -17,6 +17,10 @@ import type { NodeData } from "@/types";
 import { getImageModels } from "@/lib/model-registry";
 import { Textarea } from "@/components/ui/textarea";
 import { ImageWithActions } from "@/components/ui/image-with-actions";
+import { ImageGenerationPanel } from "./shared/ImageGenerationPanel";
+import { ImageModelSettings } from "./shared/ImageModelSettings";
+import { imagePreviewSize } from "@/lib/generation/image-dimensions";
+import imageStyles from "./shared/ImageGeneration.module.css";
 
 const aspectRatios = [
   { value: "1:1", label: "1:1 方形" },
@@ -25,9 +29,9 @@ const aspectRatios = [
 ];
 
 const resolutions = [
-  { value: "1024x1024", label: "1K (1024x1024)" },
-  { value: "2048x2048", label: "2K (2048x2048)" },
-  { value: "4096x4096", label: "4K (4096x4096)" },
+  { value: "1024x1024", label: "1K" },
+  { value: "2048x2048", label: "2K" },
+  { value: "4096x4096", label: "4K" },
 ];
 
 const ImageToImageNode = (props: NodeProps<Node<NodeData>>) => {
@@ -39,7 +43,7 @@ const ImageToImageNode = (props: NodeProps<Node<NodeData>>) => {
   const inputs = useNodeInputs(id);
 
   // 只有在单选状态下才显示控制面板
-  const shouldShowPanel = selected && singleSelected;
+  const shouldShowPanel = selected && singleSelected && !props.dragging;
 
   // 计算输入图片（使用 useMemo 稳定引用）
   const inputImages = useMemo(() => {
@@ -142,12 +146,13 @@ const ImageToImageNode = (props: NodeProps<Node<NodeData>>) => {
   );
 
   const hasResult = !!data.imageSrc && !data.isLoading;
+  const [ratioWidth, ratioHeight] = (data.aspectRatio || '1:1').split(':').map(Number);
 
   return (
-    <BaseNode {...props}>
+    <BaseNode {...props} displaySize={imagePreviewSize(ratioWidth, ratioHeight)}>
 
       {/* 节点显示区域 */}
-      <NodeSurface>
+      <NodeSurface testId="image-preview">
         {hasResult ? (
           <div className="relative w-full h-full">
             <ImageWithActions
@@ -159,10 +164,10 @@ const ImageToImageNode = (props: NodeProps<Node<NodeData>>) => {
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center text-zinc-500">
             <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 bg-zinc-800/50 text-zinc-500">
-              <Image size={28} className="opacity-60" />
+              <ImageIcon size={28} className="opacity-60" aria-hidden />
             </div>
             <span className="text-sm font-medium opacity-60">图生图</span>
-            <span className="text-xs opacity-40 mt-1">选中节点开始创作</span>
+            <span className="text-xs opacity-40 mt-1">{selected ? "输入提示词开始创作" : "选中节点开始创作"}</span>
           </div>
         )}
 
@@ -176,11 +181,7 @@ const ImageToImageNode = (props: NodeProps<Node<NodeData>>) => {
 
       {/* 控制面板 */}
       {shouldShowPanel && (
-        <div
-          className="node-panel nodrag nopan nowheel absolute top-full left-1/2 -translate-x-1/2 min-w-100 pt-4 z-70 pointer-events-auto"
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <div className="bg-[#1a1a1a]/95 backdrop-blur-xl border border-zinc-700/50 rounded-2xl p-4 flex flex-col gap-3">
+        <ImageGenerationPanel>
             {/* 输入图片预览 */}
             {inputImages.length > 0 ? (
               <div>
@@ -218,7 +219,7 @@ const ImageToImageNode = (props: NodeProps<Node<NodeData>>) => {
             )}
 
             <Textarea
-              className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none min-h-18 max-h-32 overflow-y-auto bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-purple-500 text-white placeholder-zinc-500"
+              className={`${imageStyles.prompt} nodrag`}
               placeholder="描述你想要的变化..."
               value={localPrompt}
               onChange={(e) => {
@@ -231,73 +232,15 @@ const ImageToImageNode = (props: NodeProps<Node<NodeData>>) => {
               rows={3}
             />
 
-            {/* 第一行：模型和宽高比 */}
-            <div className="flex items-center gap-2">
-              <select
-                value={data.model || imageModels[0]?.value || ""}
-                onChange={(e) => updateNodeData(id, { model: e.target.value })}
-                className="flex-1 h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-purple-500/20"
-              >
-                {imageModels.map((m) => (
-                  <option key={m.value} value={m.value}>
-                    {m.label}
-                  </option>
-                ))}
+            <div className={imageStyles.foot}>
+              <ImageModelSettings aspectRatio={data.aspectRatio || '1:1'} resolution={data.resolution || '1024x1024'}
+                ratios={aspectRatios} resolutions={resolutions} disabled={data.isLoading}
+                onChange={settings => updateNodeData(id, settings)} />
+              <select aria-label="生图模型" value={data.model || imageModels[0]?.value || ''}
+                disabled={data.isLoading} onChange={event => updateNodeData(id, { model: event.target.value })}
+                className={imageStyles.model}>
+                {imageModels.map(model => <option key={model.value} value={model.value}>{model.label}</option>)}
               </select>
-
-              <select
-                value={data.aspectRatio || "1:1"}
-                onChange={(e) =>
-                  updateNodeData(id, { aspectRatio: e.target.value })
-                }
-                className="h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-purple-500/20"
-              >
-                {aspectRatios.map((r) => (
-                  <option key={r.value} value={r.value}>
-                    {r.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* 第二行：分辨率、提示词优化 */}
-            <div className="flex items-center gap-2">
-              <select
-                value={data.resolution || "1024x1024"}
-                onChange={(e) =>
-                  updateNodeData(id, { resolution: e.target.value })
-                }
-                className="flex-1 h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-purple-500/20"
-              >
-                {resolutions.map((r) => (
-                  <option key={r.value} value={r.value}>
-                    {r.label}
-                  </option>
-                ))}
-              </select>
-
-              {/* 暂时注释掉数量配置 - 因为是串行调用，速度较慢 */}
-              {/* <div className="flex items-center gap-1.5">
-                <label className="text-xs text-zinc-400 whitespace-nowrap">
-                  数量
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  max="4"
-                  value={data.count || 1}
-                  onChange={(e) =>
-                    updateNodeData(id, {
-                      count: Math.min(
-                        4,
-                        Math.max(1, parseInt(e.target.value) || 1),
-                      ),
-                    })
-                  }
-                  className="w-14 h-8 px-2 text-sm text-center rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-purple-500/20"
-                />
-              </div> */}
-
               <button
                 className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-all border ${
                   data.promptOptimize
@@ -314,17 +257,14 @@ const ImageToImageNode = (props: NodeProps<Node<NodeData>>) => {
                   fill={data.promptOptimize ? "currentColor" : "none"}
                 />
               </button>
-            </div>
-
-            {/* 第三行：生成按钮 */}
-            <div className="flex items-center gap-2">
+              <div className="flex-1" />
               <button
                 onClick={() => handleGenerate(false)}
                 disabled={data.isLoading || !localPrompt || !inputImage}
-                className={`flex-1 h-8 px-4 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 whitespace-nowrap transition-all active:scale-[0.98] ${
+                className={`shrink-0 h-8 px-4 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 whitespace-nowrap transition-all active:scale-[0.98] ${
                   data.isLoading || !localPrompt || !inputImage
-                    ? "bg-gray-400 text-white cursor-not-allowed"
-                    : "bg-linear-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 text-white shadow-lg shadow-purple-500/25 hover:shadow-purple-500/40"
+                    ? "bg-zinc-800 text-zinc-500 cursor-not-allowed"
+                    : "bg-purple-600 hover:bg-purple-500 text-white"
                 }`}
               >
                 {data.isLoading ? (
@@ -351,8 +291,7 @@ const ImageToImageNode = (props: NodeProps<Node<NodeData>>) => {
                 {data.error}
               </div>
             )}
-          </div>
-        </div>
+        </ImageGenerationPanel>
       )}
     </BaseNode>
   );

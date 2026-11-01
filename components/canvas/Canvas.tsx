@@ -23,6 +23,7 @@ import "@xyflow/react/dist/style.css";
 import { CanvasRecovery } from "./CanvasRecovery";
 import { canvasAutosave, useCanvasStore } from "@/store/useCanvasStore";
 import { isValidCanvasConnection } from "@/lib/canvas/connections";
+import { canvasRenderNodes } from "@/lib/canvas/render-nodes";
 import { NodeType } from "@/types";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
@@ -90,6 +91,9 @@ function CanvasInner() {
   const searchParams = useSearchParams();
 
   const nodes = useCanvasStore((state) => state.nodes);
+  // Image content determines its preview ratio. Historical fixed inline styles must not
+  // leave a larger invisible node box (which displaces handles, selection and panels).
+  const renderNodes = useMemo(() => canvasRenderNodes(nodes), [nodes]);
   const edges = useCanvasStore((state) => state.edges);
   const viewport = useCanvasStore((state) => state.viewport);
   const setViewport = useCanvasStore((state) => state.setViewport);
@@ -236,7 +240,7 @@ function CanvasInner() {
     <div ref={reactFlowWrapper} className="w-full h-full">
       <CanvasRecovery />
       <ReactFlow
-        nodes={nodes}
+        nodes={renderNodes}
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}

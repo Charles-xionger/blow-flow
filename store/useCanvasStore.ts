@@ -417,18 +417,18 @@ export const useCanvasStore = create<CanvasState>()(
             ...nodesToGroup.map(
               (n) =>
                 n.position.x +
-                (typeof n.style?.width === "number"
+                (n.measured?.width ?? (typeof n.style?.width === "number"
                   ? n.style.width
-                  : Number(n.style?.width) || DEFAULT_NODE_WIDTH),
+                  : Number(n.style?.width) || DEFAULT_NODE_WIDTH)),
             ),
           );
           const maxY = Math.max(
             ...nodesToGroup.map(
               (n) =>
                 n.position.y +
-                (typeof n.style?.height === "number"
+                (n.measured?.height ?? (typeof n.style?.height === "number"
                   ? n.style.height
-                  : Number(n.style?.height) || DEFAULT_NODE_HEIGHT),
+                  : Number(n.style?.height) || DEFAULT_NODE_HEIGHT)),
             ),
           );
 

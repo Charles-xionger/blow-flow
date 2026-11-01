@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useState, useEffect, useMemo, type ReactNode } from "react";
+import { memo, useCallback, useState, useEffect, useMemo } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { BaseNode, NodeSurface } from "./BaseNode";
 import { useNodeInputs } from "@/hooks/useNodeInputs";
@@ -18,14 +18,9 @@ import type { PublicModel } from "@/lib/generation/types";
 import { useGenerationTask } from "@/hooks/useGenerationTask";
 import { imagePreviewSize } from "@/lib/generation/image-dimensions";
 import { ImageSizeSettings } from "./shared/ImageSizeSettings";
+import { ImageModelSettings } from "./shared/ImageModelSettings";
 import { ImageGenerationPanel } from "./shared/ImageGenerationPanel";
 import imageStyles from "./shared/ImageGeneration.module.css";
-
-function PanelAnchor({ compact, nodeId, children }: { compact: boolean; nodeId: string; children: ReactNode }) {
-  const content = <div onMouseDown={event => event.stopPropagation()}>{children}</div>;
-  return compact ? <ImageGenerationPanel nodeId={nodeId}>{children}</ImageGenerationPanel>
-    : <div className="node-panel nodrag nopan nowheel absolute top-full left-1/2 -translate-x-1/2 min-w-100 pt-4 z-70 pointer-events-auto">{content}</div>;
-}
 
 const aspectRatios = [
   { value: "1:1", label: "1:1 方形" },
@@ -274,7 +269,9 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
   const hasResult = !!data.imageSrc && !data.isLoading;
   const generationWidth = data.generationWidth ?? taskModel?.capabilities.dimensions.defaultWidth;
   const generationHeight = data.generationHeight ?? taskModel?.capabilities.dimensions.defaultHeight;
-  const displaySize = taskModel && generationWidth && generationHeight ? imagePreviewSize(generationWidth, generationHeight) : undefined;
+  const [ratioWidth, ratioHeight] = (data.aspectRatio || '1:1').split(':').map(Number);
+  const displaySize = taskModel && generationWidth && generationHeight
+    ? imagePreviewSize(generationWidth, generationHeight) : imagePreviewSize(ratioWidth, ratioHeight);
 
   return (
     <BaseNode {...props} displaySize={displaySize} titleAccessory={taskModel && <span
@@ -319,8 +316,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
 
       {/* 控制面板 */}
       {shouldShowPanel && (
-        <PanelAnchor compact={!!taskModel} nodeId={id}>
-          <div data-testid={taskModel ? 'image-generation-panel' : undefined} className={taskModel ? imageStyles.panel : "bg-[#1a1a1a]/95 backdrop-blur-xl border border-zinc-700/50 rounded-2xl p-4 flex flex-col gap-3"}>
+        <ImageGenerationPanel>
             {/* 连接提示卡片 */}
             {inputPrompt && (
               <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 text-sm">
@@ -331,7 +327,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
 
             {/* Prompt 输入框 */}
             <Textarea
-              className={taskModel ? `${imageStyles.prompt} nodrag` : "nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none min-h-18 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-blue-500 text-white placeholder-zinc-500 max-h-32 overflow-y-auto"}
+              className={`${imageStyles.prompt} nodrag`}
               placeholder="描述你想要生成的图片..."
               value={localPrompt}
               onChange={(e) => {
@@ -343,17 +339,20 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
               onWheel={(e) => e.stopPropagation()}
             />
 
-            <div className={taskModel ? imageStyles.foot : "flex items-center gap-2"}>
+            <div className={imageStyles.foot}>
               {taskModel && <ImageSizeSettings width={generationWidth!} height={generationHeight!}
                 limits={taskModel.capabilities.dimensions} preference={data.generationSizePreset}
                 disabled={data.isLoading || !!data.pendingGeneration || data.generationBlocked}
                 onChange={(size, preset) => updateNodeData(id, { generationWidth: size.width, generationHeight: size.height, generationSizePreset: preset })} />}
+              {!taskModel && <ImageModelSettings aspectRatio={data.aspectRatio || '1:1'} resolution={data.resolution || '1k'}
+                ratios={aspectRatios} resolutions={resolutions} disabled={data.isLoading}
+                onChange={settings => updateNodeData(id, settings)} />}
               <select
                 aria-label="生图模型"
                 value={data.model || imageModels[0]?.value || ""}
                 disabled={data.isLoading || !!data.pendingGeneration || data.generationBlocked}
                 onChange={(e) => updateNodeData(id, { model: e.target.value, usesGenerationTasks: taskModels.some(m => m.id === e.target.value) })}
-                className={taskModel ? imageStyles.model : "h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"}
+                className={imageStyles.model}
               >
                 {taskModels.map(m => <option key={m.id} value={m.id}>{m.name}{m.configured ? "" : "（未配置）"}</option>)}
                 {imageModels.map((m) => (
@@ -364,38 +363,10 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
               </select>
 
               {!taskModel && <>
-              <select
-                value={data.aspectRatio || "1:1"}
-                onChange={(e) =>
-                  updateNodeData(id, { aspectRatio: e.target.value })
-                }
-                className="h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-              >
-                {aspectRatios.map((r) => (
-                  <option key={r.value} value={r.value}>
-                    {r.label}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                value={data.resolution || "1k"}
-                onChange={(e) =>
-                  updateNodeData(id, { resolution: e.target.value })
-                }
-                className="h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-              >
-                {resolutions.map((r) => (
-                  <option key={r.value} value={r.value}>
-                    {r.label}
-                  </option>
-                ))}
-              </select>
-
               <button
                 className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-all border ${
                   data.promptOptimize
-                    ? "text-blue-400 bg-blue-500/20 border-blue-500/30"
+                    ? "text-purple-400 bg-purple-500/20 border-purple-500/30"
                     : "text-zinc-400 hover:text-white border-zinc-700 hover:border-zinc-600 hover:bg-zinc-700"
                 }`}
                 onClick={() =>
@@ -418,7 +389,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
                 className={`shrink-0 h-8 px-4 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 whitespace-nowrap transition-all active:scale-[0.98] ${
                   data.isLoading || taskUnavailable || (!inputPrompt && !localPrompt)
                     ? "bg-zinc-800 text-zinc-500 cursor-not-allowed"
-                    : taskModel ? "bg-purple-600 hover:bg-purple-500 text-white" : "bg-linear-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40"
+                    : "bg-purple-600 hover:bg-purple-500 text-white"
                 }`}
               >
                 {data.isLoading ? (
@@ -447,8 +418,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
                 {data.error}
               </div>
             )}
-          </div>
-        </PanelAnchor>
+        </ImageGenerationPanel>
       )}
     </BaseNode>
   );
