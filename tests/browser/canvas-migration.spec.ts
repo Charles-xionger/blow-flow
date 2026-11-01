@@ -62,7 +62,18 @@ for (const choice of ['server', 'copy'] as const) {
     expect(savedRemote.version).toBe(1);
     if (choice === 'server') {
       await expect(page.getByRole('button', { name: '服务端版本', exact: true })).toBeVisible();
+      const drafts = (await records(page)).drafts;
+      expect(drafts.find(draft => draft.id === id)?.recovery).toBeUndefined();
+      expect(drafts.filter(draft => draft.recovery?.kind === 'copy')).toHaveLength(1);
+      await page.reload();
+      await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
+      await expect(page.getByRole('complementary', { name: '草稿恢复', exact: true })).not.toBeVisible();
       await page.getByText('恢复副本（1）').click();
+      await expect(page.getByRole('button', { name: '打开恢复副本：升级前草稿' })).toBeVisible();
+      await page.getByRole('button', { name: '收起恢复副本' }).click();
+      await expect(page.getByRole('complementary', { name: '草稿恢复', exact: true })).not.toBeVisible();
+      expect((await records(page)).drafts.filter(draft => draft.recovery?.kind === 'copy')).toHaveLength(1);
+      await page.getByRole('button', { name: '恢复副本（1）', exact: true }).click();
       await page.getByRole('button', { name: '打开恢复副本：升级前草稿' }).click();
       await expect(page.getByRole('button', { name: '升级前草稿', exact: true })).toBeVisible();
     } else {

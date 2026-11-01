@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { History, X } from 'lucide-react';
 import { canvasAutosave, useCanvasStore } from '@/store/useCanvasStore';
 import { LEGACY_CANVAS_KEY } from '@/lib/canvas/legacy-draft';
 import { canvasSnapshot } from '@/lib/canvas/snapshot';
@@ -15,6 +16,7 @@ export function CanvasRecovery() {
   const saveError = useCanvasStore(state => state.saveError);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [copiesOpen, setCopiesOpen] = useState(false);
   if (!failed && !localFailed && !recovery && !copies?.length) return null;
 
   const run = async (action: () => Promise<unknown>) => {
@@ -43,8 +45,22 @@ export function CanvasRecovery() {
   };
   const actionError = error && error !== saveError ? error : undefined;
   const buttonClass = 'rounded border px-3 py-1 text-sm disabled:opacity-50';
+  const needsAttention = failed || localFailed || !!recovery;
+  const copyButtons = copies?.map(copy => <button key={copy.id} className={`${buttonClass} block`} disabled={busy || !ready && !failed}
+    onClick={() => void run(() => canvasAutosave.open(copy.id))}>打开恢复副本：{copy.name}</button>);
+  if (!needsAttention && !copiesOpen) return (
+    <button type="button" aria-expanded={false} title="查看保存在本机的恢复副本" onClick={() => setCopiesOpen(true)}
+      className="absolute bottom-6 left-16 z-50 flex items-center gap-2 rounded-full border bg-white px-3 py-2 text-xs text-gray-600 shadow-sm hover:bg-gray-50 dark:bg-zinc-900 dark:text-gray-300 dark:hover:bg-zinc-800">
+      <History size={14} aria-hidden="true" />恢复副本（{copies?.length}）
+    </button>
+  );
   return (
     <aside aria-label="草稿恢复" className="absolute bottom-6 left-4 z-50 max-w-lg space-y-2 rounded-xl border bg-white p-4 text-gray-900 shadow-lg dark:bg-zinc-900 dark:text-gray-100">
+      {!needsAttention ? <div className="flex items-center justify-between gap-6">
+        <span className="text-sm font-medium">恢复副本（{copies?.length}）</span>
+        <button type="button" aria-label="收起恢复副本" onClick={() => setCopiesOpen(false)}
+          className="rounded p-1 hover:bg-gray-100 dark:hover:bg-zinc-800"><X size={16} aria-hidden="true" /></button>
+      </div> : null}
       {localFailed ? <>
         <p>{ready ? '当前修改尚未保存到本地。请保持此页面打开，重试或导出以保留内容。' : '画布恢复失败，尚未加载原有内容。请重试恢复。'}</p>
         <p role="alert">{saveError}</p>
@@ -69,10 +85,7 @@ export function CanvasRecovery() {
         </> : null}
         <button className={buttonClass} disabled={busy || !ready && !failed} onClick={() => void run(() => canvasAutosave.recover('copy'))}>将本地内容另存为新画布</button>
       </> : null}
-      {copies?.length ? <details><summary>恢复副本（{copies.length}）</summary>
-        {copies.map(copy => <button key={copy.id} className={`${buttonClass} block`} disabled={busy || !ready && !failed}
-          onClick={() => void run(() => canvasAutosave.open(copy.id))}>打开恢复副本：{copy.name}</button>)}
-      </details> : null}
+      {copies?.length ? needsAttention ? <details><summary>恢复副本（{copies.length}）</summary>{copyButtons}</details> : copyButtons : null}
       {actionError || recovery && !localFailed && !failed && saveError ? <p role="alert">{actionError || saveError}</p> : null}
     </aside>
   );
