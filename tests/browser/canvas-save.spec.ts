@@ -24,6 +24,41 @@ async function localDraft(page: Page, id: string) {
   }), id);
 }
 
+test('clearing a project name while renaming never submits an invalid snapshot', async ({ page, request }) => {
+  await page.goto('/');
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('尚未保存');
+  await addTextNode(page);
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
+  const id = new URL(page.url()).searchParams.get('project')!;
+  const read = async () => (await (await request.get(`/api/workflow/${id}`)).json()).data;
+  const original = await read();
+  await page.getByRole('button', { name: original.name, exact: true }).click();
+  const input = page.getByPlaceholder('项目名称...');
+  await input.fill('');
+  // Explicit save flushes any queued edits, without relying on debounce timing.
+  await input.press('ControlOrMeta+s');
+  await expect(page.getByText('保存成功', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
+  await page.getByRole('button', { name: original.name, exact: true }).click();
+  await input.fill('   ');
+  await input.press('Enter');
+  await expect(page.getByRole('button', { name: original.name, exact: true })).toBeVisible();
+  expect((await read()).name).toBe(original.name);
+
+  await page.getByRole('button', { name: original.name, exact: true }).click();
+  await input.fill('新的名称');
+  await input.press('Enter');
+  await expect.poll(async () => (await read()).name).toBe('新的名称');
+  await page.getByRole('button', { name: '新的名称', exact: true }).click();
+  await input.fill('取消的名称');
+  await input.press('Escape');
+  await expect(page.getByRole('button', { name: '新的名称', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '新的名称', exact: true }).click();
+  await input.fill('失焦后保存');
+  await page.getByRole('button', { name: '保存', exact: true }).click();
+  await expect.poll(async () => (await read()).name).toBe('失焦后保存');
+});
+
 test('editing a canvas survives clearing browser storage and deleting its last node', async ({ page, request, context }) => {
   await page.goto('/');
   await expect(page.getByTestId('canvas-save-status')).toHaveText('尚未保存');

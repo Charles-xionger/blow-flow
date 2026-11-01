@@ -592,7 +592,7 @@ export const canvasAutosave = createCanvasAutosave(useCanvasStore, (error) => {
   // Storage failures remain visible with retry/export actions in the editor;
   // automatic retries should not repeatedly interrupt editing with a toast.
   if (error instanceof CanvasStorageError) return;
-  toast.error("自动保存失败，请检查网络后点击保存重试", {
+  toast.error("自动保存失败，请查看错误详情", {
     id: "canvas-autosave-error",
     description: error instanceof Error ? error.message : "未知错误",
   });

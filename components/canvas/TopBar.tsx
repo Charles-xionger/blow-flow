@@ -31,6 +31,7 @@ export const TopBar = memo(function TopBar() {
   const importGraph = useCanvasStore((state) => state.importGraph);
 
   const [isEditingProjectName, setIsEditingProjectName] = useState(false);
+  const [projectNameDraft, setProjectNameDraft] = useState("");
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -44,6 +45,12 @@ export const TopBar = memo(function TopBar() {
 
 
   const isDark = isDarkMode;
+
+  const commitProjectName = () => {
+    const name = projectNameDraft.trim();
+    if (name) setProjectName(name);
+    setIsEditingProjectName(false);
+  };
 
   // 保存工作流到数据库
   const handleSave = async () => {
@@ -189,11 +196,12 @@ export const TopBar = memo(function TopBar() {
           {isEditingProjectName ? (
             <input
               type="text"
-              value={projectName}
-              onChange={(e) => setProjectName(e.target.value)}
-              onBlur={() => setIsEditingProjectName(false)}
+              value={projectNameDraft}
+              onChange={(e) => setProjectNameDraft(e.target.value)}
+              onBlur={commitProjectName}
               onKeyDown={(e) => {
-                if (e.key === "Enter") setIsEditingProjectName(false);
+                if (e.nativeEvent.isComposing) return;
+                if (e.key === "Enter") commitProjectName();
                 if (e.key === "Escape") setIsEditingProjectName(false);
               }}
               autoFocus
@@ -204,7 +212,10 @@ export const TopBar = memo(function TopBar() {
             />
           ) : (
             <button
-              onClick={() => setIsEditingProjectName(true)}
+              onClick={() => {
+                setProjectNameDraft(projectName);
+                setIsEditingProjectName(true);
+              }}
               className={`text-sm font-medium max-w-35 truncate transition-colors ${
                 isDark
                   ? "text-gray-200 hover:text-white"
