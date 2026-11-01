@@ -16,7 +16,8 @@ async function testWorkflowAPI() {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      name: "测试工作流",
+      id: crypto.randomUUID(), requestId: crypto.randomUUID(), baseVersion: 0,
+      snapshot: { name: "测试工作流",
       nodes: [
         {
           id: "1",
@@ -27,6 +28,7 @@ async function testWorkflowAPI() {
       ],
       edges: [],
       viewport: { x: 0, y: 0, zoom: 1 },
+      },
     }),
   });
   const created = await createResponse.json();
@@ -52,12 +54,13 @@ async function testWorkflowAPI() {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        name: "更新后的工作流",
+        id: created.data.id, requestId: crypto.randomUUID(), baseVersion: created.data.version,
+        snapshot: { ...workflow.data, name: "更新后的工作流" },
       }),
     },
   );
   const updated = await updateResponse.json();
-  console.log("✅ 更新成功:", updated.data.name);
+  console.log("✅ 更新成功:", updated.data.version);
 
   // 删除工作流
   console.log("\n5. 删除工作流...");

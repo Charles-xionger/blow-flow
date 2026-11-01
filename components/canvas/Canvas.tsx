@@ -2,7 +2,7 @@
 
 import { GenerationNotificationsProvider } from "./GenerationNotificationsProvider";
 import { retryGenerationDeletions } from "@/lib/generation/recovery";
-import React, { useCallback, useRef, useEffect, useState, useMemo } from "react";
+import React, { useCallback, useRef, useEffect, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   ReactFlow,
@@ -20,7 +20,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
-import { canvasAutosave, canvasDraftStorage, useCanvasStore } from "@/store/useCanvasStore";
+import { canvasAutosave, useCanvasStore } from "@/store/useCanvasStore";
 import { isValidCanvasConnection } from "@/lib/canvas/connections";
 import { NodeType } from "@/types";
 import { Sidebar } from "./Sidebar";
@@ -87,7 +87,6 @@ function CanvasInner() {
   const { screenToFlowPosition } = useReactFlow();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [mounted, setMounted] = useState(false);
 
   const nodes = useCanvasStore((state) => state.nodes);
   const edges = useCanvasStore((state) => state.edges);
@@ -102,91 +101,24 @@ function CanvasInner() {
   const contextMenu = useCanvasStore((state) => state.contextMenu);
   const showContextMenu = useCanvasStore((state) => state.showContextMenu);
   const hideContextMenu = useCanvasStore((state) => state.hideContextMenu);
-  const loadWorkflow = useCanvasStore((state) => state.loadWorkflow);
-
-  // 使用 ref 跟踪上次加载的项目 ID，防止循环加载
-  const lastLoadedIdRef = useRef<string | null>(null);
+  const persistenceReady = useCanvasStore(state => state.persistenceReady);
+  const mounted = persistenceReady;
+  const saveError = useCanvasStore(state => state.saveError);
+  const projectId = searchParams.get("project");
   const isLoadingRef = useRef(false);
 
-  // 从 URL 加载项目（只在 URL 变化时触发）
   useEffect(() => {
-    const projectId = searchParams.get("project");
+    if (useCanvasStore.getState().persistenceReady && projectId === useCanvasStore.getState().currentWorkflowId) return;
+    isLoadingRef.current = true;
+    void canvasAutosave.open(projectId).finally(() => { isLoadingRef.current = false; });
+  }, [projectId]);
 
-    // 如果正在加载，或者已经加载过这个项目，跳过
-    if (isLoadingRef.current || lastLoadedIdRef.current === projectId) {
-      return;
-    }
-
-    console.log(
-      "[URL Load] projectId from URL:",
-      projectId,
-      "currentWorkflowId:",
-      currentWorkflowId,
-    );
-
-    // 只有当 URL 中有 project ID，且与当前不同时才加载
-    if (projectId && projectId !== currentWorkflowId) {
-      console.log("[URL Load] Loading project from URL:", projectId);
-      isLoadingRef.current = true;
-      lastLoadedIdRef.current = projectId;
-
-      // 从 API 加载项目
-      fetch(`/api/workflow/${projectId}`)
-        .then((res) => res.json())
-        .then((result) => {
-          if (result.success && result.data) {
-            loadWorkflow(result.data);
-          }
-        })
-        .catch((err) => console.error("Failed to load workflow from URL:", err))
-        .finally(() => {
-          isLoadingRef.current = false;
-        });
-    } else if (!projectId && currentWorkflowId) {
-      // URL 中没有项目 ID，但 store 中有，说明用户清空了 URL
-      lastLoadedIdRef.current = null;
-    }
-  }, [searchParams, currentWorkflowId, loadWorkflow]);
-
-  // 同步 currentWorkflowId 到 URL（使用 ref 防止循环更新）
-  const lastSyncedIdRef = useRef<string | null>(null);
   useEffect(() => {
-    const currentProjectId = searchParams.get("project");
-
-    // 如果正在加载，跳过同步
-    if (isLoadingRef.current) {
-      return;
+    if (!persistenceReady || isLoadingRef.current) return;
+    if (currentWorkflowId !== projectId) {
+      router.replace(currentWorkflowId ? `/?project=${encodeURIComponent(currentWorkflowId)}` : "/", { scroll: false });
     }
-
-    // 如果已经同步过这个 ID，跳过
-    if (lastSyncedIdRef.current === currentWorkflowId) {
-      return;
-    }
-
-    console.log(
-      "[URL Sync] currentWorkflowId:",
-      currentWorkflowId,
-      "URL projectId:",
-      currentProjectId,
-    );
-
-    if (currentWorkflowId && currentProjectId !== currentWorkflowId) {
-      console.log("[URL Sync] Updating URL to:", currentWorkflowId);
-      lastSyncedIdRef.current = currentWorkflowId;
-      lastLoadedIdRef.current = currentWorkflowId;
-      router.push(`/?project=${currentWorkflowId}`, { scroll: false });
-    } else if (!currentWorkflowId && currentProjectId) {
-      console.log("[URL Sync] Clearing URL");
-      lastSyncedIdRef.current = null;
-      lastLoadedIdRef.current = null;
-      router.push("/", { scroll: false });
-    }
-  }, [currentWorkflowId, router, searchParams]);
-
-  // 客户端挂载标记
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  }, [currentWorkflowId, persistenceReady, projectId, router]);
 
   // 同步主题到 DOM
   useEffect(() => {
@@ -197,7 +129,8 @@ function CanvasInner() {
 
   // 键盘快捷键：保存工作流
   const handleSave = useCallback(async () => {
-    canvasDraftStorage.flush();
+    // Node editors commit their input on blur; keyboard save must include it.
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     try {
       await canvasAutosave.save();
       toast.success("保存成功");
@@ -290,6 +223,12 @@ function CanvasInner() {
       color: mounted && isDarkMode ? "#666" : "#b1b1b7",
     },
   }), [mounted, isDarkMode]);
+
+  if (!persistenceReady) return (
+    <div className="flex h-full items-center justify-center" role="status">
+      {saveError || "正在恢复画布…"}
+    </div>
+  );
 
   return (
     <div ref={reactFlowWrapper} className="w-full h-full">

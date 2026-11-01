@@ -83,6 +83,7 @@ export type CanvasEdge = Edge;
 
 // 工作流数据
 export interface WorkflowData {
+  version?: number;
   id: string;
   name: string;
   nodes: CanvasNode[];

@@ -1,7 +1,7 @@
+import { handleCanvasSave } from "@/lib/canvas/save-route";
 import { NextRequest, NextResponse } from "next/server";
 import {
   getWorkflowById,
-  updateWorkflow,
   deleteWorkflow,
 } from "@/lib/db/workflows";
 
@@ -35,36 +35,8 @@ export async function GET(
   }
 }
 
-// PUT: 更新工作流
-export async function PUT(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  try {
-    const { id } = await params;
-    const body = await request.json();
-    const success = updateWorkflow(id, body);
-
-    if (!success) {
-      return NextResponse.json(
-        { success: false, error: "Workflow not found" },
-        { status: 404 },
-      );
-    }
-
-    const workflow = getWorkflowById(id);
-    return NextResponse.json({ success: true, data: workflow });
-  } catch (error) {
-    console.error("[API] Update workflow error:", error);
-    return NextResponse.json(
-      {
-        success: false,
-        error:
-          error instanceof Error ? error.message : "Failed to update workflow",
-      },
-      { status: 500 },
-    );
-  }
+export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  return handleCanvasSave(request, (await params).id);
 }
 
 // DELETE: 删除工作流

@@ -1,4 +1,5 @@
 require('../scripts/register-typescript.cjs');
+require('fake-indexeddb/auto');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -180,11 +181,11 @@ test('adding a node automatically persists the canvas to SQLite without manual s
   const previousFetch = global.fetch;
   global.fetch = async (url, options) => {
     const data = JSON.parse(options.body);
-    if (options.method === 'POST') return Response.json({ success: true, data: db.createWorkflow(data) });
-    return Response.json({ success: db.updateWorkflow(url.split('/').at(-1), data) });
+    return Response.json({ success: true, data: db.saveWorkflow(data) });
   };
   store.getState().clearWorkflow();
-  const stop = canvasAutosave?.start();
+  const stop = canvasAutosave.start();
+  await canvasAutosave.open();
   try {
     const id = store.getState().addNode(NodeType.TEXT);
     await wait(800);
@@ -192,6 +193,6 @@ test('adding a node automatically persists the canvas to SQLite without manual s
     assert.ok(saved, 'new node must be in the database without clicking Save');
     assert.equal(store.getState().currentWorkflowId, saved.id);
   } finally {
-    stop?.(); canvasDraftStorage.flush(); global.fetch = previousFetch;
+    stop(); await canvasAutosave.flush(); global.fetch = previousFetch;
   }
 });

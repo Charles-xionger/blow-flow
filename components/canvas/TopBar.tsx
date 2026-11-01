@@ -3,7 +3,7 @@
 import { memo } from "react";
 import React, { useState, useEffect } from "react";
 import { useReactFlow, useStore } from "@xyflow/react";
-import { canvasAutosave, canvasDraftStorage, useCanvasStore } from "@/store/useCanvasStore";
+import { canvasAutosave, useCanvasStore } from "@/store/useCanvasStore";
 import {
   Sparkles,
   Download,
@@ -20,6 +20,8 @@ import { toast } from "sonner";
 export const TopBar = memo(function TopBar() {
   const reactFlowInstance = useReactFlow();
   const zoom = useStore((state) => Math.round(state.transform[2] * 100));
+  const saveStatus = useCanvasStore(state => state.saveStatus);
+  const saveError = useCanvasStore(state => state.saveError);
   const projectName = useCanvasStore((state) => state.projectName);
   const setProjectName = useCanvasStore((state) => state.setProjectName);
   const isDarkMode = useCanvasStore((state) => state.isDarkMode);
@@ -45,7 +47,6 @@ export const TopBar = memo(function TopBar() {
 
   // 保存工作流到数据库
   const handleSave = async () => {
-    canvasDraftStorage.flush();
     setIsSaving(true);
     try {
       await canvasAutosave.save();
@@ -230,6 +231,11 @@ export const TopBar = memo(function TopBar() {
             className={`w-px h-5 ${isDark ? "bg-zinc-700" : "bg-gray-200"}`}
           />
 
+          <span role="status" data-testid="canvas-save-status" title={saveError || undefined}
+            className="px-2 text-xs text-zinc-500">
+            {{ loading: "正在恢复", idle: "尚未保存", saving: "保存中", pending: "已保存到本地，待同步",
+              syncing: "同步中", synced: "已同步", "local-error": "本地保存失败", "sync-error": "同步失败/冲突" }[saveStatus]}
+          </span>
           {/* 保存 */}
           <button
             onClick={handleSave}

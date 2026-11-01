@@ -1,0 +1,118 @@
+import { test, expect, type Page } from '@playwright/test';
+
+async function addTextNode(page: Page) {
+  // Use the application's real drop handler, with no store or persistence mocks.
+  await page.locator('.react-flow').dispatchEvent('drop', {
+    dataTransfer: await page.evaluateHandle(() => {
+      const transfer = new DataTransfer();
+      transfer.setData('application/reactflow-nodetype', 'text');
+      return transfer;
+    }), clientX: 500, clientY: 200,
+  });
+}
+
+async function localDraft(page: Page, id: string) {
+  return page.evaluate(id => new Promise<{ localVersion: number; confirmedLocalVersion: number; snapshot: { nodes: unknown[] } }>((resolve, reject) => {
+    const open = indexedDB.open('ai-flow-canvas');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction('drafts');
+      const get = tx.objectStore('drafts').get(id);
+      tx.oncomplete = () => { db.close(); resolve(get.result); };
+    };
+  }), id);
+}
+
+test('editing a canvas survives clearing browser storage and deleting its last node', async ({ page, request, context }) => {
+  await page.goto('/');
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('尚未保存');
+  await addTextNode(page);
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
+  const id = new URL(page.url()).searchParams.get('project')!;
+  expect(id).toBeTruthy();
+  const read = async () => (await (await request.get(`/api/workflow/${id}`)).json()).data;
+  expect((await read()).nodes).toHaveLength(1);
+  const local = await localDraft(page, id);
+  expect(local.snapshot.nodes).toHaveLength(1);
+  expect(local.localVersion).toBe(local.confirmedLocalVersion);
+  await page.locator('.react-flow__node').click();
+  await page.getByPlaceholder('输入文本描述...').fill('浏览器真实编辑');
+  await expect.poll(async () => (await read()).nodes[0].data.prompt).toBe('浏览器真实编辑');
+  await expect(page.getByPlaceholder('输入文本描述...')).toBeFocused();
+  await page.getByPlaceholder('输入文本描述...').fill('快捷键保存文字');
+  await page.getByPlaceholder('输入文本描述...').press('ControlOrMeta+s');
+  await expect.poll(async () => (await read()).nodes[0].data.prompt).toBe('快捷键保存文字');
+  const version = (await read()).version;
+  // A new browser context has no IndexedDB/localStorage and reads the same SQLite-backed API.
+  const clean = await context.browser()!.newContext();
+  const reopened = await clean.newPage();
+  await reopened.goto(`http://127.0.0.1:3217/?project=${id}`);
+  await expect(reopened.getByTestId('canvas-save-status')).toHaveText('已同步');
+  await expect(reopened.getByText('快捷键保存文字', { exact: true })).toBeVisible();
+  await reopened.locator('.react-flow__node').click();
+  await reopened.keyboard.press('Backspace');
+  await expect.poll(async () => (await read()).nodes.length).toBe(0);
+  await expect(reopened.getByTestId('canvas-save-status')).toHaveText('已同步');
+  expect((await read()).version).toBeGreaterThan(version);
+  await clean.close();
+});
+
+
+test('local transaction abort preserves legacy backup and prevents server-only saving', async ({ page }) => {
+  const legacy = '{"state":{"nodes":[{"id":"legacy"}]},"version":0}';
+  await page.addInitScript(raw => {
+    localStorage.setItem('canvas-storage', raw);
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (...args: Parameters<typeof put>) {
+      const request = put.apply(this, args);
+      if (this.name === 'drafts') request.addEventListener('success', () => this.transaction.abort());
+      return request;
+    };
+  }, legacy);
+  let writes = 0;
+  page.on('request', request => { if (request.url().includes('/api/workflow') && request.method() === 'PUT') writes++; });
+  await page.goto('/');
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('尚未保存');
+  await addTextNode(page);
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('本地保存失败');
+  expect(writes).toBe(0);
+  expect(await page.evaluate(() => localStorage.getItem('canvas-storage'))).toBe(legacy);
+  await expect(page.locator('.react-flow__node')).toHaveCount(1);
+});
+
+test('restoration preserves pending local edits instead of replacing them with server content', async ({ page, request }) => {
+  await page.goto('/');
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('尚未保存');
+  await addTextNode(page);
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
+  const id = new URL(page.url()).searchParams.get('project')!;
+  await page.route('**/api/workflow/*', route => route.request().method() === 'PUT' ? route.abort() : route.continue());
+  await page.getByRole('button', { name: '未命名项目', exact: true }).click();
+  await page.getByPlaceholder('项目名称...').fill('本地待同步名称');
+  await page.getByPlaceholder('项目名称...').press('Enter');
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('同步失败/冲突');
+  const draft = await localDraft(page, id);
+  expect(draft.localVersion).toBeGreaterThan(draft.confirmedLocalVersion);
+  await page.reload();
+  await expect(page.getByRole('button', { name: '本地待同步名称', exact: true })).toBeVisible();
+  await expect(page.getByTestId('canvas-save-status')).not.toHaveText('已同步');
+  await page.unroute('**/api/workflow/*');
+  await page.getByRole('button', { name: '保存', exact: true }).click();
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
+  expect((await (await request.get(`/api/workflow/${id}`)).json()).data.name).toBe('本地待同步名称');
+});
+
+test('real API rejects legacy writes and replays versioned requests without advancing twice', async ({ request }) => {
+  const id = crypto.randomUUID();
+  const operation = { id, requestId: crypto.randomUUID(), baseVersion: 0,
+    snapshot: { name: 'HTTP protocol', nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } } };
+  const first = await request.post('/api/workflow', { data: operation });
+  expect(first.status()).toBe(200);
+  expect((await first.json()).data).toEqual({ id, requestId: operation.requestId, version: 1 });
+  expect((await (await request.put(`/api/workflow/${id}`, { data: operation })).json()).data.version).toBe(1);
+  expect((await request.put(`/api/workflow/${id}`, { data: { ...operation, requestId: crypto.randomUUID() } })).status()).toBe(409);
+  expect((await request.put(`/api/workflow/${id}`, { data: { name: 'unversioned' } })).status()).toBe(400);
+  expect((await request.post('/api/workflow', { data: operation.snapshot })).status()).toBe(400);
+  expect((await request.put('/api/workflow/wrong-id', { data: operation })).status()).toBe(400);
+});

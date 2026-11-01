@@ -1,10 +1,9 @@
-import { createCanvasAutosave } from "@/lib/canvas/autosave";
+import { createCanvasAutosave, type SaveStatus } from "@/lib/canvas/autosave";
 import { clearedGenerationAssociation, deleteNodeGeneration, generationAssociation } from "@/lib/generation/recovery";
 import { isValidCanvasConnection } from "@/lib/canvas/connections";
-import { createDraftStorage } from "@/lib/canvas/draft-storage";
 import { toast } from "sonner";
 import { create } from "zustand";
-import { devtools, persist } from "zustand/middleware";
+import { devtools } from "zustand/middleware";
 import {
   Connection,
   Edge,
@@ -32,6 +31,10 @@ interface CanvasState {
   projectName: string;
   currentWorkflowId: string | null;
   canvasSession: number;
+  serverVersion: number;
+  persistenceReady: boolean;
+  saveStatus: SaveStatus;
+  saveError: string | null;
   contextMenu: {
     show: boolean;
     x: number;
@@ -221,22 +224,8 @@ const getInitialTheme = (): boolean => {
   return window.matchMedia("(prefers-color-scheme: dark)").matches;
 };
 
-type CanvasDraft = Pick<CanvasState,
-  "nodes" | "edges" | "viewport" | "projectName" | "isDarkMode" | "currentWorkflowId"
->;
-export const canvasDraftStorage = createDraftStorage<CanvasDraft>(
-  () => typeof window === "undefined"
-    ? { getItem: () => null, setItem: () => {}, removeItem: () => {} }
-    : localStorage,
-  (error) => {
-    console.error("Canvas draft storage failed", error);
-    if (typeof window !== "undefined") toast.error("本地草稿未保存，请手动保存工作流", { id: "canvas-draft-error" });
-  },
-);
-
 export const useCanvasStore = create<CanvasState>()(
   devtools(
-    persist(
       (set, get) => ({
         // 初始状态
         nodes: [],
@@ -247,6 +236,10 @@ export const useCanvasStore = create<CanvasState>()(
         projectName: "未命名项目",
         currentWorkflowId: null,
         canvasSession: 0,
+        serverVersion: 0,
+        persistenceReady: false,
+        saveStatus: "loading",
+        saveError: null,
         contextMenu: null,
 
         // 节点和边的变化处理
@@ -540,7 +533,6 @@ export const useCanvasStore = create<CanvasState>()(
         },
 
         loadWorkflow: (workflow: WorkflowData) => {
-          canvasDraftStorage.flush();
           set({
             canvasSession: get().canvasSession + 1,
             selectedNodeIds: [],
@@ -549,6 +541,7 @@ export const useCanvasStore = create<CanvasState>()(
             edges: workflow.edges,
             projectName: workflow.name,
             currentWorkflowId: workflow.id,
+            serverVersion: workflow.version ?? 0,
             viewport: workflow.viewport || { x: 0, y: 0, zoom: 0.8 },
           });
         },
@@ -561,6 +554,9 @@ export const useCanvasStore = create<CanvasState>()(
             selectedNodeIds: [],
             projectName: "未命名项目",
             currentWorkflowId: null,
+            serverVersion: 0,
+            saveStatus: "idle",
+            saveError: null,
           });
         },
 
@@ -581,20 +577,6 @@ export const useCanvasStore = create<CanvasState>()(
           };
         },
       }),
-      {
-        storage: canvasDraftStorage.storage,
-        name: "canvas-storage", // localStorage key
-        partialize: (state) => ({
-          // 只持久化这些字段
-          projectName: state.projectName,
-          isDarkMode: state.isDarkMode,
-          nodes: state.nodes,
-          edges: state.edges,
-          viewport: state.viewport,
-          currentWorkflowId: state.currentWorkflowId,
-        }),
-      },
-    ),
     { name: "CanvasStore", enabled: process.env.NODE_ENV !== "production" },
   ),
 );
@@ -605,3 +587,10 @@ export const canvasAutosave = createCanvasAutosave(useCanvasStore, (error) => {
     description: error instanceof Error ? error.message : "未知错误",
   });
 });
+
+// Existing interaction and generation hooks use the same coordinator.
+export const canvasDraftStorage = {
+  flush: () => { void canvasAutosave.flush().catch(() => {}); },
+  beginInteraction: canvasAutosave.beginInteraction,
+  endInteraction: canvasAutosave.endInteraction,
+};

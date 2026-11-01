@@ -14,17 +14,8 @@ const interactionHandlers = {
 };
 
 export function useCanvasInteractions() {
-  useEffect(() => {
-    const flush = () => canvasDraftStorage.flush();
-    const onVisibility = () => { if (document.visibilityState === "hidden") flush(); };
-    window.addEventListener("pagehide", flush);
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      window.removeEventListener("pagehide", flush);
-      document.removeEventListener("visibilitychange", onVisibility);
-      for (const key of ["viewport", "drag", "selection"]) canvasDraftStorage.endInteraction(key);
-      flush();
-    };
+  useEffect(() => () => {
+    for (const key of ["viewport", "drag", "selection"]) canvasDraftStorage.endInteraction(key);
   }, []);
   return interactionHandlers;
 }

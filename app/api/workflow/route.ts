@@ -1,5 +1,6 @@
+import { handleCanvasSave } from "@/lib/canvas/save-route";
 import { NextRequest, NextResponse } from "next/server";
-import { getAllWorkflows, createWorkflow } from "@/lib/db/workflows";
+import { getAllWorkflows } from "@/lib/db/workflows";
 
 // GET: 获取所有工作流
 export async function GET() {
@@ -19,31 +20,7 @@ export async function GET() {
   }
 }
 
-// POST: 创建新工作流
+// POST and PUT use the same versioned protocol.
 export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const { name, nodes, edges, viewport } = body;
-
-    if (!name) {
-      return NextResponse.json(
-        { success: false, error: "Workflow name is required" },
-        { status: 400 },
-      );
-    }
-
-    const workflow = createWorkflow({ name, nodes, edges, viewport });
-
-    return NextResponse.json({ success: true, data: workflow });
-  } catch (error) {
-    console.error("[API] Create workflow error:", error);
-    return NextResponse.json(
-      {
-        success: false,
-        error:
-          error instanceof Error ? error.message : "Failed to create workflow",
-      },
-      { status: 500 },
-    );
-  }
+  return handleCanvasSave(request);
 }

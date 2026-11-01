@@ -172,7 +172,10 @@ const TextToVideoNode = (props: NodeProps<Node<NodeData>>) => {
               className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none min-h-18 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-green-500 text-white placeholder-zinc-500"
               placeholder="描述你想要生成的视频..."
               value={localPrompt}
-              onChange={(e) => setLocalPrompt(e.target.value)}
+              onChange={(e) => {
+                setLocalPrompt(e.target.value);
+                updateNodeData(id, { prompt: e.target.value });
+              }}
               onBlur={() => updateNodeData(id, { prompt: localPrompt })}
               onMouseDown={(e) => e.stopPropagation()}
               onWheel={(e) => e.stopPropagation()}

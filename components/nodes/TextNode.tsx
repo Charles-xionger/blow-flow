@@ -64,7 +64,10 @@ const TextNode = (props: NodeProps<Node<NodeData>>) => {
               className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none min-h-32 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-purple-500 text-white placeholder-zinc-500"
               placeholder="输入文本描述..."
               value={localPrompt}
-              onChange={(e) => setLocalPrompt(e.target.value)}
+              onChange={(e) => {
+                setLocalPrompt(e.target.value);
+                updateNodeData(id, { prompt: e.target.value });
+              }}
               onBlur={handleBlur}
               onMouseDown={(e) => e.stopPropagation()}
               onWheel={(e) => e.stopPropagation()}

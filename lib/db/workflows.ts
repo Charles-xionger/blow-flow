@@ -1,6 +1,7 @@
 import { getDatabase } from "./index";
 import type { Node, Edge, Viewport } from "@xyflow/react";
-import { nanoid } from "nanoid";
+import { createHash } from "node:crypto";
+import { canonicalJSON, CanvasSaveError, validateSaveOperation, type SaveOperation, type SaveAcknowledgement } from "../canvas/save-protocol";
 
 export interface WorkflowData {
   id: string;
@@ -10,6 +11,7 @@ export interface WorkflowData {
   viewport: Viewport;
   createdAt: number;
   updatedAt: number;
+  version: number;
 }
 
 interface WorkflowRow {
@@ -18,6 +20,7 @@ interface WorkflowRow {
   data: string;
   created_at: number;
   updated_at: number;
+  version: number;
 }
 
 export function getAllWorkflows(): WorkflowData[] {
@@ -35,6 +38,7 @@ export function getAllWorkflows(): WorkflowData[] {
     ...JSON.parse(row.data),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    version: row.version,
   }));
 }
 
@@ -51,84 +55,36 @@ export function getWorkflowById(id: string): WorkflowData | null {
     ...JSON.parse(row.data),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    version: row.version,
   };
 }
 
-export function createWorkflow(
-  workflow: Omit<WorkflowData, "id" | "createdAt" | "updatedAt">,
-): WorkflowData {
+/** The only content writer: content, version and receipt commit atomically. */
+export function saveWorkflow(operation: SaveOperation): SaveAcknowledgement {
+  validateSaveOperation(operation);
+  const { id, requestId, baseVersion, snapshot } = operation;
+  const digest = createHash("sha256").update(canonicalJSON({ baseVersion, snapshot })).digest("hex");
   const db = getDatabase();
-  const id = nanoid();
-  const now = Date.now();
-
-  const data = JSON.stringify({
-    nodes: workflow.nodes || [],
-    edges: workflow.edges || [],
-    viewport: workflow.viewport || { x: 0, y: 0, zoom: 1 },
-  });
-
-  const stmt = db.prepare(`
-    INSERT INTO workflows (id, name, data, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?)
-  `);
-
-  stmt.run(id, workflow.name, data, now, now);
-
-  return {
-    id,
-    name: workflow.name,
-    nodes: workflow.nodes || [],
-    edges: workflow.edges || [],
-    viewport: workflow.viewport || { x: 0, y: 0, zoom: 1 },
-    createdAt: now,
-    updatedAt: now,
-  };
-}
-
-export function updateWorkflow(
-  id: string,
-  workflow: Partial<WorkflowData>,
-): boolean {
-  const db = getDatabase();
-  const now = Date.now();
-
-  const updates: string[] = [];
-  const params: unknown[] = [];
-
-  if (workflow.name !== undefined) {
-    updates.push("name = ?");
-    params.push(workflow.name);
-  }
-
-  if (workflow.nodes || workflow.edges || workflow.viewport) {
-    const existing = getWorkflowById(id);
-    if (!existing) return false;
-
-    const data = JSON.stringify({
-      nodes: workflow.nodes || existing.nodes,
-      edges: workflow.edges || existing.edges,
-      viewport: workflow.viewport || existing.viewport,
-    });
-
-    updates.push("data = ?");
-    params.push(data);
-  }
-
-  if (updates.length === 0) return false;
-
-  updates.push("updated_at = ?");
-  params.push(now);
-
-  params.push(id);
-
-  const stmt = db.prepare(`
-    UPDATE workflows 
-    SET ${updates.join(", ")}
-    WHERE id = ?
-  `);
-
-  const result = stmt.run(...params);
-  return result.changes > 0;
+  return db.transaction(() => {
+    const receipt = db.prepare("SELECT digest, version FROM canvas_save_receipts WHERE canvas_id = ? AND request_id = ?")
+      .get(id, requestId) as { digest: string; version: number } | undefined;
+    if (receipt) {
+      if (receipt.digest !== digest) throw new CanvasSaveError("Request ID already used with different content", 409);
+      return { id, requestId, version: receipt.version };
+    }
+    const existing = db.prepare("SELECT version FROM workflows WHERE id = ?").get(id) as { version: number } | undefined;
+    if ((existing?.version ?? 0) !== baseVersion) throw new CanvasSaveError("Canvas version conflict; local content has been preserved", 409);
+    const version = baseVersion + 1;
+    const now = Date.now();
+    const data = JSON.stringify({ nodes: snapshot.nodes, edges: snapshot.edges, viewport: snapshot.viewport });
+    db.prepare(`INSERT INTO workflows (id, name, data, created_at, updated_at, version) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET name = excluded.name, data = excluded.data,
+        updated_at = excluded.updated_at, version = excluded.version`)
+      .run(id, snapshot.name, data, now, now, version);
+    db.prepare("INSERT INTO canvas_save_receipts (canvas_id, request_id, digest, version) VALUES (?, ?, ?, ?)")
+      .run(id, requestId, digest, version);
+    return { id, requestId, version };
+  }).immediate();
 }
 
 export function deleteWorkflow(id: string): boolean {

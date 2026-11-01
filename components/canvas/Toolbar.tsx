@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import { Panel } from "@xyflow/react";
 import { Save, FolderOpen, Download, Upload, Trash2 } from "lucide-react";
-import { useCanvasStore } from "@/store/useCanvasStore";
+import { canvasAutosave, useCanvasStore } from "@/store/useCanvasStore";
 import { toast } from "sonner";
 
 export function Toolbar() {
@@ -16,28 +16,8 @@ export function Toolbar() {
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      const workflow = {
-        name: projectName,
-        nodes,
-        edges,
-        viewport: { x: 0, y: 0, zoom: 1 },
-      };
-
-      const response = await fetch("/api/workflow", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(workflow),
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        toast.success("保存成功", {
-          description: `工作流 "${projectName}" 已保存`,
-        });
-      } else {
-        throw new Error(result.error);
-      }
+      await canvasAutosave.save();
+      toast.success("保存成功");
     } catch (error) {
       toast.error("保存失败", {
         description: error instanceof Error ? error.message : "未知错误",

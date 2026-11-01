@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  distDir: process.env.NEXT_TEST_DIST || ".next",
   // 允许外部图片域名
   images: {
     remotePatterns: [

@@ -37,6 +37,21 @@ function initializeTables(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_workflows_updated_at ON workflows(updated_at DESC);
   `);
 
+  // Upgrade historical canvases once; preserve all existing content.
+  db.transaction(() => {
+    const columns = db.prepare("PRAGMA table_info(workflows)").all() as { name: string }[];
+    if (!columns.some(column => column.name === "version")) {
+      db.exec("ALTER TABLE workflows ADD COLUMN version INTEGER NOT NULL DEFAULT 1");
+    }
+    db.exec(`CREATE TABLE IF NOT EXISTS canvas_save_receipts (
+      canvas_id TEXT NOT NULL,
+      request_id TEXT NOT NULL,
+      digest TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      PRIMARY KEY (canvas_id, request_id)
+    )`);
+  }).immediate();
+
   // model_configs 表
   db.exec(`
     CREATE TABLE IF NOT EXISTS model_configs (

@@ -164,7 +164,10 @@ const CreativeDescNode = (props: NodeProps<Node<NodeData>>) => {
               className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none min-h-24 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-purple-500 text-white placeholder-zinc-500 max-h-32 overflow-y-auto"
               placeholder="输入故事或场景描述，例如：一个关于勇士冒险的故事..."
               value={localPrompt}
-              onChange={(e) => setLocalPrompt(e.target.value)}
+              onChange={(e) => {
+                setLocalPrompt(e.target.value);
+                updateNodeData(id, { prompt: e.target.value });
+              }}
               onBlur={() => updateNodeData(id, { prompt: localPrompt })}
               onMouseDown={(e) => e.stopPropagation()}
               onWheel={(e) => e.stopPropagation()}
@@ -175,7 +178,7 @@ const CreativeDescNode = (props: NodeProps<Node<NodeData>>) => {
               <div className="flex items-center gap-2 text-sm text-zinc-400">
                 <span>镜头数量：</span>
                 <button
-                  onClick={() => setShotCount(Math.max(2, shotCount - 1))}
+                  onClick={() => { const next = Math.max(2, shotCount - 1); setShotCount(next); updateNodeData(id, { shotCount: next }); }}
                   className="w-7 h-7 rounded flex items-center justify-center bg-zinc-800 hover:bg-zinc-700 transition-colors"
                 >
                   <Minus size={14} />
@@ -184,7 +187,7 @@ const CreativeDescNode = (props: NodeProps<Node<NodeData>>) => {
                   {shotCount}
                 </span>
                 <button
-                  onClick={() => setShotCount(Math.min(8, shotCount + 1))}
+                  onClick={() => { const next = Math.min(8, shotCount + 1); setShotCount(next); updateNodeData(id, { shotCount: next }); }}
                   className="w-7 h-7 rounded flex items-center justify-center bg-zinc-800 hover:bg-zinc-700 transition-colors"
                 >
                   <Plus size={14} />

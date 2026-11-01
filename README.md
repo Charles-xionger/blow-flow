@@ -42,3 +42,20 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## 画布保存与测试
+
+画布编辑约 500ms 合并一次，先在 IndexedDB `ai-flow-canvas` 提交草稿和待同步请求，再通过 `/api/workflow` 写入 SQLite。顶部“已同步”表示当前修改已经获得服务端确认；本地写入失败时不会绕过本地存储直接上传。保存按钮和 Ctrl/Cmd+S 使用同一链路。
+
+保存协议要求 `id`、`requestId`、`baseVersion` 和完整 `snapshot: { name, nodes, edges, viewport }`。新画布预期版本为 0；读取和列表返回 `version`，更新使用该版本。同请求重放不会重复递增版本；版本冲突返回 409，无版本写入返回 400。历史 SQLite 画布自动初始化为版本 1。
+
+本轮实现任务 01 的在线保存基础。旧 `canvas-storage` 原文保留但尚未自动导入（任务 03）；刷新后的自动重试、完整冲突与删除保护、本地故障恢复入口分别由后续任务补齐。已有待同步草稿可恢复，并可点击保存再次尝试同步。
+
+```bash
+pnpm typecheck
+pnpm test
+pnpm exec playwright install chromium
+pnpm test:browser
+```
+
+浏览器测试使用独立浏览器上下文、3217 端口、`.next-canvas-test` 构建目录及临时 SQLite，拒绝复用已运行的服务，不写入 `data/canvas.db`。覆盖真实编辑、IndexedDB、HTTP API、服务端读回和本地事务失败；快速测试另外覆盖版本冲突、幂等、SQL 回滚和合并时机。

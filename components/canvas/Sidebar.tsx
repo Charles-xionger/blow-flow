@@ -2,7 +2,7 @@
 
 import { memo } from "react";
 import React, { useState, useRef, useEffect } from "react";
-import { useCanvasStore } from "@/store/useCanvasStore";
+import { canvasAutosave, useCanvasStore } from "@/store/useCanvasStore";
 import { NodeType } from "@/types";
 import {
   Grid3x3,
@@ -78,7 +78,6 @@ const SidebarButton: React.FC<SidebarButtonProps> = ({
 export const Sidebar = memo(function Sidebar() {
   const addNode = useCanvasStore((state) => state.addNode);
   const isDarkMode = useCanvasStore((state) => state.isDarkMode);
-  const loadWorkflow = useCanvasStore((state) => state.loadWorkflow);
   const currentWorkflowId = useCanvasStore((state) => state.currentWorkflowId);
   const clearWorkflow = useCanvasStore((state) => state.clearWorkflow);
   const [activePanel, setActivePanel] = useState<
@@ -171,12 +170,8 @@ export const Sidebar = memo(function Sidebar() {
   // 加载项目
   const handleLoadWorkflow = async (workflowId: string) => {
     try {
-      const response = await fetch(`/api/workflow/${workflowId}`);
-      const result = await response.json();
-      if (result.success && result.data) {
-        loadWorkflow(result.data);
-        setActivePanel(null);
-      }
+      await canvasAutosave.open(workflowId);
+      setActivePanel(null);
     } catch (error) {
       console.error("Failed to load workflow:", error);
     }
