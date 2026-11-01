@@ -3,7 +3,7 @@
 import { memo } from "react";
 import React, { useState, useEffect } from "react";
 import { useReactFlow, useStore } from "@xyflow/react";
-import { canvasDraftStorage, useCanvasStore } from "@/store/useCanvasStore";
+import { canvasAutosave, canvasDraftStorage, useCanvasStore } from "@/store/useCanvasStore";
 import {
   Sparkles,
   Download,
@@ -27,8 +27,6 @@ export const TopBar = memo(function TopBar() {
   const nodeCount = useCanvasStore((state) => state.nodes.length);
   const clearCanvas = useCanvasStore((state) => state.clearCanvas);
   const importGraph = useCanvasStore((state) => state.importGraph);
-  const currentWorkflowId = useCanvasStore((state) => state.currentWorkflowId);
-  const setCurrentWorkflowId = useCanvasStore((state) => state.setCurrentWorkflowId);
 
   const [isEditingProjectName, setIsEditingProjectName] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -48,49 +46,10 @@ export const TopBar = memo(function TopBar() {
   // 保存工作流到数据库
   const handleSave = async () => {
     canvasDraftStorage.flush();
-    const { nodes, edges } = useCanvasStore.getState();
-    if (nodeCount === 0) {
-      toast.error("无法保存", {
-        description: "画布为空",
-      });
-      return;
-    }
-
     setIsSaving(true);
     try {
-      const viewport = reactFlowInstance.getViewport();
-      const workflow = {
-        name: projectName,
-        nodes,
-        edges,
-        viewport,
-      };
-
-      // 如果有 currentWorkflowId，使用 PUT 更新；否则使用 POST 创建
-      const url = currentWorkflowId
-        ? `/api/workflow/${currentWorkflowId}`
-        : "/api/workflow";
-      const method = currentWorkflowId ? "PUT" : "POST";
-
-      const response = await fetch(url, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(workflow),
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        // 如果是新建项目（POST），保存返回的 ID
-        if (!currentWorkflowId && result.data?.id) {
-          setCurrentWorkflowId(result.data.id);
-        }
-        toast.success("保存成功", {
-          description: `工作流 "${projectName}" 已保存`,
-        });
-      } else {
-        throw new Error(result.error);
-      }
+      await canvasAutosave.save();
+      toast.success("保存成功");
     } catch (error) {
       toast.error("保存失败", {
         description: error instanceof Error ? error.message : "未知错误",
@@ -274,7 +233,7 @@ export const TopBar = memo(function TopBar() {
           {/* 保存 */}
           <button
             onClick={handleSave}
-            disabled={isSaving || nodeCount === 0}
+            disabled={isSaving}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
               isDark
                 ? "text-gray-400 hover:text-white hover:bg-white/5"

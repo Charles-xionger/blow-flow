@@ -1,3 +1,4 @@
+import { createCanvasAutosave } from "@/lib/canvas/autosave";
 import { clearedGenerationAssociation, deleteNodeGeneration, generationAssociation } from "@/lib/generation/recovery";
 import { isValidCanvasConnection } from "@/lib/canvas/connections";
 import { createDraftStorage } from "@/lib/canvas/draft-storage";
@@ -30,6 +31,7 @@ interface CanvasState {
   isDarkMode: boolean;
   projectName: string;
   currentWorkflowId: string | null;
+  canvasSession: number;
   contextMenu: {
     show: boolean;
     x: number;
@@ -244,6 +246,7 @@ export const useCanvasStore = create<CanvasState>()(
         isDarkMode: getInitialTheme(),
         projectName: "未命名项目",
         currentWorkflowId: null,
+        canvasSession: 0,
         contextMenu: null,
 
         // 节点和边的变化处理
@@ -539,6 +542,7 @@ export const useCanvasStore = create<CanvasState>()(
         loadWorkflow: (workflow: WorkflowData) => {
           canvasDraftStorage.flush();
           set({
+            canvasSession: get().canvasSession + 1,
             selectedNodeIds: [],
             contextMenu: null,
             nodes: workflow.nodes,
@@ -551,6 +555,7 @@ export const useCanvasStore = create<CanvasState>()(
 
         clearWorkflow: () => {
           set({
+            canvasSession: get().canvasSession + 1,
             nodes: [],
             edges: [],
             selectedNodeIds: [],
@@ -593,3 +598,10 @@ export const useCanvasStore = create<CanvasState>()(
     { name: "CanvasStore", enabled: process.env.NODE_ENV !== "production" },
   ),
 );
+
+export const canvasAutosave = createCanvasAutosave(useCanvasStore, (error) => {
+  toast.error("自动保存失败，请检查网络后点击保存重试", {
+    id: "canvas-autosave-error",
+    description: error instanceof Error ? error.message : "未知错误",
+  });
+});

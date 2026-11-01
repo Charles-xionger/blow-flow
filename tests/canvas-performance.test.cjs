@@ -171,3 +171,27 @@ test('imported canvas copies have independent task identities while preserving c
   assert.equal(edges[0].target, nodes[2].id);
   canvasDraftStorage.flush();
 });
+
+test('adding a node automatically persists the canvas to SQLite without manual save', async () => {
+  process.env.DATABASE_PATH = ':memory:';
+  const db = require('../lib/db/workflows.ts');
+  const { useCanvasStore: store, canvasDraftStorage, canvasAutosave } = load('store/useCanvasStore.ts');
+  const { NodeType } = load('types/index.ts');
+  const previousFetch = global.fetch;
+  global.fetch = async (url, options) => {
+    const data = JSON.parse(options.body);
+    if (options.method === 'POST') return Response.json({ success: true, data: db.createWorkflow(data) });
+    return Response.json({ success: db.updateWorkflow(url.split('/').at(-1), data) });
+  };
+  store.getState().clearWorkflow();
+  const stop = canvasAutosave?.start();
+  try {
+    const id = store.getState().addNode(NodeType.TEXT);
+    await wait(800);
+    const saved = db.getAllWorkflows().find(w => w.nodes.some(n => n.id === id));
+    assert.ok(saved, 'new node must be in the database without clicking Save');
+    assert.equal(store.getState().currentWorkflowId, saved.id);
+  } finally {
+    stop?.(); canvasDraftStorage.flush(); global.fetch = previousFetch;
+  }
+});

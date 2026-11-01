@@ -20,7 +20,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
-import { canvasDraftStorage, useCanvasStore } from "@/store/useCanvasStore";
+import { canvasAutosave, canvasDraftStorage, useCanvasStore } from "@/store/useCanvasStore";
 import { isValidCanvasConnection } from "@/lib/canvas/connections";
 import { NodeType } from "@/types";
 import { Sidebar } from "./Sidebar";
@@ -62,6 +62,20 @@ const nodeTypes = {
 
 function CanvasInner() {
   useEffect(() => {
+    const stop = canvasAutosave.start();
+    const flush = () => { void canvasAutosave.flush().catch(() => {}); };
+    const onHidden = () => { if (document.visibilityState === "hidden") flush(); };
+    window.addEventListener("online", flush);
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", onHidden);
+    return () => {
+      window.removeEventListener("online", flush);
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", onHidden);
+      stop();
+    };
+  }, []);
+  useEffect(() => {
     const retry = () => { void retryGenerationDeletions().catch(() => {}); };
     retry();
     window.addEventListener("online", retry);
@@ -70,7 +84,7 @@ function CanvasInner() {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const interactionHandlers = useCanvasInteractions();
 
-  const { screenToFlowPosition, getViewport } = useReactFlow();
+  const { screenToFlowPosition } = useReactFlow();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [mounted, setMounted] = useState(false);
@@ -89,10 +103,6 @@ function CanvasInner() {
   const showContextMenu = useCanvasStore((state) => state.showContextMenu);
   const hideContextMenu = useCanvasStore((state) => state.hideContextMenu);
   const loadWorkflow = useCanvasStore((state) => state.loadWorkflow);
-
-  const setCurrentWorkflowId = useCanvasStore(
-    (state) => state.setCurrentWorkflowId,
-  );
 
   // 使用 ref 跟踪上次加载的项目 ID，防止循环加载
   const lastLoadedIdRef = useRef<string | null>(null);
@@ -187,60 +197,16 @@ function CanvasInner() {
 
   // 键盘快捷键：保存工作流
   const handleSave = useCallback(async () => {
-    const { nodes, edges, projectName, currentWorkflowId } = useCanvasStore.getState();
     canvasDraftStorage.flush();
-    if (nodes.length === 0) {
-      toast.error("无法保存", {
-        description: "画布为空",
-      });
-      return;
-    }
-
-    console.log("[Save] Current workflowId:", currentWorkflowId);
-
     try {
-      const workflow = {
-        name: projectName,
-        nodes,
-        edges,
-        viewport: getViewport(),
-      };
-
-      // 如果有 currentWorkflowId，使用 PUT 更新；否则使用 POST 创建
-      const url = currentWorkflowId
-        ? `/api/workflow/${currentWorkflowId}`
-        : "/api/workflow";
-      const method = currentWorkflowId ? "PUT" : "POST";
-
-      console.log("[Save] Using method:", method, "URL:", url);
-
-      const response = await fetch(url, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(workflow),
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        console.log("[Save] Success, result:", result.data);
-        // 如果是新建项目（POST），保存返回的 ID
-        if (!currentWorkflowId && result.data?.id) {
-          console.log("[Save] Setting new workflowId:", result.data.id);
-          setCurrentWorkflowId(result.data.id);
-        }
-        toast.success("保存成功", {
-          description: `工作流 "${projectName}" 已保存`,
-        });
-      } else {
-        throw new Error(result.error);
-      }
+      await canvasAutosave.save();
+      toast.success("保存成功");
     } catch (error) {
       toast.error("保存失败", {
         description: error instanceof Error ? error.message : "未知错误",
       });
     }
-  }, [getViewport, setCurrentWorkflowId]);
+  }, []);
 
   useKeyboardShortcuts(handleSave);
 
