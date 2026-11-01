@@ -8,7 +8,14 @@ export interface CanvasDraft {
   serverVersion: number;
   updatedAt: number;
 }
-export interface PendingSave extends SaveOperation { localVersion: number }
+export interface SaveRetry {
+  attempts: number;
+  nextAttemptAt: number;
+  error?: string;
+  blocked?: 'validation' | 'permanent';
+  retryAfter?: number;
+}
+export interface PendingSave extends SaveOperation { localVersion: number; retry?: SaveRetry }
 
 // The old canvas-storage localStorage key is intentionally untouched. Ticket 03
 // will migrate it using the metadata store in the same transaction as its draft.
@@ -74,7 +81,10 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
         drafts.put(draft);
         const operations = tx.objectStore('operations');
         // An unconfirmed operation is immutable, even if the user edits again.
-        if (!await result(operations.get(id))) operations.put(operation(draft));
+        const pending = await result<PendingSave | undefined>(operations.get(id));
+        // Only a definitive validation rejection allows replacing the request.
+        // Transport failures leave an unknown result that must first be replayed.
+        if (!pending || pending.retry?.blocked === 'validation') operations.put(operation(draft));
         tx.objectStore('metadata').put(id, 'activeId');
         return draft;
       });
@@ -93,6 +103,18 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
     },
     pending(id: string): Promise<PendingSave | undefined> {
       return transaction('readonly', tx => result(tx.objectStore('operations').get(id)));
+    },
+    retry(sent: PendingSave, retry: SaveRetry): Promise<PendingSave | undefined> {
+      return transaction('readwrite', async tx => {
+        const operations = tx.objectStore('operations');
+        const pending = await result<PendingSave | undefined>(operations.get(sent.id));
+        if (pending?.requestId !== sent.requestId) return pending;
+        const draft = await result<CanvasDraft>(tx.objectStore('drafts').get(sent.id));
+        const next = retry.blocked === 'validation' && draft.localVersion > sent.localVersion
+          ? operation(draft) : { ...pending, retry };
+        operations.put(next);
+        return next;
+      });
     },
     async acknowledge(sent: PendingSave, ack: SaveAcknowledgement): Promise<CanvasDraft> {
       if (ack.id !== sent.id || ack.requestId !== sent.requestId || ack.version !== sent.baseVersion + 1) {
