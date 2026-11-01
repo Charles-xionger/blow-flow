@@ -110,6 +110,7 @@ export const TopBar = memo(function TopBar() {
 
         // 导入工作流到 store
         if (data.nodes && data.edges) {
+          await canvasAutosave.prepareSwitch();
           importGraph(data.nodes, data.edges);
           if (data.projectName) {
             setProjectName(data.projectName);
@@ -126,7 +127,7 @@ export const TopBar = memo(function TopBar() {
       } catch (err) {
         console.error("导入失败:", err);
         toast.error("导入失败", {
-          description: "文件格式错误",
+          description: err instanceof Error ? err.message : "文件格式错误",
         });
       }
     };
@@ -134,7 +135,7 @@ export const TopBar = memo(function TopBar() {
   };
 
   // 清空画布
-  const handleClear = () => {
+  const handleClear = async () => {
     if (nodeCount === 0) {
       toast.info("画布已经是空的");
       return;
@@ -145,8 +146,15 @@ export const TopBar = memo(function TopBar() {
     );
 
     if (confirmed) {
-      clearCanvas();
-      toast.success("画布已清空");
+      try {
+        await canvasAutosave.prepareSwitch();
+        clearCanvas();
+        toast.success("画布已清空");
+      } catch (error) {
+        toast.error("无法清空，原画布已保留", {
+          description: error instanceof Error ? error.message : "请重试保存或导出当前画布",
+        });
+      }
     }
   };
 

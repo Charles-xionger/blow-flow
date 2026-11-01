@@ -197,6 +197,7 @@ export const Sidebar = memo(function Sidebar() {
       });
       const result = await response.json();
       if (result.success) {
+        await canvasAutosave.deleted(workflowToDelete);
         // 如果删除的是当前正在编辑的项目，清空画布
         if (workflowToDelete === currentWorkflowId) {
           clearWorkflow();
@@ -360,12 +361,19 @@ export const Sidebar = memo(function Sidebar() {
   const renderProjectPanel = () => (
     <div className="space-y-3">
       <button
-        onClick={() => {
-          clearWorkflow();
-          setActivePanel(null);
-          toast.success("新建项目", {
-            description: "已清空画布，可以开始创作",
-          });
+        onClick={async () => {
+          try {
+            await canvasAutosave.prepareSwitch();
+            clearWorkflow();
+            setActivePanel(null);
+            toast.success("新建项目", {
+              description: "已清空画布，可以开始创作",
+            });
+          } catch (error) {
+            toast.error("无法新建，原画布已保留", {
+              description: error instanceof Error ? error.message : "请重试保存或导出当前画布",
+            });
+          }
         }}
         className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${hoverBg}`}
       >

@@ -429,3 +429,132 @@ test('manual saving after permission is restored retries the original operation 
   assert.equal(sent[2].snapshot.nodes[0].id, 'after permission repair');
   assert.equal(store.getState().saveStatus, 'synced');
 });
+
+test('a hanging canvas cannot prevent a second canvas from saving with its own identity', async t => {
+  const { store, saver, repository } = await setup(t, 10000);
+  let release;
+  const sent = [];
+  global.fetch = async (url, options) => {
+    const body = JSON.parse(options.body); sent.push(body);
+    if (body.snapshot.nodes[0]?.id === 'A') await new Promise(resolve => { release = resolve; });
+    return ack(body);
+  };
+  store.setState({ nodes: [node('A')] });
+  const savingA = saver.flush();
+  await until(() => sent.length === 1);
+  const idA = sent[0].id;
+  store.setState({ canvasSession: store.getState().canvasSession + 1, currentWorkflowId: null, serverVersion: 0, nodes: [], projectName: 'B' });
+  store.setState({ nodes: [node('B')] });
+  const savingB = saver.save();
+  try {
+    await until(() => sent.length === 2);
+    await savingB;
+    const idB = store.getState().currentWorkflowId;
+    assert.notEqual(idA, idB);
+    assert.equal((await repository.read(idB)).snapshot.nodes[0].id, 'B');
+    assert.equal(store.getState().saveStatus, 'synced');
+    release(); await savingA;
+    assert.equal(store.getState().currentWorkflowId, idB);
+    assert.equal(store.getState().nodes[0].id, 'B');
+  } finally { release(); await Promise.allSettled([savingA, savingB]); }
+});
+
+test('restored canvases share two sync slots and a third progresses as soon as either finishes', async t => {
+  const { saver, repository } = await setup(t, 10000);
+  for (const id of ['one', 'two', 'three']) await repository.commit(id, {
+    name: id, nodes: [node(id)], edges: [], viewport: { x: 0, y: 0, zoom: 1 },
+  }, 0, 0);
+  const sent = [], release = new Map();
+  global.fetch = async (url, options) => {
+    const body = JSON.parse(options.body); sent.push(body.id);
+    await new Promise(resolve => release.set(body.id, resolve));
+    return ack(body);
+  };
+  const saving = saver.flush();
+  try {
+    await until(() => sent.length === 2);
+    await wait(30);
+    assert.equal(sent.length, 2);
+    release.get(sent[0])();
+    await until(() => sent.length === 3);
+    for (const resolve of release.values()) resolve();
+    await saving;
+    assert.equal(new Set(sent).size, 3);
+    for (const id of sent) assert.equal((await repository.read(id)).confirmedLocalVersion, 1);
+  } finally { for (const resolve of release.values()) resolve(); await saving; }
+});
+
+test('returning to a canvas during its request restores the eventual error to that canvas only', async t => {
+  const { store, saver } = await setup(t, 10000);
+  let reject;
+  global.fetch = async () => new Promise((resolve, fail) => { reject = fail; });
+  store.setState({ nodes: [node('A')] });
+  const saving = saver.flush();
+  const result = assert.rejects(saving, /A failed/);
+  await until(() => reject);
+  const id = store.getState().currentWorkflowId;
+  store.setState({ canvasSession: store.getState().canvasSession + 1, currentWorkflowId: null, serverVersion: 0, nodes: [] });
+  await saver.open(id);
+  reject(Error('A failed'));
+  await result;
+  assert.equal(store.getState().saveStatus, 'sync-error');
+  assert.equal(store.getState().saveError, 'A failed');
+});
+
+test('a late acknowledgement cannot replace the loading state while another canvas opens', async t => {
+  const { store, saver } = await setup(t, 10000);
+  let finishSave, finishRead;
+  global.fetch = async (url, options) => {
+    if (options.method === 'PUT') {
+      const body = JSON.parse(options.body);
+      await new Promise(resolve => { finishSave = resolve; }); return ack(body);
+    }
+    await new Promise(resolve => { finishRead = resolve; });
+    return Response.json({ success: true, data: { id: 'other', name: 'Other', nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 }, version: 1 } });
+  };
+  store.setState({ nodes: [node('A')] });
+  const saving = saver.flush();
+  await until(() => finishSave);
+  const opening = saver.open('other');
+  await until(() => finishRead);
+  finishSave(); await saving;
+  try {
+    assert.equal(store.getState().saveStatus, 'loading');
+    assert.equal(store.getState().persistenceReady, false);
+  } finally { finishRead(); await opening; }
+});
+
+for (const outcome of [200, 409, 410]) {
+  test(`a late HTTP ${outcome} for the source canvas cannot invalidate a stale tab recovery copy`, async t => {
+    const { store, saver, repository } = await setup(t, 10000);
+    let release;
+    let first = true;
+    global.fetch = async (url, options) => {
+      const body = JSON.parse(options.body);
+      if (first) {
+        first = false;
+        await new Promise(resolve => { release = resolve; });
+        if (outcome !== 200) return Response.json({ success: false, error: 'source changed' }, { status: outcome });
+      }
+      return ack(body);
+    };
+    store.setState({ nodes: [node('original')] });
+    const saving = saver.flush().catch(() => {});
+    await until(() => release);
+    const sourceId = store.getState().currentWorkflowId;
+    await repository.commit(sourceId, { name: 'other tab', nodes: [node('other')], edges: [], viewport: { x: 0, y: 0, zoom: 1 } }, 0, 1);
+    store.setState({ nodes: [node('stale local')] });
+    const localSaving = saver.flush().catch(() => {});
+    await until(() => store.getState().recovery?.kind === 'copy');
+    const recoveryId = store.getState().currentWorkflowId;
+    release(); await Promise.all([saving, localSaving]);
+    assert.equal(store.getState().recovery.kind, 'copy');
+    assert.equal(store.getState().saveStatus, 'recovery');
+    await saver.recover('copy');
+    await saver.save();
+    assert.notEqual(store.getState().currentWorkflowId, sourceId);
+    assert.notEqual(store.getState().currentWorkflowId, recoveryId);
+    assert.equal(store.getState().nodes[0].data.text, 'stale local');
+    assert.equal(store.getState().saveStatus, 'synced');
+  });
+}

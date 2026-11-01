@@ -1,4 +1,5 @@
 import { createCanvasAutosave, type SaveStatus } from "@/lib/canvas/autosave";
+import { CanvasStorageError } from "@/lib/canvas/storage-error";
 import { clearedGenerationAssociation, deleteNodeGeneration, generationAssociation } from "@/lib/generation/recovery";
 import { isValidCanvasConnection } from "@/lib/canvas/connections";
 import { toast } from "sonner";
@@ -248,6 +249,7 @@ export const useCanvasStore = create<CanvasState>()(
         // 节点和边的变化处理
         setNodes: (nodes) => set({ nodes }),
         importGraph: (nodes, edges) => {
+          get().clearWorkflow();
           const ids = new Map(nodes.map(node => [node.id, nanoid()]));
           set({
             nodes: nodes.map(node => ({ ...node, id: ids.get(node.id)!,
@@ -587,6 +589,9 @@ export const useCanvasStore = create<CanvasState>()(
 );
 
 export const canvasAutosave = createCanvasAutosave(useCanvasStore, (error) => {
+  // Storage failures remain visible with retry/export actions in the editor;
+  // automatic retries should not repeatedly interrupt editing with a toast.
+  if (error instanceof CanvasStorageError) return;
   toast.error("自动保存失败，请检查网络后点击保存重试", {
     id: "canvas-autosave-error",
     description: error instanceof Error ? error.message : "未知错误",

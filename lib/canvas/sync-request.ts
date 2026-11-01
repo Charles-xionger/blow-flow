@@ -1,5 +1,5 @@
 export class CanvasRequestError extends Error {
-  constructor(message: string, public blocked?: 'validation' | 'permanent', public retryAfter?: number) { super(message); }
+  constructor(message: string, public blocked?: 'validation' | 'permanent', public retryAfter?: number, public status?: number) { super(message); }
 }
 
 
@@ -21,7 +21,7 @@ export async function canvasRequest(url: string, init: RequestInit, timeoutMs: n
           const at = Number.isFinite(seconds) ? Date.now() + Math.max(0, seconds) * 1000 : Date.parse(hint || '');
           throw new CanvasRequestError(result?.error || `服务端保存失败 (${response.status})`,
             validation ? 'validation' : permanent ? 'permanent' : undefined,
-            Number.isFinite(at) ? at : undefined);
+            Number.isFinite(at) ? at : undefined, response.status);
         }
         return result.data;
       })(),

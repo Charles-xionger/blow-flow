@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   getWorkflowById,
   deleteWorkflow,
+  isWorkflowDeleted,
 } from "@/lib/db/workflows";
 
 // GET: 获取单个工作流
@@ -15,9 +16,10 @@ export async function GET(
     const workflow = getWorkflowById(id);
 
     if (!workflow) {
+      const deleted = isWorkflowDeleted(id);
       return NextResponse.json(
-        { success: false, error: "Workflow not found" },
-        { status: 404 },
+        { success: false, error: deleted ? "画布已被删除，本地内容已保留，请另存副本" : "Workflow not found" },
+        { status: deleted ? 410 : 404 },
       );
     }
 
@@ -49,9 +51,10 @@ export async function DELETE(
     const success = deleteWorkflow(id);
 
     if (!success) {
+      const deleted = isWorkflowDeleted(id);
       return NextResponse.json(
-        { success: false, error: "Workflow not found" },
-        { status: 404 },
+        { success: false, error: deleted ? "画布已被删除，本地内容已保留，请另存副本" : "Workflow not found" },
+        { status: deleted ? 410 : 404 },
       );
     }
 

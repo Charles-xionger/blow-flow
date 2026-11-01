@@ -5,6 +5,7 @@ import { canonicalJSON } from './save-protocol';
 import { canvasSnapshot } from './snapshot';
 import { LEGACY_CANVAS_KEY } from './legacy-draft';
 import { canvasRequest, CanvasRequestError } from './sync-request';
+import { CanvasStorageError } from './storage-error';
 
 export type SaveStatus = 'loading' | 'idle' | 'saving' | 'pending' | 'syncing' | 'synced' | 'local-error' | 'sync-error' | 'recovery' | 'migration-error';
 type State = {
@@ -23,7 +24,7 @@ type Store = {
 };
 type Session = {
   key: number; id: string | null; latest: State; dirty: boolean;
-  fingerprint: string; draft?: CanvasDraft;
+  fingerprint: string; localVersion: number; draft?: CanvasDraft; localError?: unknown;
 };
 
 // One coordinator owns batching, local commits and server confirmation. Local
@@ -39,19 +40,37 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let retryAt = Infinity;
   let localWork: Promise<void> = Promise.resolve();
-  let syncing: Promise<void> | undefined;
+  const flights = new Map<string, Promise<void>>();
+  let running = 0;
+  const waiting: (() => void)[] = [];
+  async function withSyncSlot(work: () => Promise<void>) {
+    if (running >= 2) await new Promise<void>(resolve => waiting.push(resolve));
+    else running++;
+    try { await work(); } finally {
+      const next = waiting.shift();
+      if (next) next(); else running--;
+    }
+  }
   let unsubscribe: (() => void) | undefined;
   let opening = 0;
   const clearTimers = () => { clearTimeout(timer); clearTimeout(deadline); timer = deadline = undefined; };
   const status = (target: Session, saveStatus: SaveStatus, error?: unknown) => {
-    if (store.getState().canvasSession === target.key) store.setState({ saveStatus,
+    // A request can outlive an editor visit. Its state belongs to the canvas,
+    // including a new visit to that same ID, never whichever canvas is open.
+    if (active && target.id && active.id === target.id) target = active;
+    if (target.dirty && ['syncing', 'synced', 'pending'].includes(saveStatus)) saveStatus = 'saving';
+    if (saveStatus === 'local-error') target.localError = error;
+    if (target.localError) { saveStatus = 'local-error'; error = target.localError; }
+    if (store.getState().persistenceReady && store.getState().canvasSession === target.key &&
+        store.getState().currentWorkflowId === target.id) store.setState({ saveStatus,
       saveError: error ? error instanceof Error ? error.message : String(error) : null });
   };
   const session = (state: State): Session => ({ key: state.canvasSession, id: state.currentWorkflowId,
-    latest: state, dirty: false, fingerprint: canonicalJSON(canvasSnapshot(state)) });
+    latest: state, dirty: false, localVersion: 0, fingerprint: canonicalJSON(canvasSnapshot(state)) });
   const settledStatus = (target: Session) => {
     if (target.dirty) return status(target, 'saving');
     if (target.draft?.recovery) return status(target, 'recovery');
+    if (target.draft && target.localVersion < target.draft.localVersion) return status(target, 'pending');
     status(target, !target.draft || !target.draft.localVersion && !target.draft.serverVersion ? 'idle' : target.draft.localVersion > target.draft.confirmedLocalVersion ? 'pending' : 'synced');
   };
   const schedule = () => {
@@ -86,88 +105,149 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
         if (store.getState().canvasSession === target.key) store.setState({ currentWorkflowId: target.id });
         status(target, 'saving');
         try {
-          target.draft = await repository.commit(target.id, snapshot, latest.serverVersion);
+          target.draft = await repository.commit(target.id, snapshot, latest.serverVersion, target.localVersion);
+          target.localVersion = target.draft.localVersion;
+          if (target.draft.id !== target.id) {
+            target.id = target.draft.id;
+            if (store.getState().canvasSession === target.key) store.setState({ currentWorkflowId: target.id,
+              recovery: target.draft.recovery, serverVersion: 0, generationRecoveryReadOnly: target.draft.generationRecoveryReadOnly });
+            await refreshCopies();
+          }
           target.fingerprint = fingerprint;
+          target.localError = undefined;
           target.dirty = target.latest !== latest;
           settledStatus(target);
         } catch (error) { status(target, 'local-error', error); throw error; }
+      }
+      if (active) {
+        try {
+          await repository.setActive(active.id);
+          if (!active.dirty && active.localError) { active.localError = undefined; settledStatus(active); }
+        }
+        catch (error) { status(active, 'local-error', error); throw error; }
       }
     };
     // A failed transaction must not poison subsequent explicit retries.
     localWork = localWork.catch(() => {}).then(work);
     return localWork;
   }
-  async function sync(force = false) {
-    if (syncing) {
-      await syncing;
-      // A manual save may have joined an automatic check which only scheduled
-      // a future retry. Preserve the caller's explicit wake-up in that case.
-      if (force) return sync(true);
-      return;
+  function publishDraft(draft: CanvasDraft) {
+    if (draft.recovery?.kind === 'deleted') {
+      // Deleted projects disappear from the server list. Keep their local
+      // content reachable even when deletion is discovered in the background.
+      store.setState({ recoveryCopies: [...(store.getState().recoveryCopies ?? []).filter(copy => copy.id !== draft.id),
+        { id: draft.id, name: draft.snapshot.name }] });
     }
-    if (!online()) return;
-    syncing = (async () => {
-      for (const target of sessions) {
-        if (!target.id) continue;
-        try {
-          target.draft = await repository.read(target.id);
-          if (target.draft?.recovery) {
-            if (target.draft.recovery.kind === 'copy' || target.draft.recovery.kind === 'conflict' && !force) {
-              settledStatus(target); continue;
-            }
-            const remote = await readRemote(target.id);
-            target.draft = await repository.reconcile(target.id, remote.snapshot, remote.version);
-            if (store.getState().canvasSession === target.key) store.setState({
-              recovery: target.draft.recovery, serverVersion: target.draft.serverVersion });
-            settledStatus(target);
-            if (target.draft.recovery) continue;
-          }
-          let operation = await repository.pending(target.id);
-          while (operation) {
-            if (operation.retry?.blocked && !force) throw new Error(operation.retry.error || '同步已暂停，本地内容已保留');
-            if (!online()) { settledStatus(target); break; }
-            if (operation.retry && ((!force && operation.retry.nextAttemptAt > Date.now()) ||
-                (operation.retry.retryAfter ?? 0) > Date.now())) {
-              status(target, 'sync-error', operation.retry.error);
-              retryLater(operation.retry.nextAttemptAt);
-              break;
-            }
-            if (!target.dirty) status(target, 'syncing');
-            const { retry, ...body } = operation;
-            const attempts = (retry?.attempts ?? 0) + 1;
-            const backoff = Math.min(30_000, 1000 * 2 ** Math.min(attempts - 1, 5)) * (0.75 + Math.random() * 0.25);
-            // Persist before sending: closing the page during an unresolved
-            // request must not reset its retry budget on the next startup.
-            const persisted = await repository.retry(operation, { attempts,
-              nextAttemptAt: Date.now() + requestTimeoutMs + backoff, error: retry?.error });
-            if (!persisted) break;
-            if (persisted.requestId !== operation.requestId) { operation = persisted; continue; }
-            try {
-              const ack = await canvasRequest(`/api/workflow/${encodeURIComponent(operation.id)}`, {
-                method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-              }, requestTimeoutMs);
-              target.draft = await repository.acknowledge(operation, ack);
-              if (store.getState().canvasSession === target.key) store.setState({ serverVersion: target.draft.serverVersion });
-              settledStatus(target);
-            } catch (error) {
-              const retryAfter = error instanceof CanvasRequestError ? error.retryAfter : undefined;
-              const nextAttemptAt = Math.max(retryAfter ?? 0, Date.now() + backoff);
-              const blocked = error instanceof CanvasRequestError ? error.blocked : undefined;
-              const next = await repository.retry(operation, { attempts, nextAttemptAt, blocked, retryAfter,
-                error: error instanceof Error ? error.message : String(error) });
-              if (next && next.requestId !== operation.requestId) { operation = next; continue; }
-              if (!blocked) retryLater(nextAttemptAt);
-              throw error;
-            }
-            operation = await repository.pending(target.id);
-          }
-        } catch (error) {
-          if (target.draft?.recovery?.kind === 'unverified') retryLater(Date.now() + 5000);
-          status(target, 'sync-error', error); throw error;
+    for (const target of sessions) {
+      if (target.id !== draft.id) continue;
+      target.draft = draft;
+      if (store.getState().persistenceReady && store.getState().canvasSession === target.key) store.setState({
+        serverVersion: draft.serverVersion, recovery: draft.recovery });
+      settledStatus(target);
+    }
+  }
+  async function syncCanvas(editor: Session, force: boolean) {
+    // A stale editor can acquire a recovery-copy ID during this request. Keep
+    // the worker bound to the original canvas for every response and retry.
+    const target = { ...editor };
+    if (!target.id || !online()) return;
+    try {
+      target.draft = await repository.read(target.id);
+      if (target.draft?.recovery) {
+        if (target.draft.recovery.kind !== 'unverified') {
+          publishDraft(target.draft);
+          if (target.draft.recovery.kind !== 'copy') throw new Error((await repository.pending(target.id))?.retry?.error || '同步已暂停，本地内容已保留');
+          return;
         }
+        const remote = await readRemote(target.id);
+        target.draft = await repository.reconcile(target.id, remote.snapshot, remote.version);
+        publishDraft(target.draft);
+        if (target.draft.recovery) return;
       }
-    })();
-    try { await syncing; } finally { syncing = undefined; }
+      let operation = await repository.pending(target.id);
+      while (operation) {
+        if (operation.retry?.blocked && !force) throw new Error(operation.retry.error || '同步已暂停，本地内容已保留');
+        if (!online()) { settledStatus(target); break; }
+        if (operation.retry && ((!force && operation.retry.nextAttemptAt > Date.now()) ||
+            (operation.retry.retryAfter ?? 0) > Date.now())) {
+          status(target, 'sync-error', operation.retry.error);
+          retryLater(operation.retry.nextAttemptAt);
+          break;
+        }
+        if (!target.dirty) status(target, 'syncing');
+        const { retry, ...body } = operation;
+        const attempts = (retry?.attempts ?? 0) + 1;
+        const backoff = Math.min(30_000, 1000 * 2 ** Math.min(attempts - 1, 5)) * (0.75 + Math.random() * 0.25);
+        // Persist before sending: closing the page during an unresolved
+        // request must not reset its retry budget on the next startup.
+        const persisted = await repository.retry(operation, { attempts,
+          nextAttemptAt: Date.now() + requestTimeoutMs + backoff, error: retry?.error });
+        if (!persisted) break;
+        if (persisted.requestId !== operation.requestId) { operation = persisted; continue; }
+        try {
+          const ack = await canvasRequest(`/api/workflow/${encodeURIComponent(operation.id)}`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+          }, requestTimeoutMs);
+          target.draft = await repository.acknowledge(operation, ack);
+          if (!target.dirty) target.localError = undefined;
+          publishDraft(target.draft);
+        } catch (error) {
+          if (error instanceof CanvasStorageError) throw error;
+          if (error instanceof CanvasRequestError && error.status === 409) {
+            target.draft = await repository.markRecovery(operation.id, 'conflict', operation.requestId, error.message);
+            publishDraft(target.draft);
+            throw error;
+          }
+          if (error instanceof CanvasRequestError && error.status === 410) throw error;
+          const retryAfter = error instanceof CanvasRequestError ? error.retryAfter : undefined;
+          const nextAttemptAt = Math.max(retryAfter ?? 0, Date.now() + backoff);
+          const blocked = error instanceof CanvasRequestError ? error.blocked : undefined;
+          const next = await repository.retry(operation, { attempts, nextAttemptAt, blocked, retryAfter,
+            error: error instanceof Error ? error.message : String(error) });
+          if (next && next.requestId !== operation.requestId) { operation = next; continue; }
+          if (!blocked) retryLater(nextAttemptAt);
+          throw error;
+        }
+        operation = await repository.pending(target.id);
+      }
+    } catch (error) {
+      if (error instanceof CanvasRequestError && error.status === 410 && target.id) {
+        target.draft = await repository.markRecovery(target.id, 'deleted', undefined, error.message);
+        publishDraft(target.draft);
+      }
+      if (target.draft?.recovery?.kind === 'unverified') retryLater(Date.now() + 5000);
+      status(target, error instanceof CanvasStorageError ? 'local-error' : 'sync-error', error); throw error;
+    }
+  }
+  async function sync(force = false, onlyId?: string) {
+    if (!online()) return;
+    const targets = new Map<string, Session>();
+    for (const target of sessions) if (target.id) targets.set(target.id, target);
+    let drafts: CanvasDraft[];
+    try { drafts = await repository.all(); }
+    catch (error) { if (active) status(active, 'local-error', error); throw error; }
+    for (const draft of drafts) {
+      if (targets.has(draft.id)) continue;
+      const target = session({ ...store.getState(), canvasSession: -1, currentWorkflowId: draft.id });
+      target.draft = draft; target.localVersion = draft.localVersion;
+      targets.set(draft.id, target);
+    }
+    const work = [...targets.values()].filter(target => !onlyId || target.id === onlyId).map(async target => {
+      const id = target.id!;
+      const previous = flights.get(id);
+      if (previous) {
+        if (!force) return previous;
+        // A manual retry joining an automatic backoff check must still wake it.
+        await previous.catch(() => {});
+        if (flights.has(id)) return flights.get(id);
+      }
+      const promise = withSyncSlot(() => syncCanvas(target, force));
+      flights.set(id, promise);
+      try { await promise; } finally { if (flights.get(id) === promise) flights.delete(id); }
+    });
+    const results = await Promise.allSettled(work);
+    const failure = results.find(result => result.status === 'rejected');
+    if (failure?.status === 'rejected') throw failure.reason;
   }
   async function flush() {
     if (!store.getState().persistenceReady) return;
@@ -181,6 +261,9 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
       if (!active || state.canvasSession !== active.key) {
         active = session(state);
         sessions.add(active);
+        // A synchronous clear/import creates a new editor session. The previous
+        // session still owns its pending snapshot and must be committed now.
+        void flush().catch(onError);
         // Explicit new canvas clears the last-open pointer, never old drafts.
         if (!active.id) void repository.clearActive().catch(onError);
         return;
@@ -214,13 +297,15 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
   async function open(id?: string | null) {
     const token = ++opening;
     if (store.getState().persistenceReady) {
-      await commitLocal();
+      await prepareSwitch();
       void sync().catch(onError);
     }
     store.setState({ persistenceReady: false, saveStatus: 'loading', saveError: null });
     let migrated = false;
+    let legacyRaw: string | null = null;
     try {
-      await repository.migrateLegacy(typeof localStorage === 'undefined' ? null : localStorage.getItem(LEGACY_CANVAS_KEY));
+      legacyRaw = typeof localStorage === 'undefined' ? null : localStorage.getItem(LEGACY_CANVAS_KEY);
+      await repository.migrateLegacy(legacyRaw);
       migrated = true;
       await refreshCopies();
       let draft = await repository.read(id);
@@ -230,36 +315,42 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
       const pending = canvasId ? await repository.pending(canvasId) : undefined;
       let remoteError: unknown = pending?.retry?.error;
       if (canvasId && !draft && !online()) throw new Error('离线时无法读取尚未缓存的画布');
-      if (canvasId && online() && (!draft || draft.recovery?.kind === 'unverified' || draft.recovery?.kind === 'conflict' || draft.serverVersion > 0 && draft.localVersion === draft.confirmedLocalVersion)) {
+      if (canvasId && online() && (!draft || draft.recovery?.kind === 'unverified' || !draft.recovery && draft.serverVersion > 0 && draft.localVersion === draft.confirmedLocalVersion)) {
         try {
           const remote = await readRemote(canvasId);
           if (token !== opening) return;
           draft = draft?.recovery
             ? await repository.reconcile(canvasId, remote.snapshot, remote.version)
             : await repository.adopt(canvasId, remote.snapshot, remote.version);
-        } catch (error) { if (!draft) throw error; remoteError = error; }
+        } catch (error) {
+          if (!draft || error instanceof CanvasStorageError) throw error;
+          if (error instanceof CanvasRequestError && error.status === 410) draft = await repository.markRecovery(canvasId, 'deleted');
+          remoteError = error;
+        }
       }
       if (token !== opening) return;
       if (draft) applyDraft(draft);
       else store.setState({ nodes: [], edges: [], projectName: '未命名项目', currentWorkflowId: null, serverVersion: 0, recovery: undefined, generationRecoveryReadOnly: undefined });
       store.setState({ canvasSession: store.getState().canvasSession + 1 });
-      active = session(store.getState()); active.draft = draft; sessions.add(active);
+      active = session(store.getState()); active.draft = draft; active.localVersion = draft?.localVersion ?? 0; sessions.add(active);
+      await repository.setActive(active.id);
       store.setState({ persistenceReady: true });
       if (remoteError) status(active, 'sync-error', remoteError); else settledStatus(active);
       void sync().catch(onError);
     } catch (error) {
       if (token !== opening) return;
-      store.setState({ saveStatus: migrated ? 'local-error' : 'migration-error', saveError: error instanceof Error ? error.message : String(error) });
+      store.setState({ saveStatus: migrated || legacyRaw === null ? 'local-error' : 'migration-error', saveError: error instanceof Error ? error.message : String(error) });
       onError(error);
     }
   }
   async function save() {
     if (!store.getState().persistenceReady) throw new Error('画布尚未恢复，请稍后重试');
     if (!active || (!active.id && !active.latest.nodes.length)) throw new Error('画布为空');
+    const target = active;
     await commitLocal();
-    await sync(true);
-    const draft = active.id ? await repository.read(active.id) : undefined;
-    if (active.draft && (!draft || draft.confirmedLocalVersion < active.draft.localVersion)) {
+    await sync(true, target.id ?? undefined);
+    const draft = target.id ? await repository.read(target.id) : undefined;
+    if (target.draft && (draft?.recovery || !draft || draft.confirmedLocalVersion < target.localVersion)) {
       throw new Error(store.getState().saveError || '已保存到本地，等待网络恢复后同步');
     }
   }
@@ -281,8 +372,36 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
       await open(draft.id);
     } catch (error) {
       store.setState({ persistenceReady: true });
-      status(target, 'sync-error', error);
+      status(target, error instanceof CanvasStorageError ? 'local-error' : 'sync-error', error);
       throw error;
+    }
+  }
+  async function prepareSwitch() {
+    if (!store.getState().persistenceReady) throw new Error('画布尚未恢复，请稍后重试');
+    // Clear/import/new replace the editor synchronously. Freeze editing until
+    // its final snapshot is durable; a failed checkpoint leaves it exportable.
+    store.setState({ persistenceReady: false, saveStatus: 'saving', saveError: null });
+    try { await commitLocal(); }
+    finally {
+      store.setState({ persistenceReady: true });
+      if (active) settledStatus(active);
+    }
+  }
+  async function deleted(id: string) {
+    await prepareSwitch();
+    // The caller may clear the editor next. Keep the same editing gate through
+    // the remaining local deletion bookkeeping, not just the content commit.
+    store.setState({ persistenceReady: false, saveStatus: 'saving', saveError: null });
+    let draft: CanvasDraft | undefined;
+    try {
+      if (await repository.read(id)) draft = await repository.markRecovery(id, 'deleted');
+    } catch (error) {
+      if (active) status(active, 'local-error', error);
+      throw error;
+    } finally {
+      store.setState({ persistenceReady: true });
+      if (draft) publishDraft(draft);
+      if (active) settledStatus(active);
     }
   }
   async function allowGenerationRecovery(nodeId: string) {
@@ -291,7 +410,7 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
     if (store.getState().currentWorkflowId === id) store.setState({
       generationRecoveryReadOnly: store.getState().generationRecoveryReadOnly?.filter(value => value !== nodeId) });
   }
-  return { start, open, save, flush, recover, allowGenerationRecovery,
+  return { start, open, save, flush, recover, prepareSwitch, deleted, allowGenerationRecovery,
     beginInteraction(key: string) { interactions.add(key); clearTimers(); },
     endInteraction(key: string) { interactions.delete(key); if (active?.dirty) schedule(); },
   };

@@ -1,6 +1,7 @@
 import { canonicalJSON, type CanvasSnapshot, type SaveAcknowledgement, type SaveOperation } from './save-protocol';
 import { recoverySnapshot } from './recovery-copy';
 import { parseLegacyDraft } from './legacy-draft';
+import { CanvasStorageError, canvasStorageError } from './storage-error';
 
 export interface CanvasDraft {
   id: string;
@@ -10,7 +11,7 @@ export interface CanvasDraft {
   serverVersion: number;
   updatedAt: number;
   generationRecoveryReadOnly?: string[];
-  recovery?: { kind: 'unverified' | 'conflict' | 'copy'; sourceId?: string };
+  recovery?: { kind: 'unverified' | 'conflict' | 'copy' | 'deleted'; sourceId?: string };
 }
 export interface SaveRetry {
   attempts: number;
@@ -24,24 +25,33 @@ export interface PendingSave extends SaveOperation { localVersion: number; retry
 export function createCanvasRepository(name = 'ai-flow-canvas') {
   let connection: Promise<IDBDatabase> | undefined;
   function open() {
-    return connection ??= new Promise<IDBDatabase>((resolve, reject) => {
+    if (connection) return connection;
+    // Start in a microtask so even a synchronous SecurityError clears the
+    // cached attempt after it has been assigned, allowing an explicit retry.
+    const attempt = Promise.resolve().then(() => new Promise<IDBDatabase>((resolve, reject) => {
+      if (typeof indexedDB === 'undefined') throw new CanvasStorageError('unavailable');
       const request = indexedDB.open(name, 1);
       let blocked = false;
       request.onupgradeneeded = () => {
         const db = request.result;
-        db.createObjectStore('drafts', { keyPath: 'id' });
-        db.createObjectStore('operations', { keyPath: 'id' });
-        db.createObjectStore('metadata');
+        if (!db.objectStoreNames.contains('drafts')) db.createObjectStore('drafts', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('operations')) db.createObjectStore('operations', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('metadata')) db.createObjectStore('metadata');
       };
-      request.onerror = () => { connection = undefined; reject(request.error); };
-      request.onblocked = () => { blocked = true; connection = undefined; reject(new Error('本地数据库升级被其他页面阻塞')); };
+      request.onerror = () => reject(request.error);
+      request.onblocked = () => { blocked = true; reject(new CanvasStorageError('blocked')); };
       request.onsuccess = () => {
         const db = request.result;
         if (blocked) { db.close(); return; }
-        db.onversionchange = () => { db.close(); connection = undefined; };
+        db.onversionchange = () => { db.close(); if (connection === attempt) connection = undefined; };
         resolve(db);
       };
+    })).catch(error => {
+      if (connection === attempt) connection = undefined;
+      throw canvasStorageError(error, 'unavailable');
     });
+    connection = attempt;
+    return attempt;
   }
   const result = <T>(request: IDBRequest<T>) => new Promise<T>((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
@@ -49,16 +59,25 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
   });
   async function transaction<T>(mode: IDBTransactionMode, work: (tx: IDBTransaction) => Promise<T>): Promise<T> {
     const db = await open();
-    const tx = db.transaction(['drafts', 'operations', 'metadata'], mode);
+    let tx: IDBTransaction;
+    try { tx = db.transaction(['drafts', 'operations', 'metadata'], mode); }
+    catch (error) {
+      if (error instanceof Error && error.name === 'InvalidStateError') {
+        db.close(); connection = undefined;
+      }
+      throw canvasStorageError(error, 'transaction');
+    }
     // Request success isn't a commit. Only this transaction event resolves writes.
     return new Promise<T>((resolve, reject) => {
       let value: T;
       tx.oncomplete = () => resolve(value);
-      tx.onabort = () => reject(tx.error || new Error('本地保存事务已取消'));
+      tx.onabort = () => reject(canvasStorageError(tx.error, 'aborted'));
       tx.onerror = () => {}; // onabort reports the final transaction outcome.
       void work(tx).then(output => { value = output; }).catch(error => {
         try { tx.abort(); } catch { /* May already have aborted. */ }
-        reject(error);
+        // Preserve domain errors (such as an invalid recovery choice). Only
+        // IndexedDB failures need the storage-specific recovery instructions.
+        reject(error instanceof DOMException ? canvasStorageError(error, 'transaction') : error);
       });
     });
   }
@@ -82,7 +101,7 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
     },
     recoveries(): Promise<CanvasDraft[]> {
       return transaction('readonly', async tx => (await result<CanvasDraft[]>(tx.objectStore('drafts').getAll()))
-        .filter(draft => draft.recovery?.kind === 'copy'));
+        .filter(draft => draft.recovery?.kind === 'copy' || draft.recovery?.kind === 'deleted'));
     },
     async migrateLegacy(raw: string | null) {
       // Check completion before parsing: the retained backup may later be damaged.
@@ -123,7 +142,7 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
       return transaction('readwrite', async tx => {
         const drafts = tx.objectStore('drafts');
         const draft = await result<CanvasDraft>(drafts.get(id));
-        if (!draft.recovery || draft.recovery.kind === 'copy') return draft;
+        if (draft.recovery?.kind !== 'unverified' && draft.recovery?.kind !== 'conflict') return draft;
         if (canonicalJSON(draft.snapshot) === canonicalJSON(snapshot)) {
           draft.serverVersion = serverVersion;
           draft.confirmedLocalVersion = draft.localVersion;
@@ -138,6 +157,8 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
         const drafts = tx.objectStore('drafts');
         const previous = await result<CanvasDraft>(drafts.get(id));
         if (!previous?.recovery || previous.recovery.kind === 'copy') throw new Error('画布无需恢复');
+        if (previous.recovery.kind === 'deleted') throw new Error('画布已被删除，请将本地内容另存为新画布');
+        if (serverVersion < previous.serverVersion) throw new Error('读取的服务端版本已过期，请重新核对');
         // Backup and replacement commit together; a failed transaction changes neither.
         drafts.put(recoveryCopy(id, previous.snapshot));
         const version = previous.localVersion + 1;
@@ -169,10 +190,19 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
         return key ? result(tx.objectStore('drafts').get(key)) : undefined;
       });
     },
-    async commit(id: string, snapshot: CanvasSnapshot, serverVersion: number): Promise<CanvasDraft> {
+    async commit(id: string, snapshot: CanvasSnapshot, serverVersion: number, expectedLocalVersion?: number): Promise<CanvasDraft> {
       return transaction('readwrite', async tx => {
         const drafts = tx.objectStore('drafts');
         const previous = await result<CanvasDraft | undefined>(drafts.get(id));
+        if (expectedLocalVersion !== undefined && (previous?.localVersion ?? 0) !== expectedLocalVersion) {
+          const copy = recoveryCopy(id, snapshot);
+          // Keep editor identities until the user explicitly saves a new canvas.
+          copy.snapshot = snapshot;
+          copy.generationRecoveryReadOnly = snapshot.nodes.map(node => node.id);
+          drafts.put(copy);
+          tx.objectStore('metadata').put(copy.id, 'activeId');
+          return copy;
+        }
         const draft: CanvasDraft = { id, snapshot, localVersion: (previous?.localVersion ?? 0) + 1,
           confirmedLocalVersion: previous?.confirmedLocalVersion ?? 0,
           serverVersion: previous?.serverVersion ?? serverVersion, updatedAt: Date.now(), recovery: previous?.recovery, generationRecoveryReadOnly: previous?.generationRecoveryReadOnly };
@@ -192,10 +222,32 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
         const drafts = tx.objectStore('drafts');
         const previous = await result<CanvasDraft | undefined>(drafts.get(id));
         tx.objectStore('metadata').put(id, 'activeId');
-        if (previous && previous.localVersion > previous.confirmedLocalVersion) return previous;
-        const version = previous?.localVersion ?? 0;
+        // A GET may have started before another tab confirmed a newer write
+        // or observed deletion. Reading cannot undo either persisted decision.
+        if (previous && (previous.recovery || previous.serverVersion > serverVersion ||
+            previous.localVersion > previous.confirmedLocalVersion)) return previous;
+        const version = previous ? previous.localVersion + (canonicalJSON(previous.snapshot) === canonicalJSON(snapshot) ? 0 : 1) : 0;
         const draft = { id, snapshot, serverVersion, localVersion: version, confirmedLocalVersion: version, updatedAt: Date.now(), generationRecoveryReadOnly: previous?.generationRecoveryReadOnly };
         drafts.put(draft);
+        return draft;
+      });
+    },
+    all(): Promise<CanvasDraft[]> {
+      return transaction('readonly', tx => result(tx.objectStore('drafts').getAll()));
+    },
+    markRecovery(id: string, kind: 'conflict' | 'deleted', requestId?: string, error?: string): Promise<CanvasDraft> {
+      return transaction('readwrite', async tx => {
+        const drafts = tx.objectStore('drafts');
+        const draft = await result<CanvasDraft>(drafts.get(id));
+        const operations = tx.objectStore('operations');
+        const pending = await result<PendingSave | undefined>(operations.get(id));
+        // Late conflict responses cannot invalidate a newer operation; deletion
+        // is final for the identity and always dominates earlier receipts.
+        if (kind !== 'deleted' && requestId && pending?.requestId !== requestId) return draft;
+        if (draft.recovery?.kind !== 'deleted') draft.recovery = { kind };
+        drafts.put(draft);
+        if (pending) operations.put({ ...pending, retry: { attempts: pending.retry?.attempts ?? 0,
+          nextAttemptAt: 0, blocked: 'permanent', error: error ?? pending.retry?.error ?? '同步已暂停，本地内容已保留' } });
         return draft;
       });
     },
@@ -208,6 +260,7 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
         const pending = await result<PendingSave | undefined>(operations.get(sent.id));
         if (pending?.requestId !== sent.requestId) return pending;
         const draft = await result<CanvasDraft>(tx.objectStore('drafts').get(sent.id));
+        if (draft.recovery) return undefined;
         const next = retry.blocked === 'validation' && draft.localVersion > sent.localVersion
           ? operation(draft) : { ...pending, retry };
         operations.put(next);
@@ -223,13 +276,19 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
         const draft = await result<CanvasDraft>(drafts.get(sent.id));
         const operations = tx.objectStore('operations');
         const pending = await result<PendingSave | undefined>(operations.get(sent.id));
-        if (!pending || pending.requestId !== sent.requestId) return draft;
+        if (draft.recovery || !pending || pending.requestId !== sent.requestId) return draft;
         draft.confirmedLocalVersion = sent.localVersion;
         draft.serverVersion = ack.version;
         drafts.put(draft);
         operations.delete(sent.id);
         if (draft.localVersion > sent.localVersion) operations.put(operation(draft));
         return draft;
+      });
+    },
+    setActive(id: string | null) {
+      return transaction('readwrite', async tx => {
+        if (id) tx.objectStore('metadata').put(id, 'activeId');
+        else tx.objectStore('metadata').delete('activeId');
       });
     },
     clearActive() {

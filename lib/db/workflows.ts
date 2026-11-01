@@ -26,7 +26,7 @@ interface WorkflowRow {
 export function getAllWorkflows(): WorkflowData[] {
   const db = getDatabase();
   const stmt = db.prepare(`
-    SELECT * FROM workflows 
+    SELECT * FROM workflows WHERE deleted_at IS NULL
     ORDER BY updated_at DESC
   `);
 
@@ -44,7 +44,7 @@ export function getAllWorkflows(): WorkflowData[] {
 
 export function getWorkflowById(id: string): WorkflowData | null {
   const db = getDatabase();
-  const stmt = db.prepare("SELECT * FROM workflows WHERE id = ?");
+  const stmt = db.prepare("SELECT * FROM workflows WHERE id = ? AND deleted_at IS NULL");
   const row = stmt.get(id) as WorkflowRow | undefined;
 
   if (!row) return null;
@@ -66,6 +66,9 @@ export function saveWorkflow(operation: SaveOperation): SaveAcknowledgement {
   const digest = createHash("sha256").update(canonicalJSON({ baseVersion, snapshot })).digest("hex");
   const db = getDatabase();
   return db.transaction(() => {
+    // Deletion dominates historical receipts: a replay must never report a
+    // tombstoned canvas as a currently saved project.
+    if (isWorkflowDeleted(id)) throw new CanvasSaveError("画布已被删除，本地内容已保留，请另存副本", 410);
     const receipt = db.prepare("SELECT digest, version FROM canvas_save_receipts WHERE canvas_id = ? AND request_id = ?")
       .get(id, requestId) as { digest: string; version: number } | undefined;
     if (receipt) {
@@ -87,9 +90,15 @@ export function saveWorkflow(operation: SaveOperation): SaveAcknowledgement {
   }).immediate();
 }
 
+export function isWorkflowDeleted(id: string): boolean {
+  return !!getDatabase().prepare("SELECT 1 FROM workflows WHERE id = ? AND deleted_at IS NOT NULL").get(id);
+}
+
 export function deleteWorkflow(id: string): boolean {
   const db = getDatabase();
-  const stmt = db.prepare("DELETE FROM workflows WHERE id = ?");
-  const result = stmt.run(id);
-  return result.changes > 0;
+  return db.transaction(() => {
+    const result = db.prepare("UPDATE workflows SET deleted_at = ?, version = version + 1 WHERE id = ? AND deleted_at IS NULL")
+      .run(Date.now(), id);
+    return result.changes > 0 || isWorkflowDeleted(id);
+  }).immediate();
 }

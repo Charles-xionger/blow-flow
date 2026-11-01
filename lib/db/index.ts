@@ -43,6 +43,9 @@ function initializeTables(db: Database.Database) {
     if (!columns.some(column => column.name === "version")) {
       db.exec("ALTER TABLE workflows ADD COLUMN version INTEGER NOT NULL DEFAULT 1");
     }
+    if (!columns.some(column => column.name === "deleted_at")) {
+      db.exec("ALTER TABLE workflows ADD COLUMN deleted_at INTEGER");
+    }
     db.exec(`CREATE TABLE IF NOT EXISTS canvas_save_receipts (
       canvas_id TEXT NOT NULL,
       request_id TEXT NOT NULL,
