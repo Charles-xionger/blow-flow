@@ -107,7 +107,7 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
         try {
           let operation = await repository.pending(target.id);
           while (operation) {
-            if (operation.retry?.blocked) throw new Error(operation.retry.error || '同步已暂停，本地内容已保留');
+            if (operation.retry?.blocked && !force) throw new Error(operation.retry.error || '同步已暂停，本地内容已保留');
             if (!online()) { settledStatus(target); break; }
             if (operation.retry && ((!force && operation.retry.nextAttemptAt > Date.now()) ||
                 (operation.retry.retryAfter ?? 0) > Date.now())) {

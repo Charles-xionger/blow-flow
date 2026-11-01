@@ -316,7 +316,7 @@ for (const status of [401, 403, 404, 409, 410]) {
     store.setState({ nodes: [node('original')] });
     await assert.rejects(saver.save(), /blocked/);
     store.setState({ nodes: [node('preserved edit')] });
-    await assert.rejects(saver.save(), /blocked/);
+    await assert.rejects(saver.flush(), /blocked/);
     stop();
     const restoredStore = createStore(() => ({ ...store.getState(), persistenceReady: false }));
     const restored = createCanvasAutosave(restoredStore, () => {}, 10, repository);
@@ -408,5 +408,24 @@ test('manual save joining an automatic backoff check still wakes the original op
   global.fetch = success;
   await Promise.all([saver.flush(), saver.save()]);
   assert.equal(calls.length, 1);
+  assert.equal(store.getState().saveStatus, 'synced');
+});
+
+test('manual saving after permission is restored retries the original operation before newer edits', async t => {
+  const { store, saver } = await setup(t);
+  const sent = []; let authorized = false;
+  global.fetch = async (url, options) => {
+    const body = JSON.parse(options.body); sent.push(body);
+    return authorized ? ack(body) : Response.json({ success: false, error: 'Permission denied' }, { status: 403 });
+  };
+  store.setState({ nodes: [node('before permission repair')] });
+  await assert.rejects(saver.save(), /Permission denied/);
+  store.setState({ nodes: [node('after permission repair')] });
+  await assert.rejects(saver.flush(), /Permission denied/);
+  assert.equal(sent.length, 1);
+  authorized = true;
+  await saver.save();
+  assert.deepEqual(sent[1], sent[0]);
+  assert.equal(sent[2].snapshot.nodes[0].id, 'after permission repair');
   assert.equal(store.getState().saveStatus, 'synced');
 });
