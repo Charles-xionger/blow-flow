@@ -1,11 +1,11 @@
 "use client";
 
-import { memo, useCallback, useState, useEffect, useMemo } from "react";
+import { memo, useCallback, useState, useEffect, useMemo, type ReactNode } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { BaseNode, NodeSurface } from "./BaseNode";
 import { useNodeInputs } from "@/hooks/useNodeInputs";
 import { useCanvasStore } from "@/store/useCanvasStore";
-import { Image, Sparkles, Wand2, Loader2, Link2 } from "lucide-react";
+import { Image as ImageIcon, Sparkles, Wand2, Loader2, Link2 } from "lucide-react";
 import type { NodeData } from "@/types";
 import { toast } from "sonner";
 import { getImageModels } from "@/lib/model-registry";
@@ -16,6 +16,16 @@ import { validGenerationDimensions } from "@/lib/generation/dimensions";
 import { generationModels } from "@/lib/generation/client";
 import type { PublicModel } from "@/lib/generation/types";
 import { useGenerationTask } from "@/hooks/useGenerationTask";
+import { imagePreviewSize } from "@/lib/generation/image-dimensions";
+import { ImageSizeSettings } from "./shared/ImageSizeSettings";
+import { ImageGenerationPanel } from "./shared/ImageGenerationPanel";
+import imageStyles from "./shared/ImageGeneration.module.css";
+
+function PanelAnchor({ compact, nodeId, children }: { compact: boolean; nodeId: string; children: ReactNode }) {
+  const content = <div onMouseDown={event => event.stopPropagation()}>{children}</div>;
+  return compact ? <ImageGenerationPanel nodeId={nodeId}>{children}</ImageGenerationPanel>
+    : <div className="node-panel nodrag nopan nowheel absolute top-full left-1/2 -translate-x-1/2 min-w-100 pt-4 z-70 pointer-events-auto">{content}</div>;
+}
 
 const aspectRatios = [
   { value: "1:1", label: "1:1 方形" },
@@ -47,7 +57,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
   // 获取当前节点位置
 
   // 只有在单选状态下才显示控制面板
-  const shouldShowPanel = selected && singleSelected;
+  const shouldShowPanel = selected && singleSelected && !props.dragging;
 
   // 从连接的节点读取数据（文本节点的prompt或角色节点的数据）
   const inputs = useNodeInputs(id);
@@ -262,9 +272,13 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
   ]);
 
   const hasResult = !!data.imageSrc && !data.isLoading;
+  const generationWidth = data.generationWidth ?? taskModel?.capabilities.dimensions.defaultWidth;
+  const generationHeight = data.generationHeight ?? taskModel?.capabilities.dimensions.defaultHeight;
+  const displaySize = taskModel && generationWidth && generationHeight ? imagePreviewSize(generationWidth, generationHeight) : undefined;
 
   return (
-    <BaseNode {...props}>
+    <BaseNode {...props} displaySize={displaySize} titleAccessory={taskModel && <span
+      className="shrink-0 text-[10px] text-zinc-400 tabular-nums">{generationWidth} × {generationHeight} px</span>}>
 
       {/* 角色信息提示 */}
       {characterData && (
@@ -275,7 +289,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
       )}
 
       {/* 节点显示区域 */}
-      <NodeSurface>
+      <NodeSurface testId="image-preview">
         {hasResult ? (
           <div className="relative w-full h-full">
             <ImageWithActions
@@ -288,10 +302,10 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center text-zinc-500">
             <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 bg-zinc-800/50 text-zinc-500">
-              <Image size={28} className="opacity-60" />
+              <ImageIcon size={28} className="opacity-60" aria-hidden />
             </div>
             <span className="text-sm font-medium opacity-60">生图</span>
-            <span className="text-xs opacity-40 mt-1">选中节点开始创作</span>
+            <span className="text-xs opacity-40 mt-1">{selected ? "输入提示词开始创作" : "选中节点开始创作"}</span>
           </div>
         )}
 
@@ -305,11 +319,8 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
 
       {/* 控制面板 */}
       {shouldShowPanel && (
-        <div
-          className="node-panel nodrag nopan nowheel absolute top-full left-1/2 -translate-x-1/2 min-w-100 pt-4 z-70 pointer-events-auto"
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <div className="bg-[#1a1a1a]/95 backdrop-blur-xl border border-zinc-700/50 rounded-2xl p-4 flex flex-col gap-3">
+        <PanelAnchor compact={!!taskModel} nodeId={id}>
+          <div data-testid={taskModel ? 'image-generation-panel' : undefined} className={taskModel ? imageStyles.panel : "bg-[#1a1a1a]/95 backdrop-blur-xl border border-zinc-700/50 rounded-2xl p-4 flex flex-col gap-3"}>
             {/* 连接提示卡片 */}
             {inputPrompt && (
               <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 text-sm">
@@ -320,7 +331,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
 
             {/* Prompt 输入框 */}
             <Textarea
-              className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none min-h-18 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-blue-500 text-white placeholder-zinc-500 max-h-32 overflow-y-auto"
+              className={taskModel ? `${imageStyles.prompt} nodrag` : "nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none min-h-18 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-blue-500 text-white placeholder-zinc-500 max-h-32 overflow-y-auto"}
               placeholder="描述你想要生成的图片..."
               value={localPrompt}
               onChange={(e) => {
@@ -332,12 +343,17 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
               onWheel={(e) => e.stopPropagation()}
             />
 
-            <div className="flex items-center gap-2">
+            <div className={taskModel ? imageStyles.foot : "flex items-center gap-2"}>
+              {taskModel && <ImageSizeSettings width={generationWidth!} height={generationHeight!}
+                limits={taskModel.capabilities.dimensions} preference={data.generationSizePreset}
+                disabled={data.isLoading || !!data.pendingGeneration || data.generationBlocked}
+                onChange={(size, preset) => updateNodeData(id, { generationWidth: size.width, generationHeight: size.height, generationSizePreset: preset })} />}
               <select
+                aria-label="生图模型"
                 value={data.model || imageModels[0]?.value || ""}
                 disabled={data.isLoading || !!data.pendingGeneration || data.generationBlocked}
                 onChange={(e) => updateNodeData(id, { model: e.target.value, usesGenerationTasks: taskModels.some(m => m.id === e.target.value) })}
-                className="h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                className={taskModel ? imageStyles.model : "h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"}
               >
                 {taskModels.map(m => <option key={m.id} value={m.id}>{m.name}{m.configured ? "" : "（未配置）"}</option>)}
                 {imageModels.map((m) => (
@@ -400,9 +416,9 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
                 onClick={handleGenerate}
                 disabled={data.isLoading || taskUnavailable || (!inputPrompt && !localPrompt)}
                 className={`shrink-0 h-8 px-4 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 whitespace-nowrap transition-all active:scale-[0.98] ${
-                  data.isLoading || (!inputPrompt && !localPrompt)
-                    ? "bg-gray-400 text-white cursor-not-allowed"
-                    : "bg-linear-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40"
+                  data.isLoading || taskUnavailable || (!inputPrompt && !localPrompt)
+                    ? "bg-zinc-800 text-zinc-500 cursor-not-allowed"
+                    : taskModel ? "bg-purple-600 hover:bg-purple-500 text-white" : "bg-linear-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40"
                 }`}
               >
                 {data.isLoading ? (
@@ -414,22 +430,9 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
               </button>
             </div>
 
-            {taskModel && <div className="flex flex-col gap-2 text-xs text-zinc-300">
-              <div className="flex items-center gap-2">
-                {(["generationWidth", "generationHeight"] as const).map((field, index) => {
-                  const dims = taskModel.capabilities.dimensions;
-                  return <label key={field}>{index === 0 ? "宽" : "高"}
-                    <input aria-label={index === 0 ? "生成宽度" : "生成高度"} type="number"
-                      min={dims.min} max={dims.max} step={dims.step}
-                      value={data[field] ?? (index === 0 ? dims.defaultWidth : dims.defaultHeight)}
-                      onChange={e => updateNodeData(id, { [field]: Number(e.target.value) })}
-                      className="ml-2 w-20 bg-zinc-800 rounded px-2 py-1" />
-                  </label>;
-                })}
-              </div>
-              <span>实际生成尺寸：{data.generationWidth ?? taskModel.capabilities.dimensions.defaultWidth} × {data.generationHeight ?? taskModel.capabilities.dimensions.defaultHeight} px</span>
-              <span>仅文生图，不支持参考图。尺寸须为 {taskModel.capabilities.dimensions.step} 的倍数。</span>
-              {!taskModel.configured && <span>请管理员配置平台连接</span>}
+            {taskModel && <div className="text-[11px] text-zinc-500">
+              <span>仅文生图 · 不支持参考图</span>
+              {!taskModel.configured && <span> · 请管理员配置平台连接</span>}
             </div>}
             {data.generationBlocked && data.generationTaskId && <button type="button"
               onClick={() => void resumeTask()} className="text-sm text-blue-300">继续查询原任务</button>}
@@ -445,7 +448,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
               </div>
             )}
           </div>
-        </div>
+        </PanelAnchor>
       )}
     </BaseNode>
   );

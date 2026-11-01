@@ -85,6 +85,16 @@ node -r ./scripts/register-typescript.cjs -e 'console.log(JSON.stringify(require
 
 平台临时 URL 返回 403/404/410 时显示“生成成功但结果保存失败：平台临时结果已过期或无法取回”；下载超时与 OSS 上传失败分别显示原因。若 OSS 尚无对象且平台文件已无法下载，重试保存也无法恢复文件；系统不承诺平台保留期限，不自动重新生成。用户可自行选择“重新生成”。平台 ID、原始结果和脱敏诊断留在服务端；公开任务仅返回保存状态、可展示错误与已保存的 OSS 引用。
 
+## Krea2 节点与尺寸面板
+
+节点及选中后的输入面板沿用 comfyArt 的紧凑布局，使用本项目深色主题和紫色选中态。提示词为面板主体，底部提供尺寸摘要、模型选择和生成按钮；点击摘要展开图像设置。复用样式的版权与 MIT 许可保留在 `THIRD_PARTY_NOTICES.md`，不引入 comfyArt 的画布引擎或生成队列。
+
+尺寸档位是产品的像素预设，不是模型画质等级：1K、2K 分别以短边 1024、2048 为基准，长边按画幅计算，宽高按模型能力的步长四舍五入。Krea2 当前步长为 8，因此 2K + 16:9 的实际尺寸为 3640×2048。超出模型能力范围的档位或画幅组合禁用，不裁剪预设导致画幅变化。画幅包括 1:1、3:2、2:3、4:3、3:4、16:9、9:16、4:5、5:4、21:9。
+
+新建节点默认生成尺寸保留为 1920×1080，摘要显示“自定义 · 16:9”。旧画布的宽高在打开面板时保持原值。自定义宽高在失焦或按 Enter 后对齐到允许范围内最近的步长，回显实际数值并提示调整；空值或非法输入恢复该字段上次有效值。节点标题和设置弹层显示最终生成像素，节点预览按画幅等比限制在 320×320 显示范围内；显示大小与实际生成像素独立。
+
+档位、画幅和自定义输入最终仍提交现有的 `width` / `height`，不改变原请求恢复、继续查询、重试保存与重新生成的语义。旧模型仍使用原有参数和调用路径。
+
 ## 协议与尺寸核实依据
 
 - [国际站高级工作流提交](https://www.runninghub.ai/runninghub-api-doc-en/api-425761093.md)：`POST /task/openapi/create`，body 含 apiKey、workflowId、workflow JSON 字符串及 nodeInfoList；Authorization 使用 Bearer。同文档正文要求 fieldValue 保持类型，而附带 schema 声明为 string；本实现按正文保留数字/布尔，并提交完整导出图以固定执行配置，真实联调需确认账号服务行为。
@@ -101,11 +111,18 @@ node -r ./scripts/register-typescript.cjs -e 'console.log(JSON.stringify(require
 pnpm typecheck
 node --test tests/generation.test.cjs
 node --test tests/artifact-recovery.test.cjs
+node --test tests/image-dimensions.test.cjs
+pnpm exec playwright test tests/browser/krea2-panel.spec.ts
 pnpm test
+pnpm test:browser
 ```
 
 集成测试使用真实临时 SQLite 和模拟外部边界，不需要真实密钥。HTTP 场景需要允许监听本机临时端口。测试验证付费提交次数、类型映射、幂等、配置快照、串行占位、响应丢失、查询期限及保存失败；另通过 SIGKILL 独立 worker 进程、关闭并重开数据库，验证提交前、提交不明、取得平台 ID 和保存中的重启恢复。受控时间验证继续查询；画布公开操作验证刷新、切换、删除、复制及反序完成。产物测试使用真实临时 SQLite、模拟 HTTP 平台和 OSS，覆盖上传前、上传成功未记账、部分完成时杀掉进程后恢复，以及重复保存请求、下载超时、临时 URL 失效和旧任务迟到结果。
 
 人工 UI 验收前先停止同目录已有的 Next dev（避免 `.next/dev/lock` 冲突），再运行 `node tests/helpers/generation-demo.cjs` 并访问 `http://localhost:3101`。该演示使用独立临时数据库、模拟平台和模拟保存结果，绝不调用真实平台/OSS。退出用 Ctrl-C。创建“生图”节点，选择 Krea2，输入提示词与尺寸，检查任务阶段和模拟图片；再选择旧模型，检查其原参数控件仍正常。真实旧模型生成需要该模型的连接配置。
 
-UI 交互验收按用户要求交由人工。本次未执行真实 Krea2 付费生成。真实联调待办：配置国际站账号与 OSS，确认工作流及权重权限，选定最小测试尺寸，运行一次生成，核对最终像素、提示词、仅一次计费提交及 OSS 可访问性；确认站点接受类型化 fieldValue 与完整 workflow。64–8192 是节点约束，不是所有尺寸均已验证可在当前显存档位运行。
+尺寸面板已有真实浏览器自动化验收：验证档位/画幅与预览比例、通过真实画布 API 保存并刷新恢复、旧尺寸保留、自定义输入提交和提示、Escape 焦点返回，以及窄视口内的可操作性。生成参数在请求边界捕获，不调用真实付费平台。另独立检查了点击画布、Escape 和切换宽高字段时的输入提交。规范审查无硬性违规，重复档位类型建议已处理；规格审查无剩余发现。
+
+2026-11-01 最终回归：`pnpm test` 109/109 通过，`pnpm test:browser` 38/38 通过，`pnpm typecheck`、修改文件 ESLint 和 `git diff --check` 通过。
+
+本次未执行真实 Krea2 付费生成。真实联调待办：配置国际站账号与 OSS，确认工作流及权重权限，选定最小测试尺寸，运行一次生成，核对最终像素、提示词、仅一次计费提交及 OSS 可访问性；确认站点接受类型化 fieldValue 与完整 workflow。64–8192 是节点约束，不是所有尺寸均已验证可在当前显存档位运行。

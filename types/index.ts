@@ -1,4 +1,5 @@
 import type { CreateGeneration } from "@/lib/generation/types";
+import type { ImageSizePreset } from "@/lib/generation/image-dimensions";
 import { Edge, Node } from "@xyflow/react";
 
 // 节点类型枚举
@@ -41,6 +42,7 @@ export interface NodeData extends Record<string, unknown> {
   generationSaving?: boolean;
   generationWidth?: number;
   generationHeight?: number;
+  generationSizePreset?: ImageSizePreset;
 
   // 状态
   isLoading?: boolean;

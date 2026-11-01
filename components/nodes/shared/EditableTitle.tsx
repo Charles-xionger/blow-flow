@@ -8,12 +8,14 @@ interface EditableTitleProps {
   nodeId: string;
   defaultTitle: string;
   customTitle?: string;
+  inline?: boolean;
 }
 
 export function EditableTitle({
   nodeId,
   defaultTitle,
   customTitle,
+  inline,
 }: EditableTitleProps) {
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
   const [isEditing, setIsEditing] = useState(false);
@@ -37,7 +39,7 @@ export function EditableTitle({
   };
 
   return (
-    <div className="absolute -top-7 left-0 z-10 flex items-center gap-1">
+    <div className={`${inline ? 'relative min-w-0' : 'absolute -top-7 left-0'} z-10 flex items-center gap-1`}>
       {isEditing ? (
         <input
           type="text"
@@ -58,10 +60,10 @@ export function EditableTitle({
         />
       ) : (
         <div
-          className="group/title flex items-center gap-1 rounded px-2 py-0.5 hover:bg-gray-800/50"
+          className="group/title flex min-w-0 items-center gap-1 rounded px-2 py-0.5 hover:bg-gray-800/50"
           onDoubleClick={() => setIsEditing(true)}
         >
-          <span className="text-xs font-medium text-gray-300">
+          <span className="truncate text-xs font-medium text-gray-300" title={customTitle || defaultTitle}>
             {customTitle || defaultTitle}
           </span>
           <Edit3

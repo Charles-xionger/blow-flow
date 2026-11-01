@@ -8,16 +8,21 @@ import { QuickAddNode } from "../canvas/QuickAddNode";
 import { nodeDefinitions } from "@/lib/canvas/node-definitions";
 import { cn } from "@/lib/utils";
 
-const SurfaceContext = createContext({ dragging: false, selected: false, loading: false, error: false, height: 240 });
+const SurfaceContext = createContext({ dragging: false, selected: false, loading: false, error: false, width: 320, height: 240 });
 
 /** Business chrome only. xyflow owns positioning, dragging, selection and handles. */
-export const BaseNode = memo(function BaseNode({ children, ...props }: NodeProps<Node<NodeData>> & { children: ReactNode }) {
+export const BaseNode = memo(function BaseNode({ children, displaySize, titleAccessory, ...props }: NodeProps<Node<NodeData>> & {
+  children: ReactNode; displaySize?: { width: number; height: number }; titleAccessory?: ReactNode;
+}) {
   const { id, data, selected, dragging, isConnectable } = props;
   const definition = nodeDefinitions[data.type];
   return (
-    <SurfaceContext.Provider value={{ dragging, selected, loading: !!data.isLoading, error: !!data.error, height: definition.height }}>
-      <div className={cn("relative w-80", dragging && "[&_.node-panel]:invisible [&_.node-panel]:pointer-events-none")}>
-        <EditableTitle nodeId={id} defaultTitle={data.type === NodeType.TEXT ? "文本描述" : data.label} customTitle={data.customTitle} />
+    <SurfaceContext.Provider value={{ dragging, selected, loading: !!data.isLoading, error: !!data.error, width: displaySize?.width ?? 320, height: displaySize?.height ?? definition.height }}>
+      <div style={{ width: displaySize?.width ?? 320 }} className={cn("relative", dragging && "[&_.node-panel]:invisible [&_.node-panel]:pointer-events-none")}>
+        <div className={titleAccessory ? 'absolute -top-7 left-0 right-0 flex items-center justify-between gap-2' : undefined}>
+          <EditableTitle inline={!!titleAccessory} nodeId={id} defaultTitle={data.type === NodeType.TEXT ? "文本描述" : data.label} customTitle={data.customTitle} />
+          {titleAccessory}
+        </div>
         {definition.input && <Handle type="target" position={Position.Left} id="input" isConnectable={isConnectable} />}
         <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center">
           {!dragging && <QuickAddNode nodeId={id} />}
@@ -30,10 +35,10 @@ export const BaseNode = memo(function BaseNode({ children, ...props }: NodeProps
 });
 
 /** Keep dimensions and mounted form state stable while suppressing expensive painting. */
-export function NodeSurface({ children }: { children: ReactNode }) {
-  const { dragging, selected, loading, error, height } = useContext(SurfaceContext);
+export function NodeSurface({ children, testId }: { children: ReactNode; testId?: string }) {
+  const { dragging, selected, loading, error, width, height } = useContext(SurfaceContext);
   return (
-    <div style={{ width: 320, height }} className={cn(
+    <div data-testid={testId} style={{ width, height }} className={cn(
       "relative rounded-2xl border bg-[#1a1a1a] overflow-hidden shadow-xl group",
       selected ? "border-purple-500 ring-2 ring-purple-500/30" : "border-zinc-700/50",
       loading && "border-blue-500", error && "border-red-500",
