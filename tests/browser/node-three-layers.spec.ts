@@ -128,11 +128,6 @@ test('节点控制台保留运行状态、错误、任务恢复和重试保存�
 });
 
 const editorOf = (page: Page) => page.getByRole('region', { name: '节点控制台' }).getByRole('textbox', { name: '提示词' });
-const disconnectUpstream = async (page: Page) => {
-  await page.locator('.react-flow__edge').click({ force: true });
-  await page.keyboard.press('Backspace');
-  await expect(page.locator('.react-flow__edge')).toHaveCount(0);
-};
 const savedPrompt = async (request: APIRequestContext, page: Page) => {
   const id = new URL(page.url()).searchParams.get('project');
   const { data } = await (await request.get(`/api/workflow/${id}`)).json();
@@ -155,9 +150,7 @@ test('提示词以分段结构保存，重新打开后不变，发送编辑器�
     sent = route.request().postDataJSON();
     await route.fulfill({ status: 400, json: { success: false, error: '测试已捕获' } });
   });
-  // 连接的文本节点仍会覆盖手写内容，这里断开后验证手写内容本身。
   const node = await openCanvas(page, request);
-  await disconnectUpstream(page);
   await node.click();
   await editorOf(page).click();
   await page.keyboard.press('End');
@@ -206,7 +199,6 @@ test('中文输入法组合输入不被打断，粘贴只保留纯文本，可�
 
 test('提示词为空或只有空白时不能运行', async ({ page, request }) => {
   const node = await openCanvas(page, request, { prompt: '' });
-  await disconnectUpstream(page);
   await node.click();
   const run = page.getByRole('button', { name: '生成', exact: true });
   await expect(run).toBeDisabled();
@@ -227,14 +219,140 @@ test('粘贴内容里没有文字时保留选中的提示词', async ({ page, re
   await expect(editor).toHaveText('一朵花');
 });
 
-test('上游文本只有空白时发送节点自己的提示词', async ({ page, request }) => {
-  let sent: { prompt: string } | undefined;
+async function openWithUpstream(page: Page, request: APIRequestContext, prompt: unknown, sources = true) {
+  const id = crypto.randomUUID();
+  const inputs = sources ? [
+    { id: 'hero', type: 'character', position: { x: 30, y: 30 }, data: { type: 'character', label: '角色', customTitle: '小明',
+      characterData: { name: '小明', id: 'hero-character', description: '描述', tags: [], referenceImages: [result] } } },
+    { id: 'garden', type: 'text', position: { x: 30, y: 330 }, data: { type: 'text', label: '文本', customTitle: '场景', prompt: '花园' } },
+  ] : [];
+  expect((await request.put(`/api/workflow/${id}`, { data: { id, requestId: crypto.randomUUID(), baseVersion: 0, snapshot: { name: '节点引用', nodes: [
+    { id: 'image', type: 'textToImage', position: { x: 520, y: 200 }, data: { type: 'textToImage', label: '文生图', model: 'BananaPro', prompt } },
+    ...inputs,
+  ], edges: inputs.map(input => ({ id: `link-${input.id}`, source: input.id, target: 'image', sourceHandle: 'output', targetHandle: 'input' })),
+  viewport: { x: 0, y: 0, zoom: 1 } } } })).ok()).toBeTruthy();
+  await page.goto(`/?project=${id}`);
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
+  await page.locator('.react-flow__node[data-id="image"]').click();
+  return page.getByRole('region', { name: '节点控制台' });
+}
+
+const captureRun = async (page: Page) => {
+  const run: { body?: { prompt: string; inputImages?: string[] } } = {};
   await page.route('**/api/generate/image', async route => {
-    sent = route.request().postDataJSON();
+    run.body = route.request().postDataJSON();
     await route.fulfill({ status: 400, json: { success: false, error: '测试已捕获' } });
   });
-  const node = await openCanvas(page, request, {}, '   ');
-  await node.click();
+  return run;
+};
+
+test('连接层显示上游节点，悬停显示编号和名称；没有上游节点时不显示', async ({ page, request }) => {
+  const panel = await openWithUpstream(page, request, '花');
+  const layer = panel.getByRole('list', { name: '连接的上游节点' });
+  await expect(layer.getByRole('listitem')).toHaveCount(2);
+  await expect(layer.getByTitle('图片1 · 小明')).toBeVisible();
+  await expect(layer.getByTitle('场景')).toBeVisible();
+  const empty = await openWithUpstream(page, request, '花', false);
+  await expect(empty.getByRole('list', { name: '连接的上游节点' })).toHaveCount(0);
+  await editorOf(page).click();
+  await page.keyboard.type('@');
+  await expect(page.getByRole('listbox', { name: '引用连接的节点' })).toHaveCount(0);
+  await expect(editorOf(page)).toHaveText('花@');
+});
+
+test('用方向键和回车、鼠标选择节点引用，手写内容、引用文本和未引用素材都发送', async ({ page, request }) => {
+  const run = await captureRun(page);
+  const panel = await openWithUpstream(page, request, '');
+  const menu = page.getByRole('listbox', { name: '引用连接的节点' });
+  await editorOf(page).click();
+  await page.keyboard.type('一只@');
+  await expect(menu.getByRole('option')).toHaveCount(2);
+  await expect(menu.getByRole('option').first()).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('ArrowDown');
+  await expect(menu.getByRole('option').nth(1)).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('Enter');
+  await expect(menu).toHaveCount(0);
+  await page.keyboard.type('里@');
+  await menu.getByRole('option', { name: /图片1/ }).click();
+  await expect(menu).toHaveCount(0);
+  const tags = editorOf(page).locator('[data-node-reference]');
+  await expect(tags).toHaveText([/场景$/, '图片1']);
+  await expect(tags.nth(1).locator('img')).toHaveCount(1);
+  await expect(tags.nth(1)).toHaveAttribute('title', '图片1 · 小明');
+  await panel.getByRole('button', { name: '生成', exact: true }).click();
+  await expect.poll(() => run.body?.prompt).toBe('一只花园里图片1');
+  expect(run.body?.inputImages).toEqual([result]);
+  // 节点引用保存为引用段，重新打开后仍是标签。
+  await expect.poll(() => savedPrompt(request, page)).toEqual([{ text: '一只' }, { ref: 'garden' }, { text: '里' }, { ref: 'hero' }]);
+  await page.reload();
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
+  await page.locator('.react-flow__node[data-id="image"]').click();
+  await expect(editorOf(page).locator('[data-node-reference]')).toHaveText([/场景$/, '图片1']);
+});
+
+test('节点引用是整体标签，删除它不断开连线；未引用的文本不发送，素材仍发送', async ({ page, request }) => {
+  const run = await captureRun(page);
+  const panel = await openWithUpstream(page, request, [{ text: '花' }, { ref: 'garden' }]);
+  await expect(page.locator('.react-flow__edge')).toHaveCount(2);
+  await editorOf(page).click();
+  // 先输入一个字，确保光标已经同步到标签之后。
+  await page.keyboard.type('x');
+  await expect(editorOf(page)).toContainText('x');
+  const copied = await editorOf(page).evaluate(element => {
+    getSelection()?.selectAllChildren(element);
+    return new Promise<string>(resolve => setTimeout(() => {
+      const clipboardData = new DataTransfer();
+      element.dispatchEvent(new ClipboardEvent('copy', { clipboardData, bubbles: true, cancelable: true }));
+      getSelection()?.collapseToEnd();
+      setTimeout(() => resolve(clipboardData.getData('text/plain')), 50);
+    }, 50));
+  });
+  expect(copied).toBe('花@场景x');
+  await page.keyboard.press('Backspace');
+  await expect(editorOf(page)).not.toContainText('x');
+  await page.keyboard.press('Backspace');
+  await expect(editorOf(page).locator('[data-node-reference]')).toHaveCount(0);
+  await expect(editorOf(page)).toHaveText('花');
+  await expect(page.locator('.react-flow__edge')).toHaveCount(2);
+  await panel.getByRole('button', { name: '生成', exact: true }).click();
+  await expect.poll(() => run.body?.prompt).toBe('花');
+  expect(run.body?.inputImages).toEqual([result]);
+});
+
+test('运行时读取上游文本节点的当前内容', async ({ page, request }) => {
+  const run = await captureRun(page);
+  await openWithUpstream(page, request, [{ ref: 'garden' }]);
+  await page.locator('.react-flow__node[data-id="garden"]').click();
+  await page.locator('.react-flow__node[data-id="garden"] textarea').fill('新花园');
+  await page.locator('.react-flow__node[data-id="image"]').click();
   await page.getByRole('button', { name: '生成', exact: true }).click();
-  await expect.poll(() => sent?.prompt).toBe('一朵花');
+  await expect.poll(() => run.body?.prompt).toBe('新花园');
+});
+
+test('中文输入法组合输入时不弹出菜单，Escape 只关闭菜单', async ({ page, request }) => {
+  const panel = await openWithUpstream(page, request, '');
+  const menu = page.getByRole('listbox', { name: '引用连接的节点' });
+  await editorOf(page).click();
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Input.imeSetComposition', { text: '@', selectionStart: 1, selectionEnd: 1 });
+  await page.waitForTimeout(100);
+  await expect(menu).toHaveCount(0);
+  await cdp.send('Input.imeSetComposition', { text: '@hua', selectionStart: 4, selectionEnd: 4 });
+  await page.waitForTimeout(100);
+  await expect(menu).toHaveCount(0);
+  await cdp.send('Input.insertText', { text: '@花' });
+  await expect(editorOf(page)).toHaveText('@花');
+  await expect(menu).toHaveCount(0);
+  await page.keyboard.type(' @');
+  await expect(menu).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+  await expect(panel).toBeVisible();
+  // 这个 @ 已被关闭；删掉后重新输入，菜单再次出现。
+  await page.keyboard.press('Backspace');
+  await page.keyboard.type('@');
+  await expect(menu).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.keyboard.type('flower@');
+  await expect(menu).toBeVisible();
 });

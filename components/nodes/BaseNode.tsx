@@ -2,7 +2,8 @@
 
 import { createContext, memo, useContext, type ReactNode } from "react";
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
-import { NodeType, type NodeData } from "@/types";
+import type { NodeData } from "@/types";
+import { nodeName } from "@/lib/canvas/prompt";
 import { EditableTitle } from "./shared/EditableTitle";
 import { QuickAddNode } from "../canvas/QuickAddNode";
 import { nodeDefinitions } from "@/lib/canvas/node-definitions";
@@ -19,7 +20,7 @@ export const BaseNode = memo(function BaseNode({ children, ...props }: NodeProps
   return (
     <SurfaceContext.Provider value={{ dragging, selected, loading: !!data.isLoading, error: !!data.error, width: 320, height: definition.height }}>
       <div style={{ width: 320 }} className={cn("relative", dragging && "[&_.node-panel]:invisible [&_.node-panel]:pointer-events-none")}>
-        <EditableTitle nodeId={id} defaultTitle={data.type === NodeType.TEXT ? "文本描述" : data.label} customTitle={data.customTitle} />
+        <EditableTitle nodeId={id} defaultTitle={nodeName({ ...data, customTitle: undefined })} customTitle={data.customTitle} />
         {definition.input && <Handle type="target" position={Position.Left} id="input" isConnectable={isConnectable} />}
         <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center">
           {!dragging && <QuickAddNode nodeId={id} />}

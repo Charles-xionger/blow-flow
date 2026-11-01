@@ -3,13 +3,13 @@
 import { memo, useCallback, useState, useEffect, useMemo } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { NodeShell } from "./NodeShell";
-import { useNodeInputs } from "@/hooks/useNodeInputs";
+import { useUpstreamNodes } from "@/hooks/useUpstreamNodes";
 import { useCanvasStore } from "@/store/useCanvasStore";
-import { Image as ImageIcon, Sparkles, Loader2, Link2 } from "lucide-react";
+import { Image as ImageIcon, Sparkles, Loader2 } from "lucide-react";
 import type { NodeData } from "@/types";
 import { toast } from "sonner";
 import { getImageModels } from "@/lib/model-registry";
-import { promptIsEmpty, promptSegments, promptText } from "@/lib/canvas/prompt";
+import { expandPrompt, promptIsEmpty, promptSegments, referenceImages } from "@/lib/canvas/prompt";
 
 import { validGenerationDimensions } from "@/lib/generation/dimensions";
 import { generationModels } from "@/lib/generation/client";
@@ -18,6 +18,7 @@ import { useGenerationTask } from "@/hooks/useGenerationTask";
 import { ImageSizeSettings } from "./shared/ImageSizeSettings";
 import { ImageModelSettings } from "./shared/ImageModelSettings";
 import { NodeConsole } from "./shared/NodeConsole";
+import { NodeConnections } from "./shared/NodeConnections";
 import { PromptEditor } from "./shared/PromptEditor";
 import { ImageToolbarActions } from "./shared/ImageToolbarActions";
 
@@ -47,38 +48,10 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
   const { start: createTask, resume: resumeTask, retrySave: retrySaveTask, detach: detachTask } = useGenerationTask(id, data);
   const taskUnavailable = (data.usesGenerationTasks && !taskModel) || (!!taskModel && (!taskModel.configured || data.generationBlocked));
 
-  // 从连接的节点读取数据（文本节点的prompt或角色节点的数据）
-  const inputs = useNodeInputs(id);
-
-  const { inputPrompt, characterData, referenceImages } = useMemo(() => {
-    let prompt = null;
-    let character = null;
-    let refImages: string[] = [];
-
-    for (const sourceData of inputs) {
-      if (!sourceData) continue;
-
-      // 文本节点提供prompt
-      if (!promptIsEmpty(sourceData.prompt)) {
-        prompt = promptText(sourceData.prompt);
-      }
-
-      // 角色节点提供角色数据和参考图
-      if (sourceData.characterData) {
-        character = sourceData.characterData;
-        refImages = character.referenceImages || [];
-      }
-    }
-
-    return {
-      inputPrompt: prompt,
-      characterData: character,
-      referenceImages: refImages,
-    };
-  }, [inputs]);
-
+  const upstream = useUpstreamNodes(id);
+  // Only the open console shows this, so closed nodes skip the expansion on every store change.
+  const canRun = useCanvasStore((state) => !!props.selected && !promptIsEmpty(expandPrompt(id, state)));
   const segments = useMemo(() => promptSegments(data.prompt), [data.prompt]);
-  const ownPrompt = promptText(data.prompt);
 
   // 加载图片模型列表
   useEffect(() => {
@@ -101,7 +74,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           imageUrl: data.imageSrc,
-          prompt: ownPrompt,
+          prompt: expandPrompt(id, useCanvasStore.getState()),
         }),
       });
 
@@ -152,20 +125,18 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
   };
 
   const handleGenerate = useCallback(async () => {
-    let promptToUse = inputPrompt || ownPrompt;
+    // Upstream content is read now, so a run always uses its current value.
+    const canvas = useCanvasStore.getState();
+    const promptToUse = expandPrompt(id, canvas);
     if (promptIsEmpty(promptToUse)) return;
-
-    // 如果有角色数据，注入角色描述到提示词
-    if (characterData) {
-      promptToUse = `${characterData.description}. ${promptToUse}`;
-    }
+    const references = referenceImages(id, canvas);
 
     if (data.usesGenerationTasks && !taskModel && !data.pendingGeneration) {
       updateNodeData(id, { error: "模型目录暂时不可用" });
       return;
     }
     if (taskModel || data.pendingGeneration) {
-      if (referenceImages.length || data.inputImages?.length) {
+      if (references.length || data.inputImages?.length) {
         updateNodeData(id, { error: "此模型不支持参考图" });
         return;
       }
@@ -205,7 +176,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
           resolution: data.resolution || "1k",
           count: data.count || 1,
           promptOptimize: data.promptOptimize || false,
-          inputImages: referenceImages.length > 0 ? referenceImages : undefined,
+          inputImages: references.length > 0 ? references : undefined,
         }),
       });
 
@@ -228,10 +199,6 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
     }
   }, [
     id,
-    inputPrompt,
-    ownPrompt,
-    characterData,
-    referenceImages,
     taskModel,
     detachTask,
     data.usesGenerationTasks,
@@ -256,18 +223,12 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
     <NodeShell {...props} stageTestId="image-preview"
       toolbar={<ImageToolbarActions src={hasResult ? data.imageSrc : undefined} alt="Generated" onSaveAsCharacter={handleSaveAsCharacter} />}
       console={
-        <NodeConsole data={data} onRun={handleGenerate} runDisabled={taskUnavailable || (!inputPrompt && promptIsEmpty(data.prompt))}
+        <NodeConsole data={data} onRun={handleGenerate} runDisabled={taskUnavailable || !canRun}
           notice={taskModel && !taskModel.configured ? "请管理员配置平台连接" : undefined}
           onResume={() => void resumeTask()} onRetrySave={() => void retrySaveTask()}
-          connections={(characterData || inputPrompt) && (
-            <div className="flex items-center gap-2 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-blue-400">
-              <Link2 size={16} className="shrink-0" />
-              <span className="flex-1 truncate">{inputPrompt ? "使用连接节点的内容" : `使用角色：${characterData?.name}`}</span>
-              {inputPrompt && characterData && <span className="truncate text-xs">🎭 {characterData.name}</span>}
-            </div>
-          )}
+          connections={<NodeConnections upstream={upstream} />}
           editor={
-            <PromptEditor value={segments} placeholder="描述你想要生成的图片..."
+            <PromptEditor value={segments} upstream={upstream} placeholder="描述你想要生成的图片..."
               onChange={prompt => updateNodeData(id, { prompt })} />
           }
           config={<>
