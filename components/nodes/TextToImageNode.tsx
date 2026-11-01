@@ -2,15 +2,14 @@
 
 import { memo, useCallback, useState, useEffect, useMemo } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
-import { BaseNode, NodeSurface } from "./BaseNode";
+import { NodeShell } from "./NodeShell";
 import { useNodeInputs } from "@/hooks/useNodeInputs";
 import { useCanvasStore } from "@/store/useCanvasStore";
-import { Image as ImageIcon, Sparkles, Wand2, Loader2, Link2 } from "lucide-react";
+import { Image as ImageIcon, Sparkles, Loader2, Link2 } from "lucide-react";
 import type { NodeData } from "@/types";
 import { toast } from "sonner";
 import { getImageModels } from "@/lib/model-registry";
 import { Textarea } from "@/components/ui/textarea";
-import { ImageWithActions } from "@/components/ui/image-with-actions";
 
 import { validGenerationDimensions } from "@/lib/generation/dimensions";
 import { generationModels } from "@/lib/generation/client";
@@ -18,8 +17,8 @@ import type { PublicModel } from "@/lib/generation/types";
 import { useGenerationTask } from "@/hooks/useGenerationTask";
 import { ImageSizeSettings } from "./shared/ImageSizeSettings";
 import { ImageModelSettings } from "./shared/ImageModelSettings";
-import { ImageGenerationPanel } from "./shared/ImageGenerationPanel";
-import imageStyles from "./shared/ImageGeneration.module.css";
+import { NodeConsole } from "./shared/NodeConsole";
+import { ImageToolbarActions } from "./shared/ImageToolbarActions";
 
 const aspectRatios = [
   { value: "1:1", label: "1:1 方形" },
@@ -36,9 +35,8 @@ const resolutions = [
 ];
 
 const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
-  const { id, data, selected } = props;
+  const { id, data } = props;
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
-  const singleSelected = useCanvasStore((state) => state.selectedNodeIds.length === 1);
   const [imageModels, setImageModels] = useState<
     Array<{ value: string; label: string }>
   >([]);
@@ -47,11 +45,6 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
   const taskModel = taskModels.find(m => m.id === data.model);
   const { start: createTask, resume: resumeTask, retrySave: retrySaveTask, detach: detachTask } = useGenerationTask(id, data);
   const taskUnavailable = (data.usesGenerationTasks && !taskModel) || (!!taskModel && (!taskModel.configured || data.generationBlocked));
-
-  // 获取当前节点位置
-
-  // 只有在单选状态下才显示控制面板
-  const shouldShowPanel = selected && singleSelected && !props.dragging;
 
   // 从连接的节点读取数据（文本节点的prompt或角色节点的数据）
   const inputs = useNodeInputs(id);
@@ -270,57 +263,22 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
   const generationHeight = data.generationHeight ?? taskModel?.capabilities.dimensions.defaultHeight;
 
   return (
-    <BaseNode {...props}>
-
-      {/* 角色信息提示 */}
-      {characterData && (
-        <div className="absolute -top-6 left-0 flex items-center gap-1 text-xs text-purple-400 bg-purple-900/30 px-2 py-0.5 rounded">
-          <span>🎭</span>
-          <span>{characterData.name}</span>
-        </div>
-      )}
-
-      {/* 节点显示区域 */}
-      <NodeSurface testId="image-preview">
-        {hasResult ? (
-          <div className="relative w-full h-full">
-            <ImageWithActions
-              src={data.imageSrc}
-              alt="Generated"
-              className="w-full h-full object-contain"
-              onSaveAsCharacter={handleSaveAsCharacter}
-            />
-          </div>
-        ) : (
-          <div role="img" aria-label="尚无生成图片" className="w-full h-full flex items-center justify-center text-zinc-500">
-            <div className="w-16 h-16 rounded-2xl flex items-center justify-center bg-zinc-800/50 text-zinc-500">
-              <ImageIcon size={28} className="opacity-60" aria-hidden />
+    <NodeShell {...props} stageTestId="image-preview"
+      toolbar={<ImageToolbarActions src={hasResult ? data.imageSrc : undefined} alt="Generated" onSaveAsCharacter={handleSaveAsCharacter} />}
+      console={
+        <NodeConsole data={data} onRun={handleGenerate} runDisabled={taskUnavailable || (!inputPrompt && !localPrompt)}
+          notice={taskModel && !taskModel.configured ? "请管理员配置平台连接" : undefined}
+          onResume={() => void resumeTask()} onRetrySave={() => void retrySaveTask()}
+          connections={(characterData || inputPrompt) && (
+            <div className="flex items-center gap-2 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-blue-400">
+              <Link2 size={16} className="shrink-0" />
+              <span className="flex-1 truncate">{inputPrompt ? "使用连接节点的内容" : `使用角色：${characterData?.name}`}</span>
+              {inputPrompt && characterData && <span className="truncate text-xs">🎭 {characterData.name}</span>}
             </div>
-          </div>
-        )}
-
-        {data.isLoading && (
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center z-20">
-            <Loader2 size={32} className="text-blue-500 animate-spin mb-3" />
-            <span className="text-white/80 text-sm font-medium">{data.generationTaskId ? data.generationStatus : "生成中..."}</span>
-          </div>
-        )}
-      </NodeSurface>
-
-      {/* 控制面板 */}
-      {shouldShowPanel && (
-        <ImageGenerationPanel>
-            {/* 连接提示卡片 */}
-            {inputPrompt && (
-              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 text-sm">
-                <Link2 size={16} className="shrink-0" />
-                <span className="flex-1 truncate">使用连接节点的内容</span>
-              </div>
-            )}
-
-            {/* Prompt 输入框 */}
+          )}
+          editor={
             <Textarea
-              className={`${imageStyles.prompt} nodrag`}
+              className="min-h-14 max-h-40 resize-none rounded-none border-0 bg-transparent p-0 px-1 text-sm text-inherit shadow-none focus-visible:ring-0 dark:bg-transparent"
               placeholder="描述你想要生成的图片..."
               value={localPrompt}
               onChange={(e) => {
@@ -328,89 +286,64 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
                 updateNodeData(id, { prompt: e.target.value });
               }}
               onBlur={() => updateNodeData(id, { prompt: localPrompt })}
-              onMouseDown={(e) => e.stopPropagation()}
-              onWheel={(e) => e.stopPropagation()}
             />
-
-            <div className={imageStyles.foot}>
-              {taskModel && <ImageSizeSettings width={generationWidth!} height={generationHeight!}
-                limits={taskModel.capabilities.dimensions} preference={data.generationSizePreset}
-                disabled={data.isLoading || !!data.pendingGeneration || data.generationBlocked}
-                onChange={(size, preset) => updateNodeData(id, { generationWidth: size.width, generationHeight: size.height, generationSizePreset: preset })} />}
-              {!taskModel && <ImageModelSettings aspectRatio={data.aspectRatio || '1:1'} resolution={data.resolution || '1k'}
-                ratios={aspectRatios} resolutions={resolutions} disabled={data.isLoading}
-                onChange={settings => updateNodeData(id, settings)} />}
-              <select
-                aria-label="生图模型"
-                value={data.model || imageModels[0]?.value || ""}
-                disabled={data.isLoading || !!data.pendingGeneration || data.generationBlocked}
-                onChange={(e) => updateNodeData(id, { model: e.target.value, usesGenerationTasks: taskModels.some(m => m.id === e.target.value) })}
-                className={imageStyles.model}
-              >
-                {taskModels.map(m => <option key={m.id} value={m.id}>{m.name}{m.configured ? "" : "（未配置）"}</option>)}
-                {imageModels.map((m) => (
-                  <option key={m.value} value={m.value}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-
-              {!taskModel && <>
+          }
+          config={<>
+            <select
+              aria-label="生图模型"
+              value={data.model || imageModels[0]?.value || ""}
+              disabled={data.isLoading || !!data.pendingGeneration || data.generationBlocked}
+              onChange={(e) => updateNodeData(id, { model: e.target.value, usesGenerationTasks: taskModels.some(m => m.id === e.target.value) })}
+              className="h-8 w-28 min-w-0 cursor-pointer truncate rounded-lg bg-transparent px-2 text-xs hover:bg-white/10 [&>option]:bg-[#232323]"
+            >
+              {taskModels.map(m => <option key={m.id} value={m.id}>{m.name}{m.configured ? "" : "（未配置）"}</option>)}
+              {imageModels.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+            {taskModel && <ImageSizeSettings width={generationWidth!} height={generationHeight!}
+              limits={taskModel.capabilities.dimensions} preference={data.generationSizePreset}
+              disabled={data.isLoading || !!data.pendingGeneration || data.generationBlocked}
+              onChange={(size, preset) => updateNodeData(id, { generationWidth: size.width, generationHeight: size.height, generationSizePreset: preset })} />}
+            {!taskModel && <ImageModelSettings aspectRatio={data.aspectRatio || '1:1'} resolution={data.resolution || '1k'}
+              ratios={aspectRatios} resolutions={resolutions} disabled={data.isLoading}
+              onChange={settings => updateNodeData(id, settings)} />}
+            {!taskModel && (
               <button
-                className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-all border ${
-                  data.promptOptimize
-                    ? "text-purple-400 bg-purple-500/20 border-purple-500/30"
-                    : "text-zinc-400 hover:text-white border-zinc-700 hover:border-zinc-600 hover:bg-zinc-700"
+                type="button"
+                aria-label="提示词优化"
+                aria-pressed={!!data.promptOptimize}
+                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors ${
+                  data.promptOptimize ? "bg-purple-500/20 text-purple-400" : "text-zinc-400 hover:bg-white/10 hover:text-white"
                 }`}
-                onClick={() =>
-                  updateNodeData(id, { promptOptimize: !data.promptOptimize })
-                }
+                onClick={() => updateNodeData(id, { promptOptimize: !data.promptOptimize })}
               >
-                <Sparkles
-                  size={15}
-                  fill={data.promptOptimize ? "currentColor" : "none"}
-                />
+                <Sparkles size={15} fill={data.promptOptimize ? "currentColor" : "none"} />
               </button>
-
-              </>}
-
-              <div className="flex-1" />
-
-              <button
-                onClick={handleGenerate}
-                disabled={data.isLoading || taskUnavailable || (!inputPrompt && !localPrompt)}
-                className={`shrink-0 h-8 px-4 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 whitespace-nowrap transition-all active:scale-[0.98] ${
-                  data.isLoading || taskUnavailable || (!inputPrompt && !localPrompt)
-                    ? "bg-zinc-800 text-zinc-500 cursor-not-allowed"
-                    : "bg-purple-600 hover:bg-purple-500 text-white"
-                }`}
-              >
-                {data.isLoading ? (
-                  <Loader2 className="animate-spin" size={15} />
-                ) : (
-                  <Wand2 size={15} />
-                )}
-                <span>{data.isLoading ? "生成中" : data.pendingGeneration ? "恢复原请求" : data.generationTaskId ? "重新生成" : "生成"}</span>
-              </button>
-            </div>
-
-            {taskModel && !taskModel.configured && <div className="text-[11px] text-zinc-500">请管理员配置平台连接</div>}
-            {data.generationBlocked && data.generationTaskId && <button type="button"
-              onClick={() => void resumeTask()} className="text-sm text-blue-300">继续查询原任务</button>}
-            {(data.generationCanRetrySave || data.generationSaving) && data.generationTaskId && <button type="button"
-              disabled={!data.generationCanRetrySave || data.generationSaving}
-              onClick={() => void retrySaveTask()} className="text-sm text-blue-300 disabled:opacity-50">
-              {data.generationSaving ? "保存中…" : "重试保存（不重新生成）"}
-            </button>}
-            {data.generationStatus && <div role="status" className="text-xs text-blue-300">{data.generationStatus}</div>}
-            {data.error && (
-              <div className="text-xs text-red-400 bg-red-500/10 px-3 py-2 rounded-lg border border-red-500/20">
-                {data.error}
-              </div>
             )}
-        </ImageGenerationPanel>
+          </>}
+        />
+      }
+    >
+      {hasResult ? (
+        <img src={data.imageSrc} alt="Generated" draggable={false} className="w-full h-full object-contain" />
+      ) : (
+        <div role="img" aria-label="尚无生成图片" className="w-full h-full flex items-center justify-center text-zinc-500">
+          <div className="w-16 h-16 rounded-2xl flex items-center justify-center bg-zinc-800/50 text-zinc-500">
+            <ImageIcon size={28} className="opacity-60" aria-hidden />
+          </div>
+        </div>
       )}
-    </BaseNode>
+
+      {data.isLoading && (
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center z-20">
+          <Loader2 size={32} className="text-blue-500 animate-spin mb-3" />
+          <span className="text-white/80 text-sm font-medium">{data.generationTaskId ? data.generationStatus : "生成中..."}</span>
+        </div>
+      )}
+    </NodeShell>
   );
 };
 
