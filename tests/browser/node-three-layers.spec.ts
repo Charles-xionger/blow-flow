@@ -436,3 +436,59 @@ test('拖线连接文本节点后，编辑器里出现它的节点引用，手�
   await panel.getByRole('button', { name: '生成', exact: true }).click();
   await expect.poll(() => run.body?.prompt).toBe('一朵花花园');
 });
+
+const swatch = (fill: string) => `data:image/svg+xml;base64,${Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="${fill}"/></svg>`).toString('base64')}`;
+
+test('拖动缩略图调整顺序：编号、发送内容和素材顺序一起更新，重新打开后不变，不影响其他节点和画布', async ({ page, request }) => {
+  const run = await captureRun(page);
+  const [red, blue] = [swatch('red'), swatch('blue')];
+  const id = crypto.randomUUID();
+  const source = (key: string, y: number, imageSrc: string) => ({ id: key, type: 'originalImage', position: { x: 30, y }, data: { type: 'originalImage', label: '原图', customTitle: key, imageSrc } });
+  const link = (from: string, to: string) => ({ id: `${from}-${to}`, source: from, target: to, sourceHandle: 'output', targetHandle: 'input' });
+  expect((await request.put(`/api/workflow/${id}`, { data: { id, requestId: crypto.randomUUID(), baseVersion: 0, snapshot: { name: '排序', nodes: [
+    { id: 'image', type: 'textToImage', position: { x: 520, y: 200 }, data: { type: 'textToImage', label: '文生图', model: 'BananaPro', prompt: [{ ref: 'red' }, { text: '和' }, { ref: 'blue' }] } },
+    { id: 'other', type: 'textToImage', position: { x: 1000, y: 200 }, data: { type: 'textToImage', label: '文生图', model: 'BananaPro', prompt: [{ ref: 'red' }, { text: '和' }, { ref: 'blue' }] } },
+    source('red', 30, red), source('blue', 330, blue),
+  ], edges: [link('red', 'other'), link('red', 'image'), link('blue', 'other'), link('blue', 'image')], viewport: { x: 0, y: 0, zoom: 0.75 } } } })).ok()).toBeTruthy();
+  await page.goto(`/?project=${id}`);
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
+  const node = page.locator('.react-flow__node[data-id="image"]');
+  await node.click();
+  const panel = page.getByRole('region', { name: '节点控制台' });
+  const layer = panel.getByRole('list', { name: '连接的上游节点' });
+  await expect(editorOf(page).locator('[data-node-reference]')).toHaveText(['图片1', '图片2']);
+  const position = await node.boundingBox();
+  const viewport = await page.locator('.react-flow__viewport').getAttribute('style');
+  const first = (await layer.getByTitle('图片1 · red').boundingBox())!;
+  const second = (await layer.getByTitle('图片2 · blue').boundingBox())!;
+  // 右键不是拖动。
+  await page.mouse.move(first.x + first.width / 2, first.y + first.height / 2);
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(second.x + second.width / 2, second.y + second.height / 2, { steps: 6 });
+  await page.mouse.up({ button: 'right' });
+  await page.mouse.click(5, 700);
+  await node.click();
+  await expect(layer.getByTitle('图片1 · red')).toBeVisible();
+  await page.mouse.move(first.x + first.width / 2, first.y + first.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(second.x + second.width / 2, second.y + second.height / 2, { steps: 6 });
+  await page.mouse.up();
+  await expect(layer.getByTitle('图片1 · blue')).toBeVisible();
+  await expect(layer.getByTitle('图片2 · red')).toBeVisible();
+  expect(await node.boundingBox()).toEqual(position);
+  expect(await page.locator('.react-flow__viewport').getAttribute('style')).toBe(viewport);
+  const tags = editorOf(page).locator('[data-node-reference]');
+  await expect(tags).toHaveText(['图片2', '图片1']);
+  await expect(tags.nth(0)).toHaveAttribute('title', '图片2 · red');
+  await panel.getByRole('button', { name: '生成', exact: true }).click();
+  await expect.poll(() => run.body?.prompt).toBe('图片2和图片1');
+  expect(run.body?.inputImages).toEqual([blue, red]);
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
+  await page.reload();
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
+  await node.click();
+  await expect(editorOf(page).locator('[data-node-reference]')).toHaveText(['图片2', '图片1']);
+  await page.mouse.click(5, 700);
+  await page.locator('.react-flow__node[data-id="other"]').click();
+  await expect(editorOf(page).locator('[data-node-reference]')).toHaveText(['图片1', '图片2']);
+});

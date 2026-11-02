@@ -57,6 +57,7 @@ interface CanvasState {
   onNodesChange: OnNodesChange;
   onEdgesChange: OnEdgesChange;
   onConnect: OnConnect;
+  reorderUpstream: (nodeId: string, sourceIds: string[]) => void;
 
   // 节点操作
   addNode: (type: NodeType, position?: { x: number; y: number }) => string;
@@ -302,6 +303,13 @@ export const useCanvasStore = create<CanvasState>()(
           if (!isValidCanvasConnection(connection, get().nodes, get().edges)) return;
           const edges = addEdge(connection, get().edges);
           set({ edges, nodes: syncReferences(get().nodes, get().edges, edges) });
+        },
+
+        // 只重排目标节点的连入连线，它们在数组里占的位置不变，其他节点的顺序不受影响
+        reorderUpstream: (nodeId, sourceIds) => {
+          const ordered = get().edges.filter((edge) => edge.target === nodeId)
+            .sort((a, b) => sourceIds.indexOf(a.source) - sourceIds.indexOf(b.source));
+          set({ edges: get().edges.map((edge) => edge.target === nodeId ? ordered.shift()! : edge) });
         },
 
         // 添加节点

@@ -26,7 +26,7 @@ function load(relative) {
 }
 
 const { useCanvasStore: store } = load('store/useCanvasStore.ts');
-const { expandPrompt } = load('lib/canvas/prompt.ts');
+const { expandPrompt, referenceImages, upstreamNodes } = load('lib/canvas/prompt.ts');
 
 const node = (id, type, data = {}) => ({ id, type, position: { x: 0, y: 0 }, data: { type, label: id, ...data } });
 const edge = (source, target) => ({ id: `${source}-${target}`, source, target, sourceHandle: 'output', targetHandle: 'input' });
@@ -194,4 +194,40 @@ test('selecting or dragging keeps node identity, so unrelated updates cost nothi
   store.getState().onEdgesChange([{ type: 'select', id: 'scene-image', selected: true }]);
   store.getState().onNodesChange([{ type: 'position', id: 'scene', position: { x: 5, y: 5 } }]);
   assert.equal(store.getState().nodes[0], before);
+});
+
+const image = (id, imageSrc) => node(id, 'originalImage', { imageSrc });
+
+test('reordering upstream nodes renumbers references and reorders the material sent, together', () => {
+  store.setState({
+    nodes: [node('target', 'textToImage', { prompt: [{ ref: 'a' }, { text: '和' }, { ref: 'b' }] }), image('a', 'a.png'), image('b', 'b.png')],
+    edges: [edge('a', 'target'), edge('b', 'target')],
+  });
+  assert.equal(expandPrompt('target', store.getState()), '图片1和图片2');
+  store.getState().reorderUpstream('target', ['b', 'a']);
+  assert.deepEqual(upstreamNodes('target', store.getState()).map(({ id, label }) => [id, label]), [['b', '图片1'], ['a', '图片2']]);
+  assert.equal(expandPrompt('target', store.getState()), '图片2和图片1');
+  assert.deepEqual(referenceImages('target', store.getState()), ['b.png', 'a.png']);
+});
+
+test('reordering one node leaves every other node and the edges themselves untouched', () => {
+  const edges = [edge('a', 'other'), edge('a', 'target'), edge('b', 'other'), edge('b', 'target'), edge('t', 'target')];
+  store.setState({ nodes: [node('target', 'textToImage'), node('other', 'textToImage'), image('a', 'a.png'), image('b', 'b.png'), node('t', 'text')], edges });
+  store.getState().reorderUpstream('target', ['t', 'b', 'a']);
+  assert.deepEqual(upstreamNodes('other', store.getState()).map(({ id }) => id), ['a', 'b']);
+  assert.deepEqual(upstreamNodes('target', store.getState()).map(({ id }) => id), ['t', 'b', 'a']);
+  assert.deepEqual(store.getState().edges.map(({ id }) => id).sort(), edges.map(({ id }) => id).sort());
+});
+
+test('text nodes can sit anywhere in the order without taking an image number', () => {
+  store.setState({ nodes: [node('target', 'textToImage'), image('a', 'a.png'), node('t', 'text', { customTitle: '场景' }), image('b', 'b.png')], edges: [edge('a', 'target'), edge('t', 'target'), edge('b', 'target')] });
+  store.getState().reorderUpstream('target', ['t', 'b', 'a']);
+  assert.deepEqual(upstreamNodes('target', store.getState()).map(({ id, label }) => [id, label]), [['t', '场景'], ['b', '图片1'], ['a', '图片2']]);
+});
+
+test('reordering does not touch the prompt, so references stay references', () => {
+  const prompt = [{ ref: 'a' }, { ref: 'b' }];
+  store.setState({ nodes: [node('target', 'textToImage', { prompt }), image('a', 'a.png'), image('b', 'b.png')], edges: [edge('a', 'target'), edge('b', 'target')] });
+  store.getState().reorderUpstream('target', ['b', 'a']);
+  assert.deepEqual(promptOf('target'), prompt);
 });
