@@ -356,3 +356,83 @@ test('中文输入法组合输入时不弹出菜单，Escape 只关闭菜单', a
   await page.keyboard.type('flower@');
   await expect(menu).toBeVisible();
 });
+
+test('从连接层的缩略图断开连接后，节点引用变成普通文本，撤销也不恢复；重新打开后不变', async ({ page, request }) => {
+  const run = await captureRun(page);
+  const panel = await openWithUpstream(page, request, [{ text: '在' }, { ref: 'garden' }, { text: '画' }, { ref: 'hero' }]);
+  const layer = panel.getByRole('list', { name: '连接的上游节点' });
+  // 断开前先留下一步编辑历史，撤销才有东西可以恢复。
+  await editorOf(page).click();
+  await page.keyboard.type('x');
+  await expect(editorOf(page)).toContainText('x');
+  await page.keyboard.press('Backspace');
+  await expect(editorOf(page)).not.toContainText('x');
+  await layer.getByTitle('场景').hover();
+  await layer.getByRole('button', { name: '断开 场景' }).click();
+  await expect(layer.getByRole('listitem')).toHaveCount(1);
+  await expect(page.locator('.react-flow__edge')).toHaveCount(1);
+  await expect(editorOf(page).locator('[data-node-reference]')).toHaveText(['图片1']);
+  await expect(editorOf(page)).toHaveText('在@场景画图片1');
+  await editorOf(page).click();
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(editorOf(page)).toHaveText('在@场景画图片1');
+  await panel.getByRole('button', { name: '生成', exact: true }).click();
+  await expect.poll(() => run.body?.prompt).toBe('在@场景画图片1');
+  await expect.poll(() => savedPrompt(request, page)).toEqual([{ text: '在@场景画' }, { ref: 'hero' }]);
+  await page.reload();
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
+  await page.locator('.react-flow__node[data-id="image"]').click();
+  await expect(editorOf(page)).toHaveText('在@场景画图片1');
+});
+
+test('未选中的目标节点在上游节点被删除时同样转换，选中后看到普通文本', async ({ page, request }) => {
+  await openWithUpstream(page, request, [{ text: '在' }, { ref: 'garden' }]);
+  await page.mouse.click(950, 650);
+  await expect(page.locator('.tiptap')).toHaveCount(0);
+  await page.locator('.react-flow__node[data-id="garden"]').click();
+  await page.keyboard.press('Backspace');
+  await expect(page.locator('.react-flow__node[data-id="garden"]')).toHaveCount(0);
+  await expect(page.locator('.react-flow__edge')).toHaveCount(1);
+  await page.locator('.react-flow__node[data-id="image"]').click();
+  await expect(editorOf(page)).toHaveText('在@场景');
+  await expect(editorOf(page).locator('[data-node-reference]')).toHaveCount(0);
+});
+
+test('右键复制节点时不复制连线，副本里的节点引用是普通文本', async ({ page, request }) => {
+  await openWithUpstream(page, request, [{ text: '在' }, { ref: 'garden' }]);
+  await page.mouse.click(950, 650);
+  await page.locator('.react-flow__node[data-id="image"]').click({ button: 'right' });
+  await page.getByRole('button', { name: /复制/ }).click();
+  const nodes = page.locator('.react-flow__node[data-id]');
+  await expect(nodes).toHaveCount(4);
+  await expect(page.locator('.react-flow__edge')).toHaveCount(2);
+  const id = new URL(page.url()).searchParams.get('project');
+  await expect.poll(async () => {
+    const { data } = await (await request.get(`/api/workflow/${id}`)).json();
+    return data.nodes.filter((node: { data: { type: string } }) => node.data.type === 'textToImage').map((node: { data: { prompt: unknown } }) => node.data.prompt);
+  }).toEqual([[{ text: '在' }, { ref: 'garden' }], [{ text: '在@场景' }]]);
+});
+
+test('拖线连接文本节点后，编辑器里出现它的节点引用，手写内容和文本都发送', async ({ page, request }) => {
+  const run = await captureRun(page);
+  await openCanvas(page, request, { prompt: '一朵花' }, '花园');
+  // openCanvas 的文本节点已连接；先断开，再拖线重新连接。
+  const node = page.locator('.react-flow__node[data-id="image"]');
+  await node.click();
+  const panel = page.getByRole('region', { name: '节点控制台' });
+  const layer = panel.getByRole('list', { name: '连接的上游节点' });
+  await layer.getByRole('listitem').hover();
+  await layer.getByRole('button', { name: /^断开/ }).click();
+  await expect(page.locator('.react-flow__edge')).toHaveCount(0);
+  const from = (await page.locator('.react-flow__node[data-id="text"] [data-handleid="output"]').boundingBox())!;
+  const to = (await node.locator('[data-handleid="input"]').boundingBox())!;
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 8 });
+  await page.mouse.up();
+  await expect(page.locator('.react-flow__edge')).toHaveCount(1);
+  await node.click();
+  await expect(editorOf(page).locator('[data-node-reference]')).toHaveCount(1);
+  await panel.getByRole('button', { name: '生成', exact: true }).click();
+  await expect.poll(() => run.body?.prompt).toBe('一朵花花园');
+});

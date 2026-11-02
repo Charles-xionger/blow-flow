@@ -226,7 +226,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
         <NodeConsole data={data} onRun={handleGenerate} runDisabled={taskUnavailable || !canRun}
           notice={taskModel && !taskModel.configured ? "请管理员配置平台连接" : undefined}
           onResume={() => void resumeTask()} onRetrySave={() => void retrySaveTask()}
-          connections={<NodeConnections upstream={upstream} />}
+          connections={<NodeConnections nodeId={id} upstream={upstream} />}
           editor={
             <PromptEditor value={segments} upstream={upstream} placeholder="描述你想要生成的图片..."
               onChange={prompt => updateNodeData(id, { prompt })} />

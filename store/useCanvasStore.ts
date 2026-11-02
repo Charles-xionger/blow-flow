@@ -2,6 +2,7 @@ import { createCanvasAutosave, type SaveStatus } from "@/lib/canvas/autosave";
 import { CanvasStorageError } from "@/lib/canvas/storage-error";
 import { clearedGenerationAssociation, deleteNodeGeneration, generationAssociation } from "@/lib/generation/recovery";
 import { isValidCanvasConnection } from "@/lib/canvas/connections";
+import { detachReferences, remapPromptReferences, syncReferences } from "@/lib/canvas/prompt";
 import { remapReferenceIds } from '@/lib/generation/video';
 import { toast } from "sonner";
 import { create } from "zustand";
@@ -112,6 +113,9 @@ function cancelDeletedNodes(nodes: CanvasNode[], canvasId: string | null) {
     catch { toast.error("无法保存取消请求，请恢复本地存储后重试删除"); throw new Error("无法保存取消请求"); }
   }
 }
+
+const edgesWithoutNodes = (edges: Edge[], nodeIds: ReadonlySet<string>) =>
+  edges.filter((edge) => !nodeIds.has(edge.source) && !nodeIds.has(edge.target));
 
 function createCanvasNode(type: NodeType, position: { x: number; y: number }, data: Partial<NodeData> = {}): CanvasNode {
   const nodeTypeMap: Record<
@@ -255,7 +259,9 @@ export const useCanvasStore = create<CanvasState>()(
           set({
             nodes: nodes.map(node => ({ ...node, id: ids.get(node.id)!,
               parentId: node.parentId ? ids.get(node.parentId) : undefined,
-              data: { ...withoutTaskAssociation(node.data), ...remapReferenceIds(node.data.videoReferenceOrder, node.data.videoReferenceAudio, ids) } })),
+              data: { ...withoutTaskAssociation(node.data), // 文件里缺失的上游节点没有连线可留，按断线处理
+                prompt: remapPromptReferences(detachReferences(node.data.prompt, nodes, ref => !ids.has(ref)), ids),
+                ...remapReferenceIds(node.data.videoReferenceOrder, node.data.videoReferenceAudio, ids) } })),
             edges: edges.filter(edge => ids.has(edge.source) && ids.has(edge.target))
               .map(edge => ({ ...edge, id: nanoid(), source: ids.get(edge.source)!, target: ids.get(edge.target)! })),
             selectedNodeIds: [],
@@ -266,9 +272,11 @@ export const useCanvasStore = create<CanvasState>()(
 
         onNodesChange: (changes: NodeChange[]) => {
           cancelDeletedNodes(get().nodes.filter(node => changes.some(change => change.type === "remove" && change.id === node.id)), get().currentWorkflowId);
+          const removedIds = new Set(changes.flatMap((change) => change.type === "remove" ? [change.id] : []));
+          const edges = removedIds.size ? edgesWithoutNodes(get().edges, removedIds) : get().edges;
           const updatedNodes = applyNodeChanges(
             changes,
-            get().nodes,
+            syncReferences(get().nodes, get().edges, edges),
           ) as CanvasNode[];
 
           // 更新选中的节点ID列表
@@ -278,6 +286,7 @@ export const useCanvasStore = create<CanvasState>()(
 
           set({
             nodes: updatedNodes,
+            edges,
             selectedNodeIds: selectedIds.length === get().selectedNodeIds.length &&
               selectedIds.every((id, i) => id === get().selectedNodeIds[i])
               ? get().selectedNodeIds : selectedIds,
@@ -285,16 +294,14 @@ export const useCanvasStore = create<CanvasState>()(
         },
 
         onEdgesChange: (changes: EdgeChange[]) => {
-          set({
-            edges: applyEdgeChanges(changes, get().edges),
-          });
+          const edges = applyEdgeChanges(changes, get().edges);
+          set({ edges, nodes: syncReferences(get().nodes, get().edges, edges) });
         },
 
         onConnect: (connection: Connection) => {
           if (!isValidCanvasConnection(connection, get().nodes, get().edges)) return;
-          set({
-            edges: addEdge(connection, get().edges),
-          });
+          const edges = addEdge(connection, get().edges);
+          set({ edges, nodes: syncReferences(get().nodes, get().edges, edges) });
         },
 
         // 添加节点
@@ -330,18 +337,18 @@ export const useCanvasStore = create<CanvasState>()(
           }));
           const allNodes = [...get().nodes, ...newNodes];
           const validEdges = newEdges.filter((edge) => isValidCanvasConnection(edge, allNodes, get().edges));
-          set({ nodes: allNodes, edges: [...get().edges, ...validEdges] });
+          const edges = [...get().edges, ...validEdges];
+          set({ nodes: syncReferences(allNodes, get().edges, edges), edges });
           return newNodes.map((node) => node.id);
         },
 
         // 删除节点
         deleteNode: (nodeId: string) => {
           cancelDeletedNodes(get().nodes.filter(node => node.id === nodeId), get().currentWorkflowId);
+          const edges = edgesWithoutNodes(get().edges, new Set([nodeId]));
           set({
-            nodes: get().nodes.filter((node) => node.id !== nodeId),
-            edges: get().edges.filter(
-              (edge) => edge.source !== nodeId && edge.target !== nodeId,
-            ),
+            nodes: syncReferences(get().nodes, get().edges, edges).filter((node) => node.id !== nodeId),
+            edges,
           });
         },
 
@@ -370,6 +377,8 @@ export const useCanvasStore = create<CanvasState>()(
             },
             data: {
               ...withoutTaskAssociation(node.data),
+              // 副本没有连线，不能再指向上游节点
+              prompt: detachReferences(node.data.prompt, get().nodes),
               // 清除输出数据
               imageSrc: undefined,
               videoSrc: undefined,
@@ -391,13 +400,10 @@ export const useCanvasStore = create<CanvasState>()(
           if (selectedIds.length === 0) return;
           cancelDeletedNodes(get().nodes.filter(node => selectedIds.includes(node.id)), get().currentWorkflowId);
 
+          const edges = edgesWithoutNodes(get().edges, new Set(selectedIds));
           set({
-            nodes: get().nodes.filter((node) => !selectedIds.includes(node.id)),
-            edges: get().edges.filter(
-              (edge) =>
-                !selectedIds.includes(edge.source) &&
-                !selectedIds.includes(edge.target),
-            ),
+            nodes: syncReferences(get().nodes, get().edges, edges).filter((node) => !selectedIds.includes(node.id)),
+            edges,
             selectedNodeIds: [],
           });
         },

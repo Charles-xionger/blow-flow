@@ -12,3 +12,7 @@
 - [ ] 任务恢复、重试保存、错误提示不退化
 - [ ] 节点工具栏可以预览和下载视频；没有结果时这些操作不可用
 - [ ] H3 等现有视频相关浏览器测试更新后通过
+
+## Comments
+
+- 票 04 留下的迁移事项：把 `textToVideo` 加入 `lib/canvas/prompt.ts` 的 `referencingNodeTypes`，它才会在连接文本节点时自动插入节点引用；同时更新 `tests/canvas-references.test.cjs` 里以 `textToVideo` 为例的“旧外壳不插入引用”测试。

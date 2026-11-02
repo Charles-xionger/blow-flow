@@ -28,6 +28,8 @@ export type UpstreamNode = { id: string; kind: 'text' | 'image'; label: string; 
 
 // Kept as literals so this module has no runtime dependency on the app's type modules.
 const textSources: ReadonlySet<string> = new Set(['text', 'creativeDesc', 'storyboard']);
+// Node types whose console edits references. Old text boxes would show and send the converted text.
+const referencingNodeTypes: ReadonlySet<string> = new Set(['textToImage']);
 
 /** The name shown as the node's title. */
 export function nodeName(data: Pick<NodeData, 'type' | 'label' | 'customTitle'>): string {
@@ -75,4 +77,47 @@ export function expandPrompt(nodeId: string, graph: PromptGraph): string {
     }).join('');
   };
   return expand(nodeId, []);
+}
+
+/** Turns references into `@名称` text. Returns the same prompt when none of them is detached. */
+export function detachReferences(prompt: Prompt | undefined, nodes: readonly PromptNode[], isDetached: (ref: string) => boolean = () => true): Prompt | undefined {
+  if (!Array.isArray(prompt) || !prompt.some(segment => 'ref' in segment && isDetached(segment.ref))) return prompt;
+  const segments: Segment[] = [];
+  for (const segment of prompt) {
+    if ('ref' in segment && !isDetached(segment.ref)) { segments.push(segment); continue; }
+    const data = 'ref' in segment ? nodes.find(node => node.id === segment.ref)?.data : undefined;
+    const text = 'text' in segment ? segment.text : `@${data ? nodeName(data) : '节点'}`;
+    const last = segments[segments.length - 1];
+    if (last && 'text' in last) last.text += text; else segments.push({ text });
+  }
+  return segments;
+}
+
+/** For a copied graph whose nodes get new IDs. */
+export function remapPromptReferences(prompt: Prompt | undefined, ids: ReadonlyMap<string, string>): Prompt | undefined {
+  if (!Array.isArray(prompt)) return prompt;
+  return prompt.map(segment => 'ref' in segment ? { ref: ids.get(segment.ref) ?? segment.ref } : segment);
+}
+
+/**
+ * Prompts after the edges change from `before` to `after`: a broken connection turns its references
+ * into text, and a new connection from a text node appends a reference. `nodes` must still hold
+ * removed sources, for their names. Returns the same array when nothing changes.
+ */
+export function syncReferences<N extends PromptNode>(nodes: N[], before: PromptGraph['edges'], after: PromptGraph['edges']): N[] {
+  const missingFrom = (edges: PromptGraph['edges'], others: PromptGraph['edges']) => {
+    const kept = new Set(others.map(edge => `${edge.source}\0${edge.target}`));
+    return edges.filter(edge => !kept.has(`${edge.source}\0${edge.target}`));
+  };
+  const broken = missingFrom(before, after);
+  const added = missingFrom(after, before);
+  if (!broken.length && !added.length) return nodes;
+  return nodes.map(node => {
+    const lost = new Set(broken.filter(edge => edge.target === node.id).map(edge => edge.source));
+    const detached = detachReferences(node.data.prompt, nodes, ref => lost.has(ref));
+    const gained = !referencingNodeTypes.has(node.data.type) ? [] : added.filter(edge => edge.target === node.id
+      && textSources.has(nodes.find(source => source.id === edge.source)?.data.type ?? '')).map(edge => ({ ref: edge.source }));
+    const prompt = gained.length ? [...promptSegments(detached), ...gained] : detached;
+    return prompt === node.data.prompt ? node : { ...node, data: { ...node.data, prompt } };
+  });
 }
