@@ -28,7 +28,7 @@ export type UpstreamNode = { id: string; kind: 'text' | 'image'; label: string; 
 
 // Kept as literals so this module has no runtime dependency on the app's type modules.
 const textSources: ReadonlySet<string> = new Set(['text', 'creativeDesc', 'storyboard']);
-// Node types whose console edits references. Old text boxes would show and send the converted text.
+// Node types that take text input and whose console edits references. Old text boxes would show and send the converted text.
 const referencingNodeTypes: ReadonlySet<string> = new Set(['textToImage']);
 
 /** The name shown as the node's title. */
@@ -36,7 +36,7 @@ export function nodeName(data: Pick<NodeData, 'type' | 'label' | 'customTitle'>)
   return data.customTitle || (data.type === 'text' ? '文本描述' : data.label);
 }
 
-const imagesOf = (data: PromptNodeData) => data.characterData?.referenceImages ?? (data.imageSrc ? [data.imageSrc] : []);
+const imagesOf = (data: PromptNodeData) => data.characterData?.referenceImages?.length ? data.characterData.referenceImages : data.imageSrc ? [data.imageSrc] : [];
 
 /** Describe sources in connection order. An image's number is its position among the images actually sent. */
 export function describeUpstream(sources: readonly PromptNode[]): UpstreamNode[] {

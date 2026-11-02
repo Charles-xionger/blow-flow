@@ -492,3 +492,114 @@ test('拖动缩略图调整顺序：编号、发送内容和素材顺序一起�
   await page.locator('.react-flow__node[data-id="other"]').click();
   await expect(editorOf(page).locator('[data-node-reference]')).toHaveText(['图片1', '图片2']);
 });
+
+async function openImageToImage(page: Page, request: APIRequestContext, data: Record<string, unknown> = {}, inputs = true) {
+  const id = crypto.randomUUID();
+  const sources = inputs ? [
+    { id: 'first', type: 'originalImage', position: { x: 30, y: 30 }, data: { type: 'originalImage', label: '原图', customTitle: '第一张', imageSrc: swatch('red') } },
+    { id: 'hero', type: 'character', position: { x: 30, y: 330 }, data: { type: 'character', label: '角色', customTitle: '小明',
+      characterData: { name: '小明', id: 'hero-character', description: '描述', tags: [], referenceImages: [swatch('blue'), swatch('green')] } } },
+  ] : [];
+  expect((await request.put(`/api/workflow/${id}`, { data: { id, requestId: crypto.randomUUID(), baseVersion: 0, snapshot: { name: '图生图', nodes: [
+    { id: 'image', type: 'imageToImage', position: { x: 520, y: 200 }, data: { type: 'imageToImage', label: '图生图', model: 'BananaPro', prompt: '变成水彩', ...data } },
+    ...sources,
+  ], edges: sources.map(source => ({ id: `link-${source.id}`, source: source.id, target: 'image', sourceHandle: 'output', targetHandle: 'input' })),
+  viewport: { x: 0, y: 0, zoom: 1 } } } })).ok()).toBeTruthy();
+  await page.goto(`/?project=${id}`);
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
+  const node = page.locator('.react-flow__node[data-id="image"]');
+  await expect(page.getByRole('region', { name: '节点控制台' })).toHaveCount(0);
+  await node.click();
+  return { node, panel: page.getByRole('region', { name: '节点控制台' }) };
+}
+
+const captureImageToImage = async (page: Page, response: Record<string, unknown> = { success: false, error: '测试已捕获' }) => {
+  const runs: { prompt: string; inputImage: string; inputImages: string[]; skipCache: boolean }[] = [];
+  await page.route('**/api/generate/image-to-image', async route => {
+    runs.push(route.request().postDataJSON());
+    await route.fulfill({ json: response });
+  });
+  return runs;
+};
+
+test('图生图：连接的图片和角色显示在连接层，能用 @ 引用，多张图片按连接层顺序发送', async ({ page, request }) => {
+  const runs = await captureImageToImage(page);
+  const { panel } = await openImageToImage(page, request, { prompt: '' });
+  const layer = panel.getByRole('list', { name: '连接的上游节点' });
+  await expect(layer.getByRole('listitem')).toHaveCount(2);
+  await expect(layer.getByTitle('图片1 · 第一张')).toBeVisible();
+  await expect(layer.getByTitle('图片2 · 小明')).toBeVisible();
+  await editorOf(page).click();
+  await page.keyboard.type('把@');
+  const menu = page.getByRole('listbox', { name: '引用连接的节点' });
+  await menu.getByRole('option', { name: /小明/ }).click();
+  await expect(editorOf(page).locator('[data-node-reference]')).toHaveText(['图片2']);
+  await panel.getByRole('button', { name: '生成', exact: true }).click();
+  await expect.poll(() => runs[0]?.prompt).toBe('把图片2');
+  expect(runs[0].inputImage).toBe(swatch('red'));
+  expect(runs[0].inputImages).toEqual([swatch('red'), swatch('blue'), swatch('green')]);
+  await expect(panel.getByRole('alert')).toHaveText('测试已捕获');
+});
+
+test('图生图：拖动连接层调整顺序后，发送的图片顺序随之改变', async ({ page, request }) => {
+  const runs = await captureImageToImage(page);
+  const { panel } = await openImageToImage(page, request);
+  const layer = panel.getByRole('list', { name: '连接的上游节点' });
+  const first = (await layer.getByTitle('图片1 · 第一张').boundingBox())!;
+  const second = (await layer.getByTitle('图片2 · 小明').boundingBox())!;
+  await page.mouse.move(first.x + first.width / 2, first.y + first.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(second.x + second.width / 2, second.y + second.height / 2, { steps: 6 });
+  await page.mouse.up();
+  await expect(layer.getByTitle('图片1 · 小明')).toBeVisible();
+  await panel.getByRole('button', { name: '生成', exact: true }).click();
+  await expect.poll(() => runs[0]?.inputImages).toEqual([swatch('blue'), swatch('green'), swatch('red')]);
+});
+
+test('图生图：没有输入图片或提示词为空时不能运行', async ({ page, request }) => {
+  const noInput = await openImageToImage(page, request, {}, false);
+  await expect(noInput.panel.getByRole('button', { name: '生成', exact: true })).toBeDisabled();
+  await expect(noInput.panel.getByText('请连接图片节点（支持多张图片参考）')).toBeVisible();
+  const noPrompt = await openImageToImage(page, request, { prompt: '  ' });
+  await expect(noPrompt.panel.getByRole('button', { name: '生成', exact: true })).toBeDisabled();
+  await expect(noPrompt.panel.getByText('请连接图片节点（支持多张图片参考）')).toHaveCount(0);
+  await editorOf(page).click();
+  await page.keyboard.type('花');
+  await expect(noPrompt.panel.getByRole('button', { name: '生成', exact: true })).toBeEnabled();
+});
+
+test('图生图：结果上不再有悬浮按钮，节点工具栏提供操作，可以跳过缓存重新生成', async ({ page, request }) => {
+  const runs = await captureImageToImage(page, { success: true, data: result });
+  const analyzed: { imageUrl: string; prompt: string }[] = [];
+  await page.route('**/api/character/analyze-image', async route => {
+    analyzed.push(route.request().postDataJSON());
+    await route.fulfill({ json: { success: false, error: '测试已捕获' } });
+  });
+  const { node, panel } = await openImageToImage(page, request);
+  const toolbar = page.getByRole('toolbar', { name: '节点工具栏' });
+  for (const name of ['预览', '下载', '保存为角色']) await expect(toolbar.getByRole('button', { name, exact: true })).toBeDisabled();
+  await expect(panel.getByRole('button', { name: '重新生成（跳过缓存）' })).toHaveCount(0);
+  await panel.getByRole('button', { name: '生成', exact: true }).click();
+  const image = node.getByRole('img', { name: 'Generated' });
+  await expect(image).toBeVisible();
+  expect(runs[0].skipCache).toBe(false);
+  await image.hover();
+  for (const name of ['预览', '下载', '保存为角色']) await expect(page.getByTestId('image-preview').getByTitle(name)).toHaveCount(0);
+  await toolbar.getByRole('button', { name: '预览', exact: true }).click();
+  await expect(page.locator('body > div.fixed img[alt="Generated"]')).toBeVisible();
+  await page.keyboard.press('Escape');
+  const download = page.waitForEvent('download');
+  await toolbar.getByRole('button', { name: '下载', exact: true }).click();
+  expect((await download).suggestedFilename()).toMatch(/^image-\d+\.png$/);
+  await toolbar.getByRole('button', { name: '保存为角色', exact: true }).click();
+  await page.getByRole('dialog', { name: '保存为角色' }).getByRole('button', { name: '保存为角色' }).click();
+  await expect.poll(() => analyzed[0]).toEqual({ imageUrl: result, prompt: '变成水彩' });
+  await panel.getByRole('button', { name: '重新生成（跳过缓存）' }).click();
+  await expect.poll(() => runs[1]?.skipCache).toBe(true);
+});
+
+test('图生图：生成中节点展示区显示进度，控制台的按钮不可用', async ({ page, request }) => {
+  const { panel } = await openImageToImage(page, request, { isLoading: true });
+  await expect(page.getByTestId('image-preview').getByText('生成中...')).toBeVisible();
+  await expect(panel.getByRole('button', { name: '生成中' })).toBeDisabled();
+});

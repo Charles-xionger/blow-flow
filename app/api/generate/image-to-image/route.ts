@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
       // 检查缓存（除非明确跳过）
       if (!skipCache) {
         const cacheKey = getCacheKey(model, prompt, {
-          inputImage,
+          inputImages: imagesToUse,
           aspectRatio,
         });
 
@@ -137,14 +137,14 @@ export async function POST(request: NextRequest) {
       // 保存到缓存
       if (!skipCache) {
         const cacheKey = getCacheKey(model, prompt, {
-          inputImage,
+          inputImages: imagesToUse,
           aspectRatio,
         });
         setCache(
           cacheKey,
           model,
           prompt,
-          { inputImage, aspectRatio },
+          { inputImages: imagesToUse, aspectRatio },
           imageUrl,
           {
             ttl: 300, // 5分钟缓存
@@ -172,7 +172,7 @@ export async function POST(request: NextRequest) {
     // 检查缓存（除非明确跳过）
     if (!skipCache) {
       const cacheKey = getCacheKey(model, prompt, {
-        inputImage,
+        inputImages: imagesToUse,
         aspectRatio,
       });
 
@@ -220,7 +220,7 @@ export async function POST(request: NextRequest) {
       finalPrompt,
       aspectRatio,
       "1k",
-      [inputImage],
+      imagesToUse,
     );
 
     // 下载并上传到自己的 OSS
@@ -242,10 +242,10 @@ export async function POST(request: NextRequest) {
     // 保存到缓存（图生图使用较短的缓存时间，因为用户通常期望每次生成都是新的）
     if (!skipCache) {
       const cacheKey = getCacheKey(model, prompt, {
-        inputImage,
+        inputImages: imagesToUse,
         aspectRatio,
       });
-      setCache(cacheKey, model, prompt, { inputImage, aspectRatio }, imageUrl, {
+      setCache(cacheKey, model, prompt, { inputImages: imagesToUse, aspectRatio }, imageUrl, {
         ttl: 300, // 5分钟缓存，避免短时间内重复请求
       });
     }

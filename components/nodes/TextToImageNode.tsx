@@ -5,9 +5,7 @@ import type { Node, NodeProps } from "@xyflow/react";
 import { NodeShell } from "./NodeShell";
 import { useUpstreamNodes } from "@/hooks/useUpstreamNodes";
 import { useCanvasStore } from "@/store/useCanvasStore";
-import { Image as ImageIcon, Sparkles, Loader2 } from "lucide-react";
 import type { NodeData } from "@/types";
-import { toast } from "sonner";
 import { getImageModels } from "@/lib/model-registry";
 import { expandPrompt, promptIsEmpty, promptSegments, referenceImages } from "@/lib/canvas/prompt";
 
@@ -21,6 +19,8 @@ import { NodeConsole } from "./shared/NodeConsole";
 import { NodeConnections } from "./shared/NodeConnections";
 import { PromptEditor } from "./shared/PromptEditor";
 import { ImageToolbarActions } from "./shared/ImageToolbarActions";
+import { ImageStage } from "./shared/ImageStage";
+import { PromptOptimizeToggle, consoleSelectClass } from "./shared/ConsoleControls";
 
 const aspectRatios = [
   { value: "1:1", label: "1:1 方形" },
@@ -60,69 +60,6 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
     generationModels().then(models => { if (active) setTaskModels(models.filter(m => m.category === 'IMAGE')); }).catch(() => {});
     return () => { active = false; };
   }, []);
-
-  // 保存为角色
-  const handleSaveAsCharacter = async () => {
-    if (!data.imageSrc) return;
-
-    const toastId = toast.loading("正在分析图片...");
-
-    try {
-      // 调用图片分析 API
-      const analyzeResponse = await fetch("/api/character/analyze-image", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          imageUrl: data.imageSrc,
-          prompt: expandPrompt(id, useCanvasStore.getState()),
-        }),
-      });
-
-      const analyzeResult = await analyzeResponse.json();
-
-      if (analyzeResult.success) {
-        console.log(
-          "[TextToImageNode] Analysis completed:",
-          analyzeResult.data,
-        );
-
-        toast.loading("正在保存角色...", { id: toastId });
-
-        // 直接保存到数据库
-        const saveResponse = await fetch("/api/character", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: analyzeResult.data.name,
-            description: analyzeResult.data.description,
-            referenceImages: [data.imageSrc],
-            tags: analyzeResult.data.tags || [],
-          }),
-        });
-
-        const saveResult = await saveResponse.json();
-
-        if (saveResult.success) {
-          toast.success(`角色"${analyzeResult.data.name}"已保存！`, {
-            id: toastId,
-          });
-
-          // 触发角色库刷新事件
-          window.dispatchEvent(new CustomEvent("characterSaved"));
-        } else {
-          throw new Error(saveResult.error || "保存失败");
-        }
-      } else {
-        throw new Error(analyzeResult.error);
-      }
-    } catch (error) {
-      console.error("Failed to save character:", error);
-      toast.error(
-        `保存失败: ${error instanceof Error ? error.message : "未知错误"}`,
-        { id: toastId },
-      );
-    }
-  };
 
   const handleGenerate = useCallback(async () => {
     // Upstream content is read now, so a run always uses its current value.
@@ -221,7 +158,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
 
   return (
     <NodeShell {...props} stageTestId="image-preview"
-      toolbar={<ImageToolbarActions src={hasResult ? data.imageSrc : undefined} alt="Generated" onSaveAsCharacter={handleSaveAsCharacter} />}
+      toolbar={<ImageToolbarActions nodeId={id} src={hasResult ? data.imageSrc : undefined} alt="Generated" />}
       console={
         <NodeConsole data={data} onRun={handleGenerate} runDisabled={taskUnavailable || !canRun}
           notice={taskModel && !taskModel.configured ? "请管理员配置平台连接" : undefined}
@@ -237,7 +174,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
               value={data.model || imageModels[0]?.value || ""}
               disabled={data.isLoading || !!data.pendingGeneration || data.generationBlocked}
               onChange={(e) => updateNodeData(id, { model: e.target.value, usesGenerationTasks: taskModels.some(m => m.id === e.target.value) })}
-              className="h-8 w-28 min-w-0 cursor-pointer truncate rounded-lg bg-transparent px-2 text-xs hover:bg-white/10 [&>option]:bg-[#232323]"
+              className={consoleSelectClass}
             >
               {taskModels.map(m => <option key={m.id} value={m.id}>{m.name}{m.configured ? "" : "（未配置）"}</option>)}
               {imageModels.map((m) => (
@@ -253,39 +190,12 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
             {!taskModel && <ImageModelSettings aspectRatio={data.aspectRatio || '1:1'} resolution={data.resolution || '1k'}
               ratios={aspectRatios} resolutions={resolutions} disabled={data.isLoading}
               onChange={settings => updateNodeData(id, settings)} />}
-            {!taskModel && (
-              <button
-                type="button"
-                aria-label="提示词优化"
-                aria-pressed={!!data.promptOptimize}
-                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors ${
-                  data.promptOptimize ? "bg-purple-500/20 text-purple-400" : "text-zinc-400 hover:bg-white/10 hover:text-white"
-                }`}
-                onClick={() => updateNodeData(id, { promptOptimize: !data.promptOptimize })}
-              >
-                <Sparkles size={15} fill={data.promptOptimize ? "currentColor" : "none"} />
-              </button>
-            )}
+            {!taskModel && <PromptOptimizeToggle active={!!data.promptOptimize} onChange={promptOptimize => updateNodeData(id, { promptOptimize })} />}
           </>}
         />
       }
     >
-      {hasResult ? (
-        <img src={data.imageSrc} alt="Generated" draggable={false} className="w-full h-full object-contain" />
-      ) : (
-        <div role="img" aria-label="尚无生成图片" className="w-full h-full flex items-center justify-center text-zinc-500">
-          <div className="w-16 h-16 rounded-2xl flex items-center justify-center bg-zinc-800/50 text-zinc-500">
-            <ImageIcon size={28} className="opacity-60" aria-hidden />
-          </div>
-        </div>
-      )}
-
-      {data.isLoading && (
-        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center z-20">
-          <Loader2 size={32} className="text-blue-500 animate-spin mb-3" />
-          <span className="text-white/80 text-sm font-medium">{data.generationTaskId ? data.generationStatus : "生成中..."}</span>
-        </div>
-      )}
+      <ImageStage data={data} />
     </NodeShell>
   );
 };

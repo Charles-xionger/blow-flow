@@ -81,3 +81,8 @@ test('a reference to a node that is no longer connected sends nothing', () => {
   const graph = { nodes: [target([{ text: '花' }, { ref: 'gone' }]), text('gone', '不发送')], edges: [] };
   assert.equal(expandPrompt('target', graph), '花');
 });
+
+test('a character with no reference images falls back to its own image', () => {
+  const graph = { nodes: [target([]), { id: 'c', data: { type: 'character', label: '小明', imageSrc: 'own.png', characterData: { referenceImages: [] } } }], edges: link('c') };
+  assert.deepEqual(referenceImages('target', graph), ['own.png']);
+});

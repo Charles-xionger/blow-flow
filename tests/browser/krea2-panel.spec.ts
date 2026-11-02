@@ -16,9 +16,7 @@ async function openCanvas(page: Page, request: APIRequestContext, data: Record<s
   return { id, read: async () => (await (await request.get(`/api/workflow/${id}`)).json()).data.nodes[0].data };
 }
 
-// imageToImage keeps the old panel until it migrates to the three-layer shell.
-const panelOf = (page: Page, type?: unknown) => type === 'imageToImage'
-  ? page.getByTestId('image-generation-panel') : page.getByRole('region', { name: '节点控制台' });
+const panelOf = (page: Page) => page.getByRole('region', { name: '节点控制台' });
 
 test('image models share attached panel sizing and spacing at every canvas zoom', async ({ page, request }, testInfo) => {
   await page.setViewportSize({ width: 1280, height: 1100 });
@@ -32,7 +30,7 @@ test('image models share attached panel sizing and spacing at every canvas zoom'
     ]) {
       await openCanvas(page, request, data, zoom);
       const node = page.locator('.react-flow__node');
-      const panel = panelOf(page, data.type);
+      const panel = panelOf(page);
       await expect(panel).toBeVisible();
       const nodeBox = await node.boundingBox();
       const previewBox = await page.getByTestId('image-preview').boundingBox();
@@ -41,12 +39,15 @@ test('image models share attached panel sizing and spacing at every canvas zoom'
       expect(nodeBox!.height).toBeCloseTo(previewBox!.height, 0);
       expect(nodeBox!.width).toBeCloseTo(previewBox!.width, 0);
       const panelBox = await panel.boundingBox();
-      expect(panelBox!.width / zoom).toBeCloseTo(data.type === 'imageToImage' ? 400 : 440, 0);
-      expect(panelBox!.y - nodeBox!.y - nodeBox!.height).toBeCloseTo((data.type === 'imageToImage' ? 16 : 12) * zoom, 0);
+      expect(panelBox!.width / zoom).toBeCloseTo(440, 0);
+      expect(panelBox!.y - nodeBox!.y - nodeBox!.height).toBeCloseTo(12 * zoom, 0);
       if (zoom === 1.75) await page.screenshot({ path: testInfo.outputPath(`${data.type ?? data.model}-attached.png`), animations: 'disabled' });
       geometries.push({ width: panelBox!.width, gap: panelBox!.y - nodeBox!.y - nodeBox!.height });
     }
-    expect(geometries[1].width).toBeCloseTo(geometries[0].width, 0);
+    for (const geometry of geometries) {
+      expect(geometry.width).toBeCloseTo(geometries[0].width, 0);
+      expect(geometry.gap).toBeCloseTo(geometries[0].gap, 0);
+    }
   }
 });
 
@@ -88,7 +89,7 @@ for (const data of [
     await page.setViewportSize({ width: 760, height: 540 });
     const { id } = await openCanvas(page, request, data);
     const node = page.locator('.react-flow__node');
-    const panel = panelOf(page, data.type);
+    const panel = panelOf(page);
     const output = node.locator('[data-handleid="output"]');
     const read = async () => (await (await request.get(`/api/workflow/${id}`)).json()).data;
     await page.getByRole('button', { name: '图像设置' }).click();
