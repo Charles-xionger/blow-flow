@@ -345,7 +345,9 @@ export const useCanvasStore = create<CanvasState>()(
           const allNodes = [...get().nodes, ...newNodes];
           const validEdges = newEdges.filter((edge) => isValidCanvasConnection(edge, allNodes, get().edges));
           const edges = [...get().edges, ...validEdges];
-          set({ nodes: syncReferences(allNodes, get().edges, edges), edges });
+          // A node created with its own content, such as a storyboard shot, gets no reference to its source.
+          const filled = new Set(newNodes.filter((_, index) => configs[index].data.prompt !== undefined).map((node) => node.id));
+          set({ nodes: syncReferences(allNodes, get().edges, edges.filter((edge) => !filled.has(edge.target))), edges });
           return newNodes.map((node) => node.id);
         },
 

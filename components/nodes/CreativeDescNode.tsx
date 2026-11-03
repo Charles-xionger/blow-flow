@@ -1,41 +1,33 @@
 "use client";
 
-import { memo, useCallback, useState, useEffect, useMemo } from "react";
+import { memo, useCallback, useMemo } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
-import { BaseNode, NodeSurface } from "./BaseNode";
-import { promptText } from "@/lib/canvas/prompt";
-import { useCanvasStore } from "@/store/useCanvasStore";
-import { Film, Loader2, Wand2, Plus, Minus } from "lucide-react";
-import type { NodeData, NodeType } from "@/types";
-import { Textarea } from "@/components/ui/textarea";
+import { Film, Loader2, Minus, Plus } from "lucide-react";
+import { promptIsEmpty, promptSegments, promptText } from "@/lib/canvas/prompt";
 import { getModelsByCategory } from "@/lib/model-registry";
+import { useCanvasStore } from "@/store/useCanvasStore";
+import { NodeType, type NodeData } from "@/types";
+import { NodeShell } from "./NodeShell";
+import { consoleSelectClass } from "./shared/ConsoleControls";
+import { NodeConsole } from "./shared/NodeConsole";
+import { PromptEditor } from "./shared/PromptEditor";
+
+const minShots = 2;
+const maxShots = 8;
+const stepButtonClass = "flex h-7 w-7 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-white/10 hover:text-white disabled:pointer-events-none disabled:opacity-30";
 
 const CreativeDescNode = (props: NodeProps<Node<NodeData>>) => {
-  const { id, data, selected } = props;
+  const { id, data } = props;
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
-  const addMultipleConnectedNodes = useCanvasStore(
-    (state) => state.addMultipleConnectedNodes,
-  );
-  const singleSelected = useCanvasStore((state) => state.selectedNodeIds.length === 1);
-
-  const shouldShowPanel = selected && singleSelected;
-  const [localPrompt, setLocalPrompt] = useState(promptText(data.prompt));
-  const [shotCount, setShotCount] = useState(data.shotCount || 4);
-  const [selectedModel, setSelectedModel] = useState(data.model || "");
-
-  // 获取可用的文本模型
+  const addMultipleConnectedNodes = useCanvasStore((state) => state.addMultipleConnectedNodes);
   const textModels = useMemo(() => getModelsByCategory("TEXT"), []);
-
-  useEffect(() => {
-    setLocalPrompt(promptText(data.prompt));
-  }, [data.prompt]);
+  const segments = useMemo(() => promptSegments(data.prompt), [data.prompt]);
+  const shotCount = Math.min(maxShots, Math.max(minShots, data.shotCount || 4));
 
   const handleGenerateStoryboard = useCallback(async () => {
-    if (localPrompt !== data.prompt) {
-      updateNodeData(id, { prompt: localPrompt });
-    }
-
-    if (!localPrompt) return;
+    // This node has no inputs, so its prompt holds no references.
+    const prompt = promptText(data.prompt);
+    if (promptIsEmpty(prompt)) return;
 
     updateNodeData(id, { isLoading: true, error: undefined });
 
@@ -44,37 +36,20 @@ const CreativeDescNode = (props: NodeProps<Node<NodeData>>) => {
       const response = await fetch("/api/storyboard", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt: localPrompt,
-          shotCount,
-          modelName: selectedModel,
-        }),
+        body: JSON.stringify({ prompt, shotCount, modelName: data.model || "" }),
       });
 
       const result = await response.json();
 
       if (result.success && result.data) {
-        updateNodeData(id, {
-          isLoading: false,
-          storyboardShots: result.data,
-          shotCount,
-        });
+        updateNodeData(id, { isLoading: false, storyboardShots: result.data, shotCount });
 
         // 自动创建文本节点
-        const nodesToCreate = result.data.map((shot: any) => ({
-          type: "text" as NodeType,
-          data: {
-            prompt: shot.description,
-            customTitle: shot.title,
-          },
+        const nodesToCreate = result.data.map((shot: { title: string; description: string }) => ({
+          type: NodeType.TEXT,
+          data: { prompt: [{ text: shot.description }], customTitle: shot.title },
         }));
-
-        const startPosition = {
-          x: nodePosition.x + 400,
-          y: nodePosition.y - 150,
-        };
-
-        addMultipleConnectedNodes(nodesToCreate, id, startPosition);
+        addMultipleConnectedNodes(nodesToCreate, id, { x: nodePosition.x + 400, y: nodePosition.y - 150 });
       } else {
         const errorMsg = result.error || "分镜生成失败";
         throw new Error(
@@ -89,139 +64,60 @@ const CreativeDescNode = (props: NodeProps<Node<NodeData>>) => {
         error: error instanceof Error ? error.message : "分镜生成失败",
       });
     }
-  }, [
-    id,
-    localPrompt,
-    shotCount,
-    selectedModel,
-    updateNodeData,
-    data.prompt,
-    addMultipleConnectedNodes,
-  ]);
+  }, [id, data.prompt, data.model, shotCount, updateNodeData, addMultipleConnectedNodes]);
 
   const successCount = data.storyboardShots?.length || 0;
   const hasResult = !!data.storyboardShots && !data.isLoading;
 
   return (
-    <BaseNode {...props}>
-
-      <NodeSurface>
-        <div className="relative w-full h-full p-6 flex flex-col items-center justify-center">
-          <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 bg-zinc-800/50 text-purple-500">
-            <Film size={28} className="opacity-60" />
-          </div>
-          <div className="text-sm font-medium text-zinc-300 mb-1">
-            AI 分镜生成器
-          </div>
-          {hasResult ? (
-            <div className="text-xs text-purple-400 flex items-center gap-1">
-              <span>✓ 已生成 {successCount} 个文本节点</span>
-            </div>
-          ) : (
-            <div className="text-xs text-zinc-500">输入故事描述开始生成</div>
-          )}
-        </div>
-
-        {data.isLoading && (
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center z-20">
-            <Loader2 size={32} className="text-purple-500 animate-spin mb-3" />
-            <span className="text-white/80 text-sm font-medium">
-              分镜生成中...
-            </span>
-          </div>
-        )}
-      </NodeSurface>
-
-      {shouldShowPanel && (
-        <div
-          className="node-panel nodrag nopan nowheel absolute top-full left-1/2 -translate-x-1/2 min-w-100 pt-4 z-70 pointer-events-auto"
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <div className="bg-[#1a1a1a]/95 backdrop-blur-xl border border-zinc-700/50 rounded-2xl p-4 flex flex-col gap-3">
-            {/* 模型选择 */}
-            <div className="flex flex-col gap-2">
-              <label className="text-xs font-medium text-zinc-400">
-                选择模型
-              </label>
-              <select
-                value={selectedModel}
-                onChange={(e) => {
-                  setSelectedModel(e.target.value);
-                  updateNodeData(id, { model: e.target.value });
-                }}
-                className="nodrag w-full px-3 py-2 text-sm rounded-lg bg-zinc-800/80 hover:bg-zinc-800 border border-zinc-700 focus:border-purple-500 text-white transition-colors"
-                onMouseDown={(e) => e.stopPropagation()}
-              >
-                <option value="">自动选择</option>
-                {textModels.map((model) => (
-                  <option key={model.id} value={model.name}>
-                    {model.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <Textarea
-              className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none min-h-24 bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-purple-500 text-white placeholder-zinc-500 max-h-32 overflow-y-auto"
-              placeholder="输入故事或场景描述，例如：一个关于勇士冒险的故事..."
-              value={localPrompt}
-              onChange={(e) => {
-                setLocalPrompt(e.target.value);
-                updateNodeData(id, { prompt: e.target.value });
-              }}
-              onBlur={() => updateNodeData(id, { prompt: localPrompt })}
-              onMouseDown={(e) => e.stopPropagation()}
-              onWheel={(e) => e.stopPropagation()}
-              rows={4}
-            />
-
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2 text-sm text-zinc-400">
-                <span>镜头数量：</span>
-                <button
-                  onClick={() => { const next = Math.max(2, shotCount - 1); setShotCount(next); updateNodeData(id, { shotCount: next }); }}
-                  className="w-7 h-7 rounded flex items-center justify-center bg-zinc-800 hover:bg-zinc-700 transition-colors"
-                >
-                  <Minus size={14} />
-                </button>
-                <span className="w-8 text-center text-white font-semibold">
-                  {shotCount}
-                </span>
-                <button
-                  onClick={() => { const next = Math.min(8, shotCount + 1); setShotCount(next); updateNodeData(id, { shotCount: next }); }}
-                  className="w-7 h-7 rounded flex items-center justify-center bg-zinc-800 hover:bg-zinc-700 transition-colors"
-                >
-                  <Plus size={14} />
-                </button>
-              </div>
-            </div>
-
-            <button
-              onClick={handleGenerateStoryboard}
-              disabled={data.isLoading || !localPrompt}
-              className={`w-full h-10 px-4 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 whitespace-nowrap transition-all active:scale-[0.98] ${
-                data.isLoading || !localPrompt
-                  ? "bg-gray-400 text-white cursor-not-allowed"
-                  : "bg-linear-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 text-white shadow-lg shadow-purple-500/25 hover:shadow-purple-500/40"
-              }`}
-            >
-              {data.isLoading ? (
-                <Loader2 className="animate-spin" size={15} />
-              ) : (
-                <Wand2 size={15} />
-              )}
-              <span>{data.isLoading ? "生成中" : "生成分镜"}</span>
+    <NodeShell {...props}
+      console={
+        <NodeConsole data={data} onRun={() => void handleGenerateStoryboard()} runDisabled={promptIsEmpty(data.prompt)}
+          editor={
+            <PromptEditor value={segments} upstream={[]} placeholder="输入故事或场景描述，例如：一个关于勇士冒险的故事..."
+              onChange={prompt => updateNodeData(id, { prompt })} />
+          }
+          config={<>
+            <select aria-label="文本模型" value={data.model || ""} className={consoleSelectClass}
+              onChange={event => updateNodeData(id, { model: event.target.value })}>
+              <option value="">自动选择</option>
+              {textModels.map(model => <option key={model.id} value={model.name}>{model.name}</option>)}
+            </select>
+            <span className="ml-1 text-xs text-zinc-400">镜头</span>
+            <button type="button" aria-label="减少镜头" title="减少镜头" disabled={shotCount <= minShots} className={stepButtonClass}
+              onClick={() => updateNodeData(id, { shotCount: shotCount - 1 })}>
+              <Minus size={14} />
             </button>
-
-            {data.error && (
-              <div className="text-xs text-red-400 bg-red-500/10 px-3 py-2 rounded-lg border border-red-500/20">
-                {data.error}
-              </div>
-            )}
+            <span aria-label="镜头数量" className="w-6 text-center text-xs font-semibold text-white">{shotCount}</span>
+            <button type="button" aria-label="增加镜头" title="增加镜头" disabled={shotCount >= maxShots} className={stepButtonClass}
+              onClick={() => updateNodeData(id, { shotCount: shotCount + 1 })}>
+              <Plus size={14} />
+            </button>
+          </>}
+        />
+      }
+    >
+      <div className="relative flex h-full w-full flex-col items-center justify-center p-6">
+        <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-zinc-800/50 text-purple-500">
+          <Film size={28} className="opacity-60" />
+        </div>
+        <div className="mb-1 text-sm font-medium text-zinc-300">AI 分镜生成器</div>
+        {hasResult ? (
+          <div className="flex items-center gap-1 text-xs text-purple-400">
+            <span>✓ 已生成 {successCount} 个文本节点</span>
           </div>
+        ) : (
+          <div className="text-xs text-zinc-500">输入故事描述开始生成</div>
+        )}
+      </div>
+
+      {data.isLoading && (
+        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm">
+          <Loader2 size={32} className="mb-3 animate-spin text-purple-500" />
+          <span className="text-sm font-medium text-white/80">分镜生成中...</span>
         </div>
       )}
-    </BaseNode>
+    </NodeShell>
   );
 };
 

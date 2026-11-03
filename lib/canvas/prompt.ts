@@ -40,7 +40,7 @@ export type UpstreamNode = { id: string; kind: 'text' | 'image' | 'video'; label
 // Kept as literals so this module has no runtime dependency on the app's type modules.
 const textSources: ReadonlySet<string> = new Set(['text', 'creativeDesc', 'storyboard']);
 // Node types that take text input and whose console edits references. Old text boxes would show and send the converted text.
-const referencingNodeTypes: ReadonlySet<string> = new Set(['textToImage', 'textToVideo']);
+const referencingNodeTypes: ReadonlySet<string> = new Set(['text', 'textToImage', 'textToVideo']);
 
 /** The name shown as the node's title. */
 export function nodeName(data: Pick<NodeData, 'type' | 'label' | 'customTitle'>): string {

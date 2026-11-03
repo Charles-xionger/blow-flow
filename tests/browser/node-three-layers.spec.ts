@@ -322,8 +322,12 @@ test('节点引用是整体标签，删除它不断开连线；未引用的文�
 test('运行时读取上游文本节点的当前内容', async ({ page, request }) => {
   const run = await captureRun(page);
   await openWithUpstream(page, request, [{ ref: 'garden' }]);
-  await page.locator('.react-flow__node[data-id="garden"]').click();
-  await page.locator('.react-flow__node[data-id="garden"] textarea').fill('新花园');
+  const garden = page.locator('.react-flow__node[data-id="garden"]');
+  await garden.click();
+  await editorOf(page).click();
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.type('新花园');
+  await expect(garden.getByTestId('text-content')).toHaveText('新花园');
   await page.locator('.react-flow__node[data-id="image"]').click();
   await page.getByRole('button', { name: '生成', exact: true }).click();
   await expect.poll(() => run.body?.prompt).toBe('新花园');
@@ -771,4 +775,71 @@ test('首尾帧：尾帧来自有多张参考图的角色时不能交换，避�
   await expect(panel.getByLabel('首帧：图片1 · red')).toBeVisible();
   await expect(panel.getByLabel('尾帧：图片2 · 小明')).toBeVisible();
   await expect(panel.getByRole('button', { name: '交换首尾帧' })).toBeDisabled();
+});
+
+async function openTextGraph(page: Page, request: APIRequestContext, nodes: Record<string, unknown>[], edges: [string, string][]) {
+  const id = crypto.randomUUID();
+  expect((await request.put(`/api/workflow/${id}`, { data: { id, requestId: crypto.randomUUID(), baseVersion: 0, snapshot: { name: '文本节点', nodes,
+    edges: edges.map(([source, target]) => ({ id: `link-${source}-${target}`, source, target, sourceHandle: 'output', targetHandle: 'input' })),
+    viewport: { x: 0, y: 0, zoom: 1 } } } })).ok()).toBeTruthy();
+  await page.goto(`/?project=${id}`);
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
+}
+const textNode = (id: string, x: number, y: number, prompt: unknown, customTitle?: string) =>
+  ({ id, type: 'text', position: { x, y }, data: { type: 'text', label: '文本', prompt, ...(customTitle ? { customTitle } : {}) } });
+
+test('文本节点：展示区显示内容，控制台只有编辑器；可以引用上游文本并逐层展开发送', async ({ page, request }) => {
+  const run = await captureRun(page);
+  await openTextGraph(page, request, [
+    textNode('scene', 30, 60, '花园', '场景'),
+    textNode('shot', 420, 60, '镜头：', '镜头'),
+    { id: 'image', type: 'textToImage', position: { x: 820, y: 60 }, data: { type: 'textToImage', label: '文生图', model: 'BananaPro', prompt: [{ ref: 'shot' }] } },
+  ], [['scene', 'shot'], ['shot', 'image']]);
+  const shot = page.locator('.react-flow__node[data-id="shot"]');
+  await expect(shot.getByTestId('text-content')).toHaveText('镜头：');
+  await shot.click();
+  const panel = page.getByRole('region', { name: '节点控制台' });
+  await expect(editorOf(page)).toHaveText('镜头：');
+  await expect(panel.getByRole('button')).toHaveCount(0);
+  await expect(panel.getByRole('combobox')).toHaveCount(0);
+  await expect(panel.getByRole('list', { name: '连接的上游节点' })).toHaveCount(0);
+  await expect(page.getByRole('toolbar', { name: '节点工具栏' })).toHaveCount(0);
+  await editorOf(page).click();
+  await page.keyboard.press('End');
+  await page.keyboard.type('@');
+  await page.getByRole('listbox', { name: '引用连接的节点' }).getByRole('option', { name: /场景/ }).click();
+  await expect(shot.getByTestId('text-content')).toHaveText('镜头：花园');
+  await page.locator('.react-flow__node[data-id="image"]').click();
+  await page.getByRole('button', { name: '生成', exact: true }).click();
+  await expect.poll(() => run.body?.prompt).toBe('镜头：花园');
+});
+
+test('分镜：没有连接层，编辑器、镜头数量和运行在控制台；生成的文本节点带各自内容，可以被引用', async ({ page, request }) => {
+  const sent: { prompt: string; shotCount: number }[] = [];
+  let reply: Record<string, unknown> = { success: false, error: '分镜失败' };
+  await page.route('**/api/storyboard', async route => { sent.push(route.request().postDataJSON()); await route.fulfill({ json: reply }); });
+  await openTextGraph(page, request, [{ id: 'board', type: 'storyboard', position: { x: 30, y: 60 }, data: { type: 'storyboard', label: '分镜', prompt: '' } }], []);
+  const board = page.locator('.react-flow__node[data-id="board"]');
+  await board.click();
+  const panel = page.getByRole('region', { name: '节点控制台' });
+  await expect(panel.getByRole('list', { name: '连接的上游节点' })).toHaveCount(0);
+  const run = panel.getByRole('button', { name: '生成', exact: true });
+  await expect(run).toBeDisabled();
+  await editorOf(page).click();
+  await page.keyboard.type('勇士的故事');
+  await panel.getByRole('button', { name: '增加镜头' }).click();
+  await expect(panel.getByLabel('镜头数量')).toHaveText('5');
+  await run.click();
+  await expect(panel.getByRole('alert')).toHaveText('分镜失败');
+  expect(sent[0]).toMatchObject({ prompt: '勇士的故事', shotCount: 5 });
+  reply = { success: true, data: [{ title: '出发', description: '勇士出发' }, { title: '归来', description: '勇士归来' }] };
+  await run.click();
+  await expect(board.getByText('已生成 2 个文本节点')).toBeVisible();
+  await expect(panel.getByRole('alert')).toHaveCount(0);
+  const shots = page.locator('.react-flow__node-text');
+  await expect(shots).toHaveCount(2);
+  await expect(shots.getByTestId('text-content')).toHaveText(['勇士出发', '勇士归来']);
+  await shots.first().click();
+  await expect(editorOf(page)).toHaveText('勇士出发');
+  await expect(editorOf(page).locator('[data-node-reference]')).toHaveCount(0);
 });

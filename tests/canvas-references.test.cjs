@@ -180,15 +180,6 @@ test('a recovery copy keeps references pointing at the copied nodes', () => {
   assert.equal(expandPrompt(image.id, copy), '在花园');
 });
 
-test('a node type still on the old shell gets no reference, so its text box and sending stay as they were', () => {
-  store.setState({ nodes: [node('old', 'text', { prompt: '手写' }), node('scene', 'text', { prompt: '花园', customTitle: '场景' })] });
-  store.getState().onConnect(connection('scene', 'old'));
-  assert.equal(store.getState().edges.length, 1);
-  assert.equal(promptOf('old'), '手写');
-  store.getState().onEdgesChange(store.getState().edges.map(candidate => ({ type: 'remove', id: candidate.id })));
-  assert.equal(promptOf('old'), '手写');
-});
-
 test('selecting or dragging keeps node identity, so unrelated updates cost nothing', () => {
   store.setState({ nodes: [node('image', 'textToImage', { prompt: [{ ref: 'scene' }] }), node('scene', 'text')], edges: [edge('scene', 'image')] });
   const before = store.getState().nodes[0];
@@ -238,4 +229,29 @@ test('reordering does not touch the prompt, so references stay references', () =
   store.setState({ nodes: [node('target', 'textToImage', { prompt }), image('a', 'a.png'), image('b', 'b.png')], edges: [edge('a', 'target'), edge('b', 'target')] });
   store.getState().reorderUpstream('target', ['b', 'a']);
   assert.deepEqual(promptOf('target'), prompt);
+});
+
+test('connecting a text node to another text node appends its reference, and sending expands it layer by layer', () => {
+  store.setState({ nodes: [node('image', 'textToImage', { prompt: [{ ref: 'shot' }] }), node('shot', 'text', { prompt: '镜头：' }), node('scene', 'text', { prompt: '花园' })],
+    edges: [edge('shot', 'image')] });
+  store.getState().onConnect(connection('scene', 'shot'));
+  assert.deepEqual(promptOf('shot'), [{ text: '镜头：' }, { ref: 'scene' }]);
+  assert.equal(expandPrompt('image', store.getState()), '镜头：花园');
+});
+
+test('text nodes created by a storyboard keep their own content, an empty connected node gets the reference', () => {
+  store.setState({ nodes: [node('board', 'storyboard', { prompt: '勇士的故事' })] });
+  const [first, second] = store.getState().addMultipleConnectedNodes([
+    { type: 'text', data: { prompt: [{ text: '勇士出发' }], customTitle: '镜头1' } },
+    { type: 'text', data: { prompt: [{ text: '勇士归来' }], customTitle: '镜头2' } },
+  ], 'board', { x: 0, y: 0 });
+  assert.deepEqual(promptOf(first), [{ text: '勇士出发' }]);
+  assert.deepEqual(promptOf(second), [{ text: '勇士归来' }]);
+  assert.equal(store.getState().edges.length, 2);
+  store.setState({ nodes: [...store.getState().nodes, node('image', 'textToImage', { prompt: '' })] });
+  store.getState().onConnect(connection(second, 'image'));
+  assert.equal(expandPrompt('image', store.getState()), '勇士归来');
+  store.getState().addConnectedNode('text', 'board');
+  const created = store.getState().nodes.at(-1);
+  assert.deepEqual(created.data.prompt, [{ ref: 'board' }]);
 });

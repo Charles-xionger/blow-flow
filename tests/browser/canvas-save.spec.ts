@@ -123,12 +123,12 @@ test('editing a canvas survives clearing browser storage and deleting its last n
   expect(local.snapshot.nodes).toHaveLength(1);
   expect(local.localVersion).toBe(local.confirmedLocalVersion);
   await page.locator('.react-flow__node').click();
-  await page.getByPlaceholder('输入文本描述...').fill('浏览器真实编辑');
-  await expect.poll(async () => (await read()).nodes[0].data.prompt).toBe('浏览器真实编辑');
-  await expect(page.getByPlaceholder('输入文本描述...')).toBeFocused();
-  await page.getByPlaceholder('输入文本描述...').fill('快捷键保存文字');
-  await page.getByPlaceholder('输入文本描述...').press('ControlOrMeta+s');
-  await expect.poll(async () => (await read()).nodes[0].data.prompt).toBe('快捷键保存文字');
+  await page.getByRole('textbox', { name: '提示词' }).fill('浏览器真实编辑');
+  await expect.poll(async () => (await read()).nodes[0].data.prompt).toEqual([{ text: '浏览器真实编辑' }]);
+  await expect(page.getByRole('textbox', { name: '提示词' })).toBeFocused();
+  await page.getByRole('textbox', { name: '提示词' }).fill('快捷键保存文字');
+  await page.getByRole('textbox', { name: '提示词' }).press('ControlOrMeta+s');
+  await expect.poll(async () => (await read()).nodes[0].data.prompt).toEqual([{ text: '快捷键保存文字' }]);
   const version = (await read()).version;
   // A new browser context has no IndexedDB/localStorage and reads the same SQLite-backed API.
   const clean = await context.browser()!.newContext();
@@ -209,7 +209,7 @@ test('API offline edits survive refresh and automatically sync into a clean brow
   // Static assets stay online: this tests API recovery, not an offline app shell.
   await page.route('**/api/workflow/**', route => route.abort());
   await page.locator('.react-flow__node').click();
-  await page.getByPlaceholder('输入文本描述...').fill('离线编辑后刷新');
+  await page.getByRole('textbox', { name: '提示词' }).fill('离线编辑后刷新');
   await page.getByRole('button', { name: '未命名项目', exact: true }).click();
   await page.getByPlaceholder('项目名称...').fill('离线恢复项目');
   await page.getByPlaceholder('项目名称...').press('Enter');
@@ -261,13 +261,13 @@ for (const mode of ['create', 'update'] as const) {
     if (mode === 'create') await addTextNode(page);
     else {
       await page.locator('.react-flow__node').click();
-      await page.getByPlaceholder('输入文本描述...').fill('服务端已写入但响应丢失');
+      await page.getByRole('textbox', { name: '提示词' }).fill('服务端已写入但响应丢失');
     }
     await expect.poll(() => committedVersion).toBe(mode === 'create' ? 1 : 2);
     const original = sent[0];
     const id = original.id;
     await page.locator('.react-flow__node').click();
-    await page.getByPlaceholder('输入文本描述...').fill('确认前产生的新修改');
+    await page.getByRole('textbox', { name: '提示词' }).fill('确认前产生的新修改');
     await expect.poll(async () => (await localDraft(page, id)).localVersion).toBeGreaterThan(original.localVersion);
     const pending = await localDraft(page, id);
     await page.reload();
@@ -305,11 +305,11 @@ test('browser reconnect wakes locally committed edits without manual saving', as
   const id = new URL(page.url()).searchParams.get('project')!;
   await page.locator('.react-flow__node').click();
   await context.setOffline(true);
-  await page.getByPlaceholder('输入文本描述...').fill('重新联网后补传');
+  await page.getByRole('textbox', { name: '提示词' }).fill('重新联网后补传');
   await expect(page.getByTestId('canvas-save-status')).toHaveText('已保存到本地，待同步');
   const draft = await localDraft(page, id);
   expect(draft.localVersion).toBeGreaterThan(draft.confirmedLocalVersion);
   await context.setOffline(false);
   await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
-  expect((await (await request.get(`/api/workflow/${id}`)).json()).data.nodes[0].data.prompt).toBe('重新联网后补传');
+  expect((await (await request.get(`/api/workflow/${id}`)).json()).data.nodes[0].data.prompt).toEqual([{ text: '重新联网后补传' }]);
 });
