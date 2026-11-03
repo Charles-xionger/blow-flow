@@ -7,11 +7,10 @@ const { getModelsByCategory, getImageModels, getModelDefinition } = require('../
 test('current Gemini models can be selected and old project selections still resolve', () => {
   const textModels = getModelsByCategory('TEXT');
   assert.equal(textModels[0].id, 'gemini-3.8-flash');
-  for (const id of ['gemini-3.8-flash', 'gemini-4-argon', 'gemini-3.5-flash-lite']) {
+  for (const id of ['gemini-3.8-flash', 'gemini-4-argon']) {
     assert.equal(textModels.find(model => model.id === id)?.provider, 'gemini');
   }
   for (const [name, id] of [
-    ['Gemini 3.1 Flash-Lite', 'gemini-3.1-flash-lite'],
     ['Gemini 3 Flash Preview', 'gemini-3-flash-preview'],
   ]) {
     assert.equal(getModelDefinition(name)?.id, id);
@@ -24,6 +23,7 @@ test('current Gemini models can be selected and old project selections still res
   assert.equal(getModelDefinition('Gemini 2.5 Pro')?.id, 'gemini-3.8-flash');
   assert.equal(getModelDefinition('gemini-2.5-pro')?.id, 'gemini-3.8-flash');
   assert.equal(textModels.some(model => model.name === 'Gemini 2.5 Pro'), false);
+  assert.equal(textModels.some(model => /lite/i.test(model.id)), false);
   const imageModels = getImageModels();
   assert.equal(imageModels[0].value, 'Nano Banana 2.1');
   for (const [name, id] of [

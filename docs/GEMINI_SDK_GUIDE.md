@@ -46,9 +46,7 @@ curl -X POST http://localhost:3000/api/test/gemini \
 | ---------------------- | ------------------------ | ------------------ |
 | Gemini 3.8 Flash       | `gemini-3.8-flash`       | 通用文本生成 |
 | Gemini 4 Argon         | `gemini-4-argon`         | 复杂推理 |
-| Gemini 3.5 Flash-Lite  | `gemini-3.5-flash-lite`  | 低延迟、低成本 |
 | Gemini 3 Flash Preview | `gemini-3-flash-preview` | 保留的旧文本选项 |
-| Gemini 3.1 Flash-Lite | `gemini-3.1-flash-lite` | 低成本的旧文本选项 |
 
 ### 图片生成模型
 

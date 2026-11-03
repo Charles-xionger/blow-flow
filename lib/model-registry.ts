@@ -37,24 +37,10 @@ const BUILTIN_MODELS: Record<string, ModelDefinition> = {
     defaultEndpoint: "",
     provider: "gemini",
   },
-  "Gemini 3.5 Flash-Lite": {
-    id: "gemini-3.5-flash-lite",
-    name: "Gemini 3.5 Flash-Lite",
-    category: "TEXT",
-    defaultEndpoint: "",
-    provider: "gemini",
-  },
   // 保留仍可用的旧文本型号，让用户自行选择成本与效果。
   "Gemini 3 Flash Preview": {
     id: "gemini-3-flash-preview",
     name: "Gemini 3 Flash Preview",
-    category: "TEXT",
-    defaultEndpoint: "",
-    provider: "gemini",
-  },
-  "Gemini 3.1 Flash-Lite": {
-    id: "gemini-3.1-flash-lite",
-    name: "Gemini 3.1 Flash-Lite",
     category: "TEXT",
     defaultEndpoint: "",
     provider: "gemini",

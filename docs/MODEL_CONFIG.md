@@ -12,9 +12,7 @@
 
 - **Gemini 3.8 Flash** (`gemini-3.8-flash`) - 通用文本生成，分镜自动选择时使用
 - **Gemini 4 Argon** (`gemini-4-argon`) - 复杂推理
-- **Gemini 3.5 Flash-Lite** (`gemini-3.5-flash-lite`) - 低延迟、低成本
 - **Gemini 3 Flash Preview** (`gemini-3-flash-preview`) - 保留的旧文本选项
-- **Gemini 3.1 Flash-Lite** (`gemini-3.1-flash-lite`) - 低成本的旧文本选项
 
 旧项目中的 Gemini 3 Flash Preview 保持原型号。已从目录移除的 Gemini 2.5 Pro 和已停用的 Gemini 3 Pro Preview 在文本选择器中显示为 Gemini 3.8 Flash，保存的项目数据不作批量改写。
 
@@ -89,7 +87,6 @@ GEMINI_API_KEY=your_gemini_api_key_here
 
 - **通用任务**：Gemini 3.8 Flash
 - **复杂推理**：Gemini 4 Argon
-- **成本优先**：Gemini 3.5 Flash-Lite
 
 ### 图片生成
 
