@@ -94,6 +94,32 @@ test('invalid IPs and missing interfaces fail before any platform request', () =
   assert.throws(() => createRunningHubTransport({ origin: 'https://127.0.0.1', connectIp: '127.0.0.1' }), /hostname/);
 });
 
+test('a network change fails requests without crashing and heals when the interface has an address again', async t => {
+  const port = await listen(t, http.createServer((req, res) => res.end(req.socket.remoteAddress)));
+  // A child observes crashes: an unhandled socket error would kill it instead of rejecting.
+  const code = `require('./scripts/register-typescript.cjs');
+    const assert = require('node:assert/strict');
+    const os = require('node:os');
+    let current = [{ address: '127.0.0.1', family: 'IPv4' }];
+    os.networkInterfaces = () => ({ wifi0: current });
+    const { createRunningHubTransport } = require('./lib/generation/transport.ts');
+    const origin = 'http://runninghub.invalid:${port}';
+    const transport = createRunningHubTransport({ origin, connectIp: '127.0.0.1', localInterface: 'wifi0' });
+    const get = () => transport.fetch(origin + '/task/openapi/outputs', { method: 'POST', body: '{}' });
+    (async () => {
+      try {
+        current = [{ address: '192.0.2.123', family: 'IPv4' }];
+        await assert.rejects(get(), e => e.cause?.code === 'EADDRNOTAVAIL');
+        current = [];
+        await assert.rejects(get(), e => /no matching address/.test(e.cause?.message));
+        current = [{ address: '127.0.0.1', family: 'IPv4' }];
+        assert.equal(await (await get()).text(), '127.0.0.1');
+        await new Promise(resolve => setTimeout(resolve, 50));
+      } finally { await transport.close(); }
+    })().catch(e => { console.error(e); process.exitCode = 1; });`;
+  await promisify(execFile)(process.execPath, ['-e', code], { timeout: 15000 });
+});
+
 test('pinned HTTPS retains SNI and certificate hostname verification', async t => {
   const dir = mkdtempSync(join(tmpdir(), 'generation-tls-')); t.after(() => rmSync(dir, { recursive: true, force: true }));
   const key = join(dir, 'key.pem'), cert = join(dir, 'cert.pem');

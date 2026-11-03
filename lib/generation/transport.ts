@@ -1,7 +1,7 @@
 import { lookup as systemLookup } from 'node:dns';
 import { isIP, type LookupFunction } from 'node:net';
 import { networkInterfaces } from 'node:os';
-import { Agent } from 'undici';
+import { Agent, buildConnector } from 'undici';
 
 interface RunningHubNetworkConfig {
   origin?: string;
@@ -28,18 +28,29 @@ export function createRunningHubTransport(config: RunningHubNetworkConfig = {
     target.pathname !== '/' || target.search || target.hash || isIP(target.hostname))
     throw new Error('RunningHub network origin must contain a hostname, without credentials or a path');
 
-  // Resolve the current interface address at worker startup instead of persisting a DHCP address.
-  const localAddress = localInterface ? networkInterfaces()[localInterface]?.find(address =>
-    address.family === (family === 4 ? 'IPv4' : 'IPv6'))?.address : undefined;
-  if (localInterface && !localAddress)
+  // Read the interface address per connection instead of persisting a DHCP address, so a
+  // network change heals once the interface has an address again. Startup still requires one.
+  const interfaceAddress = () => networkInterfaces()[localInterface!]?.find(address =>
+    address.family === (family === 4 ? 'IPv4' : 'IPv6'))?.address;
+  if (localInterface && !interfaceAddress())
     throw new Error('RUNNINGHUB_LOCAL_INTERFACE has no address matching RUNNINGHUB_CONNECT_IP');
 
   const lookup: LookupFunction = (hostname, options, callback) => {
     if (hostname !== target.hostname) { systemLookup(hostname, options, callback); return; }
-    if (options.all) callback(null, [{ address: connectIp, family }]);
-    else callback(null, connectIp, family);
+    // Answer asynchronously like dns.lookup: a synchronous answer makes a failed bind (the interface
+    // lost this address after a network change) emit a second socket error nothing listens for.
+    process.nextTick(() => {
+      if (options.all) callback(null, [{ address: connectIp, family }]);
+      else callback(null, connectIp, family);
+    });
   };
-  const dispatcher = new Agent({ localAddress, connect: { lookup } });
+  const connector = buildConnector({ lookup });
+  const dispatcher = new Agent({ connect: localInterface ? (options, callback) => {
+    const localAddress = interfaceAddress();
+    // Never fall back to another egress: without an address on this interface the request fails.
+    if (!localAddress) { callback(new Error('RUNNINGHUB_LOCAL_INTERFACE currently has no matching address'), null); return; }
+    connector({ ...options, localAddress }, callback);
+  } : connector });
   const platformFetch: typeof fetch = (input, init) => {
     const url = new URL(input instanceof Request ? input.url : input);
     if (url.origin !== target.origin) return globalThis.fetch(input, init);

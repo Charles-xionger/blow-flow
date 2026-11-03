@@ -50,7 +50,7 @@ RUNNINGHUB_CONNECT_IP=43.168.19.45
 RUNNINGHUB_LOCAL_INTERFACE=en0
 ```
 
-此 IP 是本次实测可用的香港 CDN 节点示例，备用实测地址为 `43.175.132.232`；CDN 地址会变化，部署前须重新核实，不把它视为永久服务地址。`en0` 是本机的 Wi-Fi 网卡，其他部署环境应使用实际网卡名。worker 启动时读取该网卡当前地址，换网后应重启；指定网卡不存在或没有匹配的 IP 地址族时启动失败，不悄悄切回其他出口。绑定本地地址的路由效果取决于操作系统与 VPN，迁移机器后需重新验证。
+此 IP 是本次实测可用的香港 CDN 节点示例，备用实测地址为 `43.175.132.232`；CDN 地址会变化，部署前须重新核实，不把它视为永久服务地址。`en0` 是本机的 Wi-Fi 网卡，其他部署环境应使用实际网卡名。worker 每次建立平台连接时读取该网卡当前地址：同一网卡换网后取得新地址即自动恢复，无需重启；网卡暂时没有匹配地址或地址已失效时，该次请求失败（查询按暂时性错误有限重试），进程不会退出。启动时指定网卡不存在或没有匹配的 IP 地址族则启动失败；任何时候都不悄悄切回其他出口，改用其他网卡需修改 `RUNNINGHUB_LOCAL_INTERFACE` 并重启。绑定本地地址的路由效果取决于操作系统与 VPN，迁移机器后需重新验证。
 
 `lib/generation/transport.ts` 通过 Undici 的连接解析设置选择 IP，保留域名 URL、Host、TLS SNI 和证书验证。该设置只应用于与 `RUNNINGHUB_BASE_URL` 相同 origin 的 HTTP 请求；未填写 BASE_URL 时网络选路的目标默认为 `https://www.runninghub.ai`。使用自定义 `GENERATION_CONFIG_PATH` 时，BASE_URL 应与希望覆盖的连接 origin 一致。素材上传、任务创建和 HTTP 状态查询共用同一个传输实例，OSS 下载、其他平台、产物转存与平台返回的 WebSocket 地址保持原有路由。WebSocket 不通时仍由原有 HTTP 查询兜底。
 
