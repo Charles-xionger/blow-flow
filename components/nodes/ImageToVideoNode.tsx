@@ -16,7 +16,7 @@ import { consoleSelectClass, narrowConsoleSelectClass } from "./shared/ConsoleCo
 import { NodeConnections } from "./shared/NodeConnections";
 import { NodeConsole } from "./shared/NodeConsole";
 import { PromptEditor } from "./shared/PromptEditor";
-import { VideoGenerationPanel } from "./shared/VideoGenerationPanel";
+import { TaskVideoNode } from "./shared/TaskVideoNode";
 import { VideoStage } from "./shared/VideoStage";
 import { VideoToolbarActions } from "./shared/VideoToolbarActions";
 
@@ -86,7 +86,7 @@ const ImageToVideoNode = (props: NodeProps<Node<NodeData>>) => {
       const result = await response.json();
 
       if (result.success && result.data) {
-        updateNodeData(id, { prompt: result.data });
+        updateNodeData(id, { prompt: promptSegments(result.data) });
       } else {
         throw new Error(result.error || "生成提示词失败");
       }
@@ -151,7 +151,7 @@ const ImageToVideoNode = (props: NodeProps<Node<NodeData>>) => {
   ];
   if (data.model && !modelOptions.some(m => m.id === data.model)) modelOptions.push({ id: data.model, label: data.model });
   if (taskModel || data.usesGenerationTasks || data.model === 'runninghub-h3')
-    return <VideoGenerationPanel node={props} model={taskModel} models={modelOptions} task={task} />;
+    return <TaskVideoNode node={props} model={taskModel} models={modelOptions} task={task} />;
 
   const promptAction = hasPrompt ? "优化提示词" : "AI 生成提示词";
 

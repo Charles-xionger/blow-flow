@@ -19,7 +19,7 @@ export const BaseNode = memo(function BaseNode({ children, ...props }: NodeProps
   const definition = nodeDefinitions[data.type];
   return (
     <SurfaceContext.Provider value={{ dragging, selected, loading: !!data.isLoading, error: !!data.error, width: 320, height: definition.height }}>
-      <div style={{ width: 320 }} className={cn("relative", dragging && "[&_.node-panel]:invisible [&_.node-panel]:pointer-events-none")}>
+      <div style={{ width: 320 }} className="relative">
         <EditableTitle nodeId={id} defaultTitle={nodeName({ ...data, customTitle: undefined })} customTitle={data.customTitle} />
         {definition.input && <Handle type="target" position={Position.Left} id="input" isConnectable={isConnectable} />}
         <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center">

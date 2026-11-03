@@ -1,34 +1,6 @@
 /* Adapted from comfyArt src/styles/canvas.css. Copyright (c) 2026 Terry Jia.
  * MIT license: see THIRD_PARTY_NOTICES.md. Scoped to image generation controls. */
-.panel {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  width: 400px;
-  padding: 12px 8px 8px 16px;
-  border-radius: 20px;
-  background: #1a1a1a;
-  border: 1px solid rgb(255 255 255 / 10%);
-  box-shadow: 0 4px 16px rgb(0 0 0 / 50%);
-  color: #e4e4e7;
-  font-size: 13px;
-  line-height: 20px;
-}
-.panel textarea.prompt {
-  min-height: 56px;
-  max-height: 160px;
-  padding: 0 8px 0 0;
-  border: 0;
-  border-radius: 0;
-  resize: none;
-  background: transparent;
-  color: inherit;
-  font-size: 14px;
-  box-shadow: none;
-}
-.prompt:focus-visible { outline: none; }
-.foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-left: -8px; }
-.pill, .panel select.model {
+.pill {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -42,9 +14,7 @@
   white-space: nowrap;
   cursor: pointer;
 }
-.panel select.model { width: 120px; min-width: 0; text-overflow: ellipsis; }
-.panel option { background: #232323; }
-.pill:hover, .pill[aria-expanded="true"], .model:hover { background: rgb(255 255 255 / 8%); }
+.pill:hover, .pill[aria-expanded="true"] { background: rgb(255 255 255 / 8%); }
 .pill:focus-visible, .chip:focus-visible, .ratio:focus-visible, .close:focus-visible { outline: 2px solid #a855f7; outline-offset: 2px; }
 .settings {
   position: fixed;

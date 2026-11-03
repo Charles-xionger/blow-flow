@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Download, Expand, User } from "lucide-react";
 import { toast } from "sonner";
-import { ImagePreview, SaveAsCharacterDialog, downloadImage } from "@/components/ui/image-with-actions";
+import { ImagePreview, SaveAsCharacterDialog, downloadImage } from "@/components/ui/media-actions";
 import { expandPrompt } from "@/lib/canvas/prompt";
 import { useCanvasStore } from "@/store/useCanvasStore";
 import { NodeToolbarButton } from "../NodeShell";

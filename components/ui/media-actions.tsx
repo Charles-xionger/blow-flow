@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, Expand, X, ZoomIn, ZoomOut, User } from "lucide-react";
+import { X, ZoomIn, ZoomOut, User } from "lucide-react";
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -12,14 +12,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { toast } from "sonner";
-
-interface ImageWithActionsProps {
-  src: string | undefined;
-  alt?: string;
-  className?: string;
-  onSaveAsCharacter?: () => void | Promise<void>;
-}
 
 export const downloadImage = (src: string) => downloadFile(src, `image-${Date.now()}.png`);
 export const downloadVideo = (src: string) => downloadFile(src, `video-${Date.now()}.mp4`);
@@ -198,88 +190,5 @@ export function SaveAsCharacterDialog({ src, alt = "图片", onClose, onConfirm 
       </DialogFooter>
     </DialogContent>
   </Dialog>
-  );
-}
-
-export function ImageWithActions({
-  src,
-  alt = "图片",
-  className = "",
-  onSaveAsCharacter,
-}: ImageWithActionsProps) {
-  const [showPreview, setShowPreview] = useState(false);
-  const [isHovered, setIsHovered] = useState(false);
-  const [showSaveDialog, setShowSaveDialog] = useState(false);
-
-  if (!src) return null;
-
-  const handleDownload = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-    await downloadImage(src);
-  };
-
-  const handlePreview = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setShowPreview(true);
-  };
-
-  return (
-    <>
-      <div
-        className="relative w-full h-full group"
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <img src={src} alt={alt} className={className} />
-
-        {/* 工具菜单 */}
-        {isHovered && (
-          <div
-            className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col gap-2 z-50 pointer-events-auto"
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <button
-              onClick={handlePreview}
-              onMouseDown={(e) => e.stopPropagation()}
-              className="p-2 rounded-lg bg-black/80 hover:bg-black text-white backdrop-blur-sm transition-all hover:scale-110 cursor-pointer"
-              title="预览"
-            >
-              <Expand size={16} />
-            </button>
-            <button
-              onClick={handleDownload}
-              onMouseDown={(e) => e.stopPropagation()}
-              className="p-2 rounded-lg bg-black/80 hover:bg-black text-white backdrop-blur-sm transition-all hover:scale-110 cursor-pointer"
-              title="下载"
-            >
-              <Download size={16} />
-            </button>
-            {onSaveAsCharacter && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowSaveDialog(true);
-                }}
-                onMouseDown={(e) => e.stopPropagation()}
-                className="p-2 rounded-lg bg-purple-600/80 hover:bg-purple-600 text-white backdrop-blur-sm transition-all hover:scale-110 cursor-pointer"
-                title="保存为角色"
-              >
-                <User size={16} />
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-
-      {showPreview && typeof document !== "undefined" && (
-        <ImagePreview src={src} alt={alt} onClose={() => setShowPreview(false)} />
-      )}
-
-      {showSaveDialog && onSaveAsCharacter && (
-        <SaveAsCharacterDialog src={src} alt={alt} onClose={() => setShowSaveDialog(false)} onConfirm={onSaveAsCharacter} />
-      )}
-    </>
   );
 }

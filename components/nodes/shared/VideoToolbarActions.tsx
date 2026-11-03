@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { Download, Expand } from "lucide-react";
-import { downloadVideo } from "@/components/ui/image-with-actions";
+import { downloadVideo } from "@/components/ui/media-actions";
 import { NodeToolbarButton } from "../NodeShell";
 
 function VideoPreview({ src, onClose }: { src: string; onClose: () => void }) {

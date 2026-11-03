@@ -123,7 +123,7 @@ const StartEndToVideoNode = (props: NodeProps<Node<NodeData>>) => {
 
       const result = await response.json();
       if (result.success && result.data) {
-        updateNodeData(id, { prompt: result.data });
+        updateNodeData(id, { prompt: promptSegments(result.data) });
       } else {
         throw new Error(result.error || "生成提示词失败");
       }

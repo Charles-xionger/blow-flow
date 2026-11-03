@@ -18,7 +18,7 @@ import { NodeConsole } from './NodeConsole';
 import { PromptEditor } from './PromptEditor';
 import { VideoStage } from './VideoStage';
 import { VideoToolbarActions } from './VideoToolbarActions';
-import styles from './VideoGenerationPanel.module.css';
+import styles from './TaskVideoNode.module.css';
 
 interface Props {
   node: NodeProps<Node<NodeData>>; model?: PublicModel;
@@ -28,7 +28,7 @@ interface Props {
 const emptyReferences: VideoReference[] = [];
 const emptyOrder: string[] = [];
 
-export function VideoGenerationPanel({ node, model, models, task }: Props) {
+export function TaskVideoNode({ node, model, models, task }: Props) {
   const { id, data } = node;
   const update = useCanvasStore(s => s.updateNodeData);
   const sources = useCanvasStore(useShallow(s => s.edges.filter(e => e.target === id)
