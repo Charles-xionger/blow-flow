@@ -1,7 +1,7 @@
 require('../scripts/register-typescript.cjs');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { expandPrompt, promptIsEmpty, promptSegments, promptText, referenceImages, upstreamNodes } = require('../lib/canvas/prompt.ts');
+const { appendPromptText, expandPrompt, promptIsEmpty, promptSegments, promptText, promptWithLabels, referenceImages, upstreamNodes } = require('../lib/canvas/prompt.ts');
 
 test('an old prompt string reads as one text segment and an absent prompt as none', () => {
   assert.deepEqual(promptSegments('一朵花'), [{ text: '一朵花' }]);
@@ -85,4 +85,17 @@ test('a reference to a node that is no longer connected sends nothing', () => {
 test('a character with no reference images falls back to its own image', () => {
   const graph = { nodes: [target([]), { id: 'c', data: { type: 'character', label: '小明', imageSrc: 'own.png', characterData: { referenceImages: [] } } }], edges: link('c') };
   assert.deepEqual(referenceImages('target', graph), ['own.png']);
+});
+
+test('a model with its own reference format sends its labels, and a reference without one sends nothing', () => {
+  const prompt = [{ text: '让' }, { ref: 'a' }, { text: '走进' }, { ref: 'b' }, { ref: 'gone' }];
+  assert.equal(promptWithLabels(prompt, new Map([['a', '<Picture 1>'], ['b', '<Video 1>']])), '让<Picture 1>走进<Video 1>');
+  assert.equal(promptWithLabels('手写', new Map()), '手写');
+});
+
+test('appending text keeps references and joins the last text segment', () => {
+  assert.deepEqual(appendPromptText([{ ref: 'a' }, { text: '走' }], '<Audio 1>'), [{ ref: 'a' }, { text: '走<Audio 1>' }]);
+  assert.deepEqual(appendPromptText([{ ref: 'a' }], '<Audio 1>'), [{ ref: 'a' }, { text: '<Audio 1>' }]);
+  assert.deepEqual(appendPromptText('手写', '<Audio 1>'), [{ text: '手写<Audio 1>' }]);
+  assert.deepEqual(appendPromptText(undefined, '<Audio 1>'), [{ text: '<Audio 1>' }]);
 });

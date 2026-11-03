@@ -24,7 +24,7 @@ export function NodeShell({ toolbar, console: nodeConsole, stageTestId, children
       <NodeSurface testId={stageTestId}>{children}</NodeSurface>
       {open && toolbar && (
         <div role="toolbar" aria-label="节点工具栏"
-          className="nodrag nopan absolute bottom-full left-1/2 z-70 mb-8 flex -translate-x-1/2 items-center gap-0.5 rounded-xl border border-white/10 bg-[#222] p-1 shadow-xl">
+          className="nokey nodrag nopan absolute bottom-full left-1/2 z-70 mb-8 flex -translate-x-1/2 items-center gap-0.5 rounded-xl border border-white/10 bg-[#222] p-1 shadow-xl">
           {toolbar}
         </div>
       )}

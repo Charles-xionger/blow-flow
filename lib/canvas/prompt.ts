@@ -19,17 +19,28 @@ export function promptIsEmpty(prompt: Prompt | undefined): boolean {
   return !promptText(prompt).trim();
 }
 
+/** For a model with its own reference format, which gives each referenced node's label. */
+export function promptWithLabels(prompt: Prompt | undefined, labels: ReadonlyMap<string, string>): string {
+  return promptSegments(prompt).map(segment => 'text' in segment ? segment.text : labels.get(segment.ref) ?? '').join('');
+}
+
+export function appendPromptText(prompt: Prompt | undefined, text: string): Segment[] {
+  const segments = promptSegments(prompt);
+  const last = segments[segments.length - 1];
+  return last && 'text' in last ? [...segments.slice(0, -1), { text: last.text + text }] : [...segments, { text }];
+}
+
 type PromptNodeData = Pick<NodeData, 'type' | 'label' | 'customTitle' | 'prompt' | 'imageSrc'> & {
   characterData?: { referenceImages?: string[] };
 };
 type PromptNode = { id: string; data: PromptNodeData };
 export type PromptGraph = { nodes: readonly PromptNode[]; edges: readonly { source: string; target: string }[] };
-export type UpstreamNode = { id: string; kind: 'text' | 'image'; label: string; name: string; src?: string };
+export type UpstreamNode = { id: string; kind: 'text' | 'image' | 'video'; label: string; name: string; src?: string };
 
 // Kept as literals so this module has no runtime dependency on the app's type modules.
 const textSources: ReadonlySet<string> = new Set(['text', 'creativeDesc', 'storyboard']);
 // Node types that take text input and whose console edits references. Old text boxes would show and send the converted text.
-const referencingNodeTypes: ReadonlySet<string> = new Set(['textToImage']);
+const referencingNodeTypes: ReadonlySet<string> = new Set(['textToImage', 'textToVideo']);
 
 /** The name shown as the node's title. */
 export function nodeName(data: Pick<NodeData, 'type' | 'label' | 'customTitle'>): string {

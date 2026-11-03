@@ -603,3 +603,130 @@ test('图生图：生成中节点展示区显示进度，控制台的按钮不�
   await expect(page.getByTestId('image-preview').getByText('生成中...')).toBeVisible();
   await expect(panel.getByRole('button', { name: '生成中' })).toBeDisabled();
 });
+
+const videoAsset = 'https://video-fixture.test/result.mp4';
+async function openVideoNode(page: Page, request: APIRequestContext, type: 'textToVideo' | 'imageToVideo', data: Record<string, unknown> = {}, sources: Record<string, unknown>[] = []) {
+  await page.route('https://video-fixture.test/**', route => route.fulfill({ path: 'tests/fixtures/h3/reference.mp4', contentType: 'video/mp4', headers: { 'access-control-allow-origin': '*' } }));
+  const id = crypto.randomUUID();
+  expect((await request.put(`/api/workflow/${id}`, { data: { id, requestId: crypto.randomUUID(), baseVersion: 0, snapshot: { name: '视频', nodes: [
+    { id: 'video', type, position: { x: 520, y: 120 }, data: { type, label: '视频', model: type === 'textToVideo' ? 'Sora 2' : 'sora-2', prompt: '海浪', ...data } }, ...sources,
+  ], edges: sources.map(source => ({ id: `link-${source.id}`, source: source.id, target: 'video', sourceHandle: 'output', targetHandle: 'input' })), viewport: { x: 0, y: 0, zoom: 1 } } } })).ok()).toBeTruthy();
+  await page.goto(`/?project=${id}`);
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
+  const node = page.locator('.react-flow__node[data-id="video"]');
+  await expect(page.getByRole('region', { name: '节点控制台' })).toHaveCount(0);
+  await expect(page.locator('.tiptap')).toHaveCount(0);
+  await node.click();
+  return { node, panel: page.getByRole('region', { name: '节点控制台' }), toolbar: page.getByRole('toolbar', { name: '节点工具栏' }) };
+}
+const captureVideo = async (page: Page, path: string, response: Record<string, unknown> = { success: false, error: '测试已捕获' }) => {
+  const runs: Record<string, unknown>[] = [];
+  await page.route(`**/api/generate/${path}`, async route => { runs.push(route.request().postDataJSON()); await route.fulfill({ json: response }); });
+  return runs;
+};
+const textSource = { id: 'scene', type: 'text', position: { x: 30, y: 120 }, data: { type: 'text', label: '文本', customTitle: '场景', prompt: '黄昏' } };
+const imageSource = (key: string, y: number, fill: string) => ({ id: key, type: 'originalImage', position: { x: 30, y }, data: { type: 'originalImage', label: '原图', customTitle: key, imageSrc: swatch(fill) } });
+
+test('文生视频：三层结构，配置和运行同一行，手写内容和引用的文本都发送，配置值不变', async ({ page, request }) => {
+  const runs = await captureVideo(page, 'video');
+  const { node, panel } = await openVideoNode(page, request, 'textToVideo', { prompt: [{ text: '海浪' }, { ref: 'scene' }] }, [textSource]);
+  await expect(panel.getByRole('list', { name: '连接的上游节点' }).getByTitle('场景')).toBeVisible();
+  await expect(editorOf(page).locator('[data-node-reference]')).toHaveCount(1);
+  const run = panel.getByRole('button', { name: '生成', exact: true });
+  const middle = async (name: string) => { const box = (await panel.getByRole('combobox', { name }).boundingBox())!; return box.y + box.height / 2; };
+  const runBox = (await run.boundingBox())!;
+  for (const name of ['视频模型', '视频时长', '视频画幅']) expect(await middle(name)).toBeCloseTo(runBox.y + runBox.height / 2, 0);
+  await panel.getByRole('combobox', { name: '视频时长' }).selectOption('10s');
+  await panel.getByRole('combobox', { name: '视频画幅' }).selectOption('9:16');
+  await panel.getByRole('button', { name: '提示词优化' }).click();
+  await run.click();
+  await expect.poll(() => runs[0]?.prompt).toBe('海浪黄昏');
+  expect(runs[0]).toMatchObject({ model: 'Sora 2', duration: '10s', aspectRatio: '9:16', promptOptimize: true });
+  await expect(panel.getByRole('alert')).toHaveText('测试已捕获');
+  const box = (await node.boundingBox())!;
+  await page.mouse.move(box.x + 100, box.y + 100);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 160, box.y + 120, { steps: 5 });
+  await expect(panel).toHaveCount(0);
+  await page.mouse.up();
+});
+
+test('文生视频：提示词为空时不能运行', async ({ page, request }) => {
+  const { panel } = await openVideoNode(page, request, 'textToVideo', { prompt: ' ' });
+  await expect(panel.getByRole('button', { name: '生成', exact: true })).toBeDisabled();
+});
+
+test('视频节点工具栏：没有结果时不可用，有结果时可以预览和下载；展示区保留播放器', async ({ page, request }) => {
+  const empty = await openVideoNode(page, request, 'textToVideo');
+  for (const name of ['预览', '下载']) await expect(empty.toolbar.getByRole('button', { name, exact: true })).toBeDisabled();
+  await expect(empty.toolbar.getByRole('button', { name: '保存为角色' })).toHaveCount(0);
+  const { node, toolbar } = await openVideoNode(page, request, 'imageToVideo', { videoSrc: videoAsset });
+  await expect(node.locator('video')).toHaveAttribute('controls', '');
+  await toolbar.getByRole('button', { name: '预览', exact: true }).click();
+  await expect(page.locator('body > div.fixed video')).toHaveAttribute('src', videoAsset);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('body > div.fixed video')).toHaveCount(0);
+  await expect(toolbar).toBeVisible();
+  const download = page.waitForEvent('download');
+  await toolbar.getByRole('button', { name: '下载', exact: true }).click();
+  expect((await download).suggestedFilename()).toMatch(/^video-\d+\.mp4$/);
+});
+
+test('图生视频：连接层可以引用和排序，发送连接层第一张图和全部配置；没有图或提示词时不能运行', async ({ page, request }) => {
+  const runs = await captureVideo(page, 'image-to-video');
+  const noImage = await openVideoNode(page, request, 'imageToVideo');
+  await expect(noImage.panel.getByRole('button', { name: '生成', exact: true })).toBeDisabled();
+  await expect(noImage.panel.getByText('请连接一个图片节点作为输入')).toBeVisible();
+  await expect(noImage.panel.getByRole('button', { name: '优化提示词' })).toBeDisabled();
+  const { panel } = await openVideoNode(page, request, 'imageToVideo', { prompt: '' }, [imageSource('red', 30, 'red'), imageSource('blue', 330, 'blue')]);
+  const layer = panel.getByRole('list', { name: '连接的上游节点' });
+  await expect(panel.getByRole('button', { name: '生成', exact: true })).toBeDisabled();
+  await editorOf(page).click();
+  await page.keyboard.type('让@');
+  await page.getByRole('listbox', { name: '引用连接的节点' }).getByRole('option', { name: /blue/ }).click();
+  const first = (await layer.getByTitle('图片1 · red').boundingBox())!;
+  const second = (await layer.getByTitle('图片2 · blue').boundingBox())!;
+  await page.mouse.move(first.x + first.width / 2, first.y + first.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(second.x + second.width / 2, second.y + second.height / 2, { steps: 6 });
+  await page.mouse.up();
+  await expect(layer.getByTitle('图片1 · blue')).toBeVisible();
+  for (const [name, value] of [['视频时长', '8'], ['视频分辨率', '1080P'], ['视频画幅', '9:16']]) await panel.getByRole('combobox', { name }).selectOption(value);
+  await panel.getByRole('button', { name: '生成', exact: true }).click();
+  await expect.poll(() => runs[0]?.prompt).toBe('让图片1');
+  expect(runs[0]).toMatchObject({ inputImage: swatch('blue'), duration: 8, resolution: '1080P', aspectRatio: '9:16' });
+  await expect(panel.getByRole('alert')).toHaveText('测试已捕获');
+});
+
+test('图生视频：AI 生成提示词写入编辑器', async ({ page, request }) => {
+  const sent: { currentPrompt?: string; context: { inputImage: string } }[] = [];
+  await page.route('**/api/generate-prompt', async route => { sent.push(route.request().postDataJSON()); await route.fulfill({ json: { success: true, data: '生成的提示词' } }); });
+  const { panel } = await openVideoNode(page, request, 'imageToVideo', { prompt: [{ text: '让' }, { ref: 'red' }] }, [imageSource('red', 30, 'red')]);
+  await panel.getByRole('button', { name: '优化提示词' }).click();
+  await expect(editorOf(page)).toHaveText('生成的提示词');
+  expect(sent[0]).toMatchObject({ currentPrompt: '让图片1', context: { inputImage: swatch('red') } });
+});
+
+test('图生视频：任务恢复和重试保存仍在节点控制台', async ({ page, request }) => {
+  await page.route('**/api/generation/tasks/missing-task', route => route.abort());
+  const { panel } = await openVideoNode(page, request, 'imageToVideo', { generationTaskId: 'missing-task', generationBlocked: true, generationCanRetrySave: true });
+  await expect(panel.getByRole('button', { name: '继续查询原任务' })).toBeVisible();
+  await expect(panel.getByRole('button', { name: '重试保存（不重新生成）' })).toBeVisible();
+});
+
+test('焦点在节点控制台或节点工具栏的按钮上时，Backspace 不删除节点', async ({ page, request }) => {
+  const { node, panel } = await openImageToImage(page, request);
+  await panel.getByRole('button', { name: '提示词优化' }).focus();
+  await page.keyboard.press('Backspace');
+  await expect(node).toHaveCount(1);
+  await panel.getByRole('list', { name: '连接的上游节点' }).getByRole('button', { name: /^断开/ }).first().focus();
+  await page.keyboard.press('Delete');
+  await expect(node).toHaveCount(1);
+});
+
+test('图生视频：连接多张图片时提示此模型只使用第一张', async ({ page, request }) => {
+  const single = await openVideoNode(page, request, 'imageToVideo', {}, [imageSource('red', 30, 'red')]);
+  await expect(single.panel.getByText('此模型只使用连接层的第一张图片')).toHaveCount(0);
+  const many = await openVideoNode(page, request, 'imageToVideo', {}, [imageSource('red', 30, 'red'), imageSource('blue', 330, 'blue')]);
+  await expect(many.panel.getByText('此模型只使用连接层的第一张图片')).toBeVisible();
+});

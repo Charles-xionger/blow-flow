@@ -181,11 +181,12 @@ test('a recovery copy keeps references pointing at the copied nodes', () => {
 });
 
 test('a node type still on the old shell gets no reference, so its text box and sending stay as they were', () => {
-  store.setState({ nodes: [node('video', 'textToVideo', { prompt: '手写' }), node('scene', 'text', { prompt: '花园', customTitle: '场景' })] });
-  store.getState().onConnect(connection('scene', 'video'));
-  assert.equal(promptOf('video'), '手写');
+  store.setState({ nodes: [node('old', 'text', { prompt: '手写' }), node('scene', 'text', { prompt: '花园', customTitle: '场景' })] });
+  store.getState().onConnect(connection('scene', 'old'));
+  assert.equal(store.getState().edges.length, 1);
+  assert.equal(promptOf('old'), '手写');
   store.getState().onEdgesChange(store.getState().edges.map(candidate => ({ type: 'remove', id: candidate.id })));
-  assert.equal(promptOf('video'), '手写');
+  assert.equal(promptOf('old'), '手写');
 });
 
 test('selecting or dragging keeps node identity, so unrelated updates cost nothing', () => {
@@ -197,6 +198,13 @@ test('selecting or dragging keeps node identity, so unrelated updates cost nothi
 });
 
 const image = (id, imageSrc) => node(id, 'originalImage', { imageSrc });
+
+test('connecting a text node to text-to-video appends its reference', () => {
+  store.setState({ nodes: [node('video', 'textToVideo', { prompt: '手写' }), node('scene', 'text', { prompt: '花园' })] });
+  store.getState().onConnect(connection('scene', 'video'));
+  assert.deepEqual(promptOf('video'), [{ text: '手写' }, { ref: 'scene' }]);
+  assert.equal(expandPrompt('video', store.getState()), '手写花园');
+});
 
 test('reordering upstream nodes renumbers references and reorders the material sent, together', () => {
   store.setState({

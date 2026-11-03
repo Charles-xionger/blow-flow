@@ -22,7 +22,7 @@ export function NodeConsole({ data, connections, editor, config, onRun, runDisab
   const blocked = data.isLoading || runDisabled;
   return (
     <section aria-label="节点控制台"
-      className="nodrag nopan nowheel absolute left-1/2 top-full z-70 mt-3 flex w-[440px] -translate-x-1/2 cursor-auto select-text flex-col gap-2 rounded-[20px] border border-white/10 bg-[#1c1c1c] p-3 text-[13px] text-zinc-200 shadow-2xl">
+      className="nokey nodrag nopan nowheel absolute left-1/2 top-full z-70 mt-3 flex w-[440px] -translate-x-1/2 cursor-auto select-text flex-col gap-2 rounded-[20px] border border-white/10 bg-[#1c1c1c] p-3 text-[13px] text-zinc-200 shadow-2xl">
       {connections}
       {editor}
       {(config || onRun) && (

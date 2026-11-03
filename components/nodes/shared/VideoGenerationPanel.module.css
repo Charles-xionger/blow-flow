@@ -1,5 +1,5 @@
-.panel { width: 400px; display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 20px; background: #1a1a1a; color: #e4e4e7; border: 1px solid #ffffff1a; box-shadow: 0 4px 16px #0008; font-size: 13px; }
-.heading, .footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.panel { display: flex; flex-direction: column; gap: 10px; }
+.heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .heading { font-weight: 600; }
 .muted { color: #a1a1aa; font-size: 11px; line-height: 1.5; }
 .references { display: flex; flex-direction: column; gap: 8px; max-height: 220px; overflow: auto; }
@@ -16,12 +16,5 @@
 .actions button { padding: 2px; }
 .panel button { cursor: pointer; }
 .panel button:disabled { opacity: .4; cursor: not-allowed; }
-.panel button:focus-visible, .panel select:focus-visible, .panel textarea:focus-visible { outline: 2px solid #a855f7; outline-offset: 2px; }
 .upload { display: flex; justify-content: center; align-items: center; gap: 6px; padding: 7px; border-radius: 8px; background: #ffffff08; border: 1px solid #ffffff1a; }
-.prompt { width: 100%; min-height: 72px; max-height: 160px; resize: vertical; border: 1px solid #ffffff1a; border-radius: 10px; background: #ffffff06; padding: 8px; color: inherit; }
-.settings { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.settings label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: #a1a1aa; }
-.panel select { height: 32px; border-radius: 8px; background: #27272a; color: #e4e4e7; padding: 0 6px; min-width: 0; }
-.footer select { flex: 1; }
-.generate { padding: 6px 24px; border-radius: 8px; background: #9333ea; color: white; font-weight: 600; }
 .error { color: #fca5a5; padding: 6px 8px; border-radius: 8px; background: #ef444410; font-size: 12px; }

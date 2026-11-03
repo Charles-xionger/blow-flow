@@ -2,7 +2,9 @@
 
 import { Sparkles } from "lucide-react";
 
-export const consoleSelectClass = "h-8 w-28 min-w-0 cursor-pointer truncate rounded-lg bg-transparent px-2 text-xs hover:bg-white/10 [&>option]:bg-[#232323]";
+const selectClass = "h-8 min-w-0 cursor-pointer truncate rounded-lg bg-transparent px-2 text-xs hover:bg-white/10 [&>option]:bg-[#232323]";
+export const consoleSelectClass = `${selectClass} w-28`;
+export const narrowConsoleSelectClass = `${selectClass} w-[72px]`;
 
 export function PromptOptimizeToggle({ active, onChange }: { active: boolean; onChange: (active: boolean) => void }) {
   return (

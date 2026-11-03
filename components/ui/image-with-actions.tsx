@@ -21,13 +21,16 @@ interface ImageWithActionsProps {
   onSaveAsCharacter?: () => void | Promise<void>;
 }
 
-export async function downloadImage(src: string) {
+export const downloadImage = (src: string) => downloadFile(src, `image-${Date.now()}.png`);
+export const downloadVideo = (src: string) => downloadFile(src, `video-${Date.now()}.mp4`);
+
+async function downloadFile(src: string, filename: string) {
   try {
     // 如果是 data URL 或 blob URL，直接使用
     if (src.startsWith("data:") || src.startsWith("blob:")) {
       const link = document.createElement("a");
       link.href = src;
-      link.download = `image-${Date.now()}.png`;
+      link.download = filename;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -48,7 +51,7 @@ export async function downloadImage(src: string) {
     const url = window.URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `image-${Date.now()}.png`;
+    link.download = filename;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -59,14 +62,14 @@ export async function downloadImage(src: string) {
     try {
       const link = document.createElement("a");
       link.href = src;
-      link.download = `image-${Date.now()}.png`;
+      link.download = filename;
       link.target = "_blank";
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
     } catch (fallbackError) {
       console.error("降级下载也失败:", fallbackError);
-      alert("下载失败，请右键点击图片另存为");
+      alert("下载失败，请右键点击另存为");
     }
   }
 }

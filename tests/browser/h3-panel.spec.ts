@@ -35,7 +35,7 @@ async function open(page: Page, request: APIRequestContext, connected = false, d
   const node = page.locator('.react-flow__node[data-id="h3"]');
   await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
   await node.click();
-  await expect(page.getByTestId('video-generation-panel')).toBeVisible();
+  await expect(page.getByRole('region', { name: '节点控制台' })).toBeVisible();
   return { id, node, read: async () => (await (await request.get(`/api/workflow/${id}`)).json()).data.nodes.find((n: { id: string }) => n.id === 'h3').data };
 }
 
@@ -60,7 +60,7 @@ test('H3 combines canvas references and uploads, persists ordering and submits t
   await page.getByRole('combobox', { name: '视频目标时长' }).selectOption('7');
   await expect(page.getByTestId('video-actual-size')).toContainText('1088 × 1920 · 预计 7.29 秒');
   await refs.first().getByRole('button', { name: '<Picture 1>', exact: true }).click();
-  await expect(page.getByPlaceholder('描述视频内容，点击素材编号插入引用…')).toHaveValue('人物走过田野<Picture 1>');
+  await expect(page.getByRole('textbox', { name: '提示词' })).toHaveText('人物走过田野<Picture 1>');
   await expect.poll(async () => (await read()).videoReferenceAudio?.['node:source-video']).toBe(false);
   await expect.poll(async () => (await read()).videoResolution).toBe('1080p');
   await page.reload();
@@ -103,7 +103,7 @@ test('H3 restores a saved MP4 after refresh without submitting generation again'
   expect((await read()).imageSrc).toBeUndefined();
   await page.reload(); await page.locator('.react-flow__node[data-id="h3"]').click();
   await expect(page.getByTestId('video-preview').locator('video')).toHaveAttribute('src', assets + '/saved.mp4');
-  await expect(page.getByTestId('video-generation-panel').getByRole('status')).toHaveText('已保存');
+  await expect(page.getByRole('region', { name: '节点控制台' }).getByRole('status')).toHaveText('已保存');
   await page.screenshot({ path: testInfo.outputPath('h3-recovered-video.png'), animations: 'disabled' });
   expect(submits).toBe(1);
 });
@@ -113,10 +113,63 @@ test('upload limits prevent extra requests and H3 selection preserves legacy vid
   await page.route('**/api/upload/reference', route => { uploads++; return route.fulfill({ json: {} }); });
   await open(page, request);
   await page.getByTestId('reference-file-input').setInputFiles(Array.from({ length: 10 }, (_, i) => ({ name: `image-${i}.png`, mimeType: 'image/png', buffer: Buffer.from('fixture') })));
-  await expect(page.getByTestId('video-generation-panel').getByRole('alert')).toContainText('最多支持 9 张图片'); expect(uploads).toBe(0);
+  await expect(page.getByRole('region', { name: '节点控制台' }).getByRole('alert')).toContainText('最多支持 9 张图片'); expect(uploads).toBe(0);
   await page.getByRole('combobox', { name: '视频模型' }).selectOption('sora-2');
-  await expect(page.getByTestId('video-generation-panel')).toHaveCount(0);
+  await expect(page.getByTestId('reference-file-input')).toHaveCount(0);
   await expect(page.getByText('请连接一个图片节点作为输入')).toBeVisible();
   await page.getByRole('combobox', { name: '视频模型' }).selectOption('runninghub-h3');
-  await expect(page.getByTestId('video-generation-panel')).toBeVisible();
+  await expect(page.getByTestId('reference-file-input')).toHaveCount(1);
+});
+
+test('H3 connected references are node references that follow reordering and send its own format', async ({ page, request }) => {
+  await open(page, request, true, { prompt: '' });
+  const refs = page.getByTestId('video-reference');
+  const editor = page.getByRole('textbox', { name: '提示词' });
+  await editor.click();
+  await page.keyboard.type('让@');
+  await page.getByRole('listbox', { name: '引用连接的节点' }).getByRole('option', { name: /Video 1/ }).click();
+  await page.keyboard.type('像');
+  await refs.first().getByRole('button', { name: '<Picture 1>', exact: true }).click();
+  await expect(editor.locator('[data-node-reference]')).toHaveText([/<Video 1>$/, '<Picture 1>']);
+  let submitted: CreateGeneration | undefined;
+  await page.route('**/api/generation/tasks', async route => {
+    submitted = route.request().postDataJSON();
+    await route.fulfill({ status: 400, json: { error: '测试捕获参数，未提交平台' } });
+  });
+  await page.getByRole('button', { name: '生成', exact: true }).click();
+  await expect.poll(() => submitted?.input.prompt).toBe('让<Video 1>像<Picture 1>');
+  await page.getByRole('button', { name: '移除素材 2' }).click();
+  await expect(editor).toHaveText('让@动作视频像<Picture 1>');
+});
+
+test('H3 has the node toolbar; drag hides the console', async ({ page, request }) => {
+  const { node } = await open(page, request, false, { videoSrc: assets + '/saved.mp4' });
+  await expect(page.getByRole('toolbar', { name: '节点工具栏' }).getByRole('button', { name: '预览', exact: true })).toBeEnabled();
+  const box = (await node.boundingBox())!;
+  await page.mouse.move(box.x + 8, box.y + 8);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 60, box.y + 40, { steps: 5 });
+  await expect(page.getByRole('region', { name: '节点控制台' })).toHaveCount(0);
+  await page.mouse.up();
+});
+
+test('H3 reference to a connected node with no material shows and sends its name', async ({ page, request }) => {
+  await mocks(page);
+  const id = crypto.randomUUID();
+  expect((await request.put(`/api/workflow/${id}`, { data: { id, requestId: crypto.randomUUID(), baseVersion: 0, snapshot: { name: 'H3', nodes: [
+    { id: 'h3', type: 'imageToVideo', position: { x: 420, y: 60 }, data: { label: 'H3', type: 'imageToVideo', model: 'runninghub-h3', usesGenerationTasks: true, prompt: [{ text: '让' }, { ref: 'empty' }] } },
+    { id: 'empty', type: 'originalImage', position: { x: -100, y: 40 }, data: { type: 'originalImage', label: '空图' } },
+  ], edges: [{ id: 'link', source: 'empty', target: 'h3', sourceHandle: 'output', targetHandle: 'input' }], viewport: { x: 0, y: 0, zoom: 1 } } } })).ok()).toBeTruthy();
+  await page.goto(`/?project=${id}`);
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
+  await page.locator('.react-flow__node[data-id="h3"]').click();
+  await expect(page.getByRole('textbox', { name: '提示词' })).toContainText('让');
+  await expect(page.getByRole('textbox', { name: '提示词' }).locator('[data-node-reference]')).toContainText('空图');
+  let submitted: CreateGeneration | undefined;
+  await page.route('**/api/generation/tasks', async route => {
+    submitted = route.request().postDataJSON();
+    await route.fulfill({ status: 400, json: { error: '测试捕获参数，未提交平台' } });
+  });
+  await page.getByRole('button', { name: '生成', exact: true }).click();
+  await expect.poll(() => submitted?.input.prompt).toBe('让空图');
 });

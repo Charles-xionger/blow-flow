@@ -12,7 +12,7 @@ export function UpstreamThumbnail({ node, className }: { node: UpstreamNode; cla
   return node.src
     // eslint-disable-next-line @next/next/no-img-element
     ? <img src={node.src} alt="" draggable={false} className={`${className} object-cover`} />
-    : <span aria-hidden className={`${className} flex items-center justify-center bg-zinc-700 text-zinc-300`}>{node.kind === "text" ? "文" : "图"}</span>;
+    : <span aria-hidden className={`${className} flex items-center justify-center bg-zinc-700 text-zinc-300`}>{node.kind === "text" ? "文" : node.kind === "video" ? "视" : "图"}</span>;
 }
 
 /** Connection layer of the node console. Dragging previews locally and commits the order on release. */
