@@ -141,13 +141,7 @@ export const TopBar = memo(function TopBar() {
         // 导入工作流到 store
         if (data.nodes && data.edges) {
           await canvasAutosave.prepareSwitch();
-          importGraph(data.nodes, data.edges);
-          if (data.projectName) {
-            setProjectName(data.projectName);
-          }
-          if (data.viewport && reactFlowInstance) {
-            reactFlowInstance.setViewport(data.viewport);
-          }
+          importGraph(data.nodes, data.edges, { name: data.projectName, viewport: data.viewport });
           toast.success("导入成功", {
             description: `已导入工作流 "${data.projectName || "未命名"}"`,
           });

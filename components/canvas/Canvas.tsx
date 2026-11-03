@@ -17,6 +17,7 @@ import {
   SelectionMode,
   type Connection,
   type Edge,
+  type OnBeforeDelete,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
@@ -99,6 +100,12 @@ function CanvasInner() {
   const setViewport = useCanvasStore((state) => state.setViewport);
   const onNodesChange = useCanvasStore((state) => state.onNodesChange);
   const onEdgesChange = useCanvasStore((state) => state.onEdgesChange);
+  const deleteElements = useCanvasStore((state) => state.deleteElements);
+  const onBeforeDelete = useCallback<OnBeforeDelete>(async ({ nodes, edges }) => {
+    try { deleteElements(nodes.map(node => node.id), edges.map(edge => edge.id)); }
+    catch (error) { toast.error(error instanceof Error ? error.message : "删除失败"); }
+    return false; // Store publishes the entire graph batch, including detached references.
+  }, [deleteElements]);
   const onConnect = useCanvasStore((state) => state.onConnect);
   const addNode = useCanvasStore((state) => state.addNode);
   const isDarkMode = useCanvasStore((state) => state.isDarkMode);
@@ -257,6 +264,7 @@ function CanvasInner() {
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
+        onBeforeDelete={onBeforeDelete}
         onConnect={onConnect}
         onPaneClick={onPaneClick}
         onDrop={onDrop}

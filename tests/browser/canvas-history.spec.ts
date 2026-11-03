@@ -95,3 +95,58 @@ test('title and generation parameters undo with keyboard, without reviving an ol
   await page.locator('.react-flow__node').click({ position: { x: 100, y: 100 } });
   await expect(ratio).toHaveValue('9:16');
 });
+
+test('keyboard bulk deletion restores references in one step after refresh', async ({ page, request }) => {
+  const id = crypto.randomUUID();
+  const nodes = [
+    { id: 'source', type: 'text', position: { x: 100, y: 100 }, data: { type: 'text', label: 'Source', customTitle: 'Source', prompt: 'hello' } },
+    { id: 'extra', type: 'text', position: { x: 100, y: 430 }, data: { type: 'text', label: 'Extra' } },
+    { id: 'target', type: 'textToImage', position: { x: 550, y: 100 }, data: { type: 'textToImage', label: 'Target', prompt: [{ ref: 'source' }] } },
+  ];
+  await request.put(`/api/workflow/${id}`, { data: { id, requestId: crypto.randomUUID(), baseVersion: 0,
+    snapshot: { name: 'Batch deletion', nodes, edges: [{ id: 'edge', source: 'source', target: 'target' }], viewport: { x: 0, y: 0, zoom: 1 } } } });
+  await page.goto(`/canvas?project=${id}`);
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
+  await page.locator('[data-id="source"]').click({ position: { x: 15, y: 15 } });
+  await page.locator('[data-id="extra"]').click({ modifiers: ['Shift'], position: { x: 15, y: 15 } });
+  await expect(page.locator('.react-flow__node.selected')).toHaveCount(2);
+  await page.keyboard.press('Backspace');
+  await expect(page.locator('.react-flow__node')).toHaveCount(1);
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
+  const read = async () => (await (await request.get(`/api/workflow/${id}`)).json()).data;
+  expect((await read()).nodes[0].data.prompt).toEqual([{ text: '@Source' }]);
+  await page.reload();
+  await page.getByRole('button', { name: '撤销', exact: true }).click();
+  await expect(page.locator('.react-flow__node')).toHaveCount(3);
+  await expect(page.getByRole('button', { name: '撤销', exact: true })).toBeDisabled();
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
+  expect((await read()).nodes.find((node: { id: string }) => node.id === 'target').data.prompt).toEqual([{ ref: 'source' }]);
+  await page.getByRole('button', { name: '重做', exact: true }).click();
+  await expect(page.locator('.react-flow__node')).toHaveCount(1);
+});
+
+test('import replays saved identities after reload without reopening the file', async ({ page, request }) => {
+  await page.goto('/canvas');
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: '导入', exact: true }).click();
+  await (await chooser).setFiles({ name: 'batch.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({
+    projectName: 'Imported batch', nodes: [
+      { id: 'original', type: 'text', position: { x: 350, y: 120 }, data: { type: 'text', label: 'Text', prompt: 'imported' } },
+    ], edges: [], viewport: { x: 0, y: 0, zoom: 1 },
+  })) });
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
+  const id = new URL(page.url()).searchParams.get('project');
+  expect(id).toBeTruthy();
+  const read = async () => (await (await request.get(`/api/workflow/${id}`)).json()).data;
+  const savedId = (await read()).nodes[0].id;
+  expect(savedId).not.toBe('original');
+  await page.reload();
+  await page.getByRole('button', { name: '撤销', exact: true }).click();
+  await expect(page.locator('.react-flow__node')).toHaveCount(0);
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
+  await page.reload();
+  await page.getByRole('button', { name: '重做', exact: true }).click();
+  await expect(page.locator('.react-flow__node')).toHaveCount(1);
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
+  expect((await read()).nodes[0].id).toBe(savedId);
+});

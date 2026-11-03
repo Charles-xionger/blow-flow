@@ -1,3 +1,4 @@
+import { assertCanvasGraph, descendants, groupGraphNodes, parentFirst, ungroupGraphNodes } from '@/lib/canvas/graph';
 import { createCanvasHistory, type CanvasHistory } from '@/lib/canvas/history';
 import { createCanvasAutosave, type SaveStatus } from "@/lib/canvas/autosave";
 import { CanvasStorageError } from "@/lib/canvas/storage-error";
@@ -57,7 +58,7 @@ interface CanvasState {
 
   // Actions
   setNodes: (nodes: CanvasNode[]) => void;
-  importGraph: (nodes: CanvasNode[], edges: Edge[]) => void;
+  importGraph: (nodes: CanvasNode[], edges: Edge[], options?: { name?: string; viewport?: WorkflowData["viewport"] }) => void;
   setEdges: (edges: Edge[]) => void;
   setViewport: (viewport: { x: number; y: number; zoom: number }) => void;
   onNodesChange: OnNodesChange;
@@ -77,6 +78,7 @@ interface CanvasState {
     sourceNodeId: string,
     startPosition: { x: number; y: number },
   ) => string[];
+  deleteElements: (nodeIds: string[], edgeIds?: string[]) => void;
   deleteNode: (nodeId: string) => void;
   updateNodeData: (nodeId: string, data: Partial<NodeData>) => void;
   duplicateNode: (nodeId: string) => void;
@@ -110,6 +112,11 @@ interface CanvasState {
 
 function withoutTaskAssociation(data: NodeData): NodeData {
   return { ...data, ...clearedGenerationAssociation, isLoading: false, error: undefined };
+}
+
+function hasGeneration(node: CanvasNode): boolean {
+  return !!(node.data.generationTaskId || node.data.pendingGeneration || node.data.isLoading ||
+    (typeof localStorage !== 'undefined' && generationAssociation(node.id)));
 }
 
 function cancelDeletedNodes(nodes: CanvasNode[], canvasId: string | null) {
@@ -246,8 +253,30 @@ const getInitialTheme = (): boolean => {
 export const useCanvasStore = create<CanvasState>()(
   devtools(
       (rawSet, get) => {
-        const edits = createCanvasHistory(get, update => rawSet(update as Partial<CanvasState>));
+        const edits = createCanvasHistory(get, update => rawSet(update as Partial<CanvasState>), next => {
+          try {
+            assertCanvasGraph(next.nodes as CanvasNode[], next.edges);
+            const current = get().nodes;
+            const beforeIds = new Set(current.map(node => node.id));
+            const afterIds = new Set(next.nodes.map(node => node.id));
+            return ![...current.filter(node => !afterIds.has(node.id)),
+              ...(next.nodes as CanvasNode[]).filter(node => !beforeIds.has(node.id))].some(hasGeneration);
+          } catch { return false; }
+        });
         const set = (update: Partial<CanvasState>) => edits.change(update);
+        const commitGraph = (update: Partial<CanvasState>, label: string) => {
+          const before = get();
+          const nodes = update.nodes ?? before.nodes;
+          assertCanvasGraph(nodes, update.edges ?? before.edges);
+          const beforeIds = new Set(before.nodes.map(node => node.id));
+          const afterIds = new Set(nodes.map(node => node.id));
+          const removed = before.nodes.filter(node => !afterIds.has(node.id));
+          const added = nodes.filter(node => !beforeIds.has(node.id));
+          const record = ![...removed, ...added].some(hasGeneration);
+          cancelDeletedNodes(removed, before.currentWorkflowId);
+          edits.end();
+          edits.change({ ...update, selectedNodeIds: (update.selectedNodeIds ?? before.selectedNodeIds).filter(id => afterIds.has(id)) } as Partial<CanvasState>, { record, label });
+        };
         return ({
         beginEdit: edits.begin,
         endEdit: edits.end,
@@ -270,19 +299,29 @@ export const useCanvasStore = create<CanvasState>()(
 
         // 节点和边的变化处理
         setNodes: (nodes) => set({ nodes }),
-        importGraph: (nodes, edges) => {
-          get().clearWorkflow();
+        importGraph: (nodes, edges, options = {}) => {
+          // Legacy exports may contain edges to omitted nodes; detach those references.
+          if (!Array.isArray(nodes) || !Array.isArray(edges)) throw new Error('画布节点与连线格式错误');
+          const sourceIds = new Set(nodes.map(node => node?.id));
+          edges = edges.filter(edge => !edge || sourceIds.has(edge.source) && sourceIds.has(edge.target));
+          assertCanvasGraph(nodes, edges);
+          if (options.name !== undefined && (typeof options.name !== 'string' || !options.name.trim())) throw new Error('项目名称无效');
+          if (options.viewport && (![options.viewport.x, options.viewport.y, options.viewport.zoom].every(Number.isFinite) || options.viewport.zoom <= 0)) throw new Error('画布视口无效');
           const ids = new Map(nodes.map(node => [node.id, nanoid()]));
-          set({
-            nodes: nodes.map(node => ({ ...node, id: ids.get(node.id)!,
-              parentId: node.parentId ? ids.get(node.parentId) : undefined,
-              data: { ...withoutTaskAssociation(node.data), // 文件里缺失的上游节点没有连线可留，按断线处理
-                prompt: remapPromptReferences(detachReferences(node.data.prompt, nodes, ref => !ids.has(ref)), ids),
-                ...remapReferenceIds(node.data.videoReferenceOrder, node.data.videoReferenceAudio, ids) } })),
-            edges: edges.filter(edge => ids.has(edge.source) && ids.has(edge.target))
-              .map(edge => ({ ...edge, id: nanoid(), source: ids.get(edge.source)!, target: ids.get(edge.target)! })),
-            selectedNodeIds: [],
-          });
+          const importedNodes = parentFirst(nodes).map(node => ({ ...node, id: ids.get(node.id)!, selected: false,
+            parentId: node.parentId ? ids.get(node.parentId) : undefined,
+            data: { ...withoutTaskAssociation(node.data),
+              prompt: remapPromptReferences(detachReferences(node.data.prompt, nodes,
+                ref => !edges.some(edge => edge.source === ref && edge.target === node.id)), ids),
+              ...remapReferenceIds(node.data.videoReferenceOrder, node.data.videoReferenceAudio, ids) } }));
+          const importedEdges = edges.map(edge => ({ ...edge, id: nanoid(), selected: false,
+            source: ids.get(edge.source)!, target: ids.get(edge.target)! }));
+          // Existing import semantics create an independent project. Validate and
+          // allocate identities first, then record one import in the new project.
+          get().clearWorkflow();
+          commitGraph({ nodes: importedNodes, edges: importedEdges, selectedNodeIds: [],
+            projectName: options.name?.trim() || '未命名项目',
+            ...(options.viewport ? { viewport: options.viewport } : {}) }, '导入画布');
         },
         setEdges: (edges) => set({ edges }),
         setViewport: (viewport) => set({ viewport }),
@@ -290,12 +329,11 @@ export const useCanvasStore = create<CanvasState>()(
         onNodesChange: (changes: NodeChange[]) => {
           const geometry = changes.every(change => ['position', 'dimensions', 'select'].includes(change.type));
           if (changes.some(change => change.type === 'position' && change.dragging || change.type === 'dimensions' && change.resizing)) edits.begin('geometry');
-          cancelDeletedNodes(get().nodes.filter(node => changes.some(change => change.type === "remove" && change.id === node.id)), get().currentWorkflowId);
-          const removedIds = new Set(changes.flatMap((change) => change.type === "remove" ? [change.id] : []));
+          const removedIds = descendants(get().nodes, changes.flatMap((change) => change.type === "remove" ? [change.id] : []));
           const edges = removedIds.size ? edgesWithoutNodes(get().edges, removedIds) : get().edges;
           let updatedNodes = applyNodeChanges(
             changes,
-            syncReferences(get().nodes, get().edges, edges),
+            syncReferences(get().nodes, get().edges, edges).filter(node => !removedIds.has(node.id)),
           ) as CanvasNode[];
 
           // Measurement events are transient. Only explicit resize gestures persist dimensions.
@@ -311,38 +349,44 @@ export const useCanvasStore = create<CanvasState>()(
             .filter((node) => node.selected)
             .map((node) => node.id) : get().selectedNodeIds;
 
-          edits.change({
+          const update: Partial<CanvasState> = {
             nodes: updatedNodes,
             edges,
             selectedNodeIds: selectedIds.length === get().selectedNodeIds.length &&
               selectedIds.every((id, i) => id === get().selectedNodeIds[i])
               ? get().selectedNodeIds : selectedIds,
-          } as Partial<CanvasState>, { record: geometry, label: '移动或调整节点尺寸' });
+          };
+          if (geometry) edits.change(update, { record: true, label: '移动或调整节点尺寸' });
+          else commitGraph(update, '编辑节点结构');
           if (changes.some(change => change.type === 'position' && change.dragging === false || change.type === 'dimensions' && change.resizing === false)) edits.end('geometry');
         },
 
         onEdgesChange: (changes: EdgeChange[]) => {
           const edges = applyEdgeChanges(changes, get().edges);
-          set({ edges, nodes: syncReferences(get().nodes, get().edges, edges) });
+          if (changes.every(change => change.type === 'select')) { edits.change({ edges }); return; }
+          commitGraph({ edges, nodes: syncReferences(get().nodes, get().edges, edges) }, '编辑连线');
         },
 
         onConnect: (connection: Connection) => {
           if (!isValidCanvasConnection(connection, get().nodes, get().edges)) return;
           const edges = addEdge(connection, get().edges);
-          set({ edges, nodes: syncReferences(get().nodes, get().edges, edges) });
+          commitGraph({ edges, nodes: syncReferences(get().nodes, get().edges, edges) }, '编辑连线');
         },
 
         // 只重排目标节点的连入连线，它们在数组里占的位置不变，其他节点的顺序不受影响
         reorderUpstream: (nodeId, sourceIds) => {
-          const ordered = get().edges.filter((edge) => edge.target === nodeId)
+          const incoming = get().edges.filter(edge => edge.target === nodeId);
+          if (sourceIds.length !== incoming.length || new Set(sourceIds).size !== sourceIds.length ||
+              incoming.some(edge => !sourceIds.includes(edge.source))) return;
+          const ordered = incoming
             .sort((a, b) => sourceIds.indexOf(a.source) - sourceIds.indexOf(b.source));
-          set({ edges: get().edges.map((edge) => edge.target === nodeId ? ordered.shift()! : edge) });
+          commitGraph({ edges: get().edges.map((edge) => edge.target === nodeId ? ordered.shift()! : edge) }, '调整上游顺序');
         },
 
         // 添加节点
         addNode: (type: NodeType, position = DEFAULT_NODE_POSITION) => {
           const newNode = createCanvasNode(type, position);
-          set({ nodes: [...get().nodes, newNode] });
+          commitGraph({ nodes: [...get().nodes, newNode] }, '创建节点');
           return newNode.id;
         },
 
@@ -357,7 +401,7 @@ export const useCanvasStore = create<CanvasState>()(
 
         // Build the complete graph change before notifying subscribers.
         addMultipleConnectedNodes: (configs, sourceNodeId, startPosition) => {
-          if (!configs.length) return [];
+          if (!configs.length || !get().nodes.some(node => node.id === sourceNodeId)) return [];
           const newNodes = configs.map((config, index) => createCanvasNode(
             config.type,
             { x: startPosition.x, y: startPosition.y + index * 300 },
@@ -372,32 +416,33 @@ export const useCanvasStore = create<CanvasState>()(
           }));
           const allNodes = [...get().nodes, ...newNodes];
           const validEdges = newEdges.filter((edge) => isValidCanvasConnection(edge, allNodes, get().edges));
+          if (validEdges.length !== newEdges.length) return [];
           const edges = [...get().edges, ...validEdges];
           // A node created with its own content, such as a storyboard shot, gets no reference to its source.
           const filled = new Set(newNodes.filter((_, index) => configs[index].data.prompt !== undefined).map((node) => node.id));
-          set({ nodes: syncReferences(allNodes, get().edges, edges.filter((edge) => !filled.has(edge.target))), edges });
+          commitGraph({ nodes: syncReferences(allNodes, get().edges, edges.filter((edge) => !filled.has(edge.target))), edges }, '批量创建关联节点');
           return newNodes.map((node) => node.id);
         },
 
-        // 删除节点
-        deleteNode: (nodeId: string) => {
-          cancelDeletedNodes(get().nodes.filter(node => node.id === nodeId), get().currentWorkflowId);
-          const edges = edgesWithoutNodes(get().edges, new Set([nodeId]));
-          set({
-            nodes: syncReferences(get().nodes, get().edges, edges).filter((node) => node.id !== nodeId),
-            edges,
-          });
+        // Nodes, incident edges and detached prompt references publish together.
+        deleteElements: (nodeIds, edgeIds = []) => {
+          const removed = descendants(get().nodes, nodeIds);
+          const removedEdges = new Set(edgeIds);
+          const edges = edgesWithoutNodes(get().edges, removed).filter(edge => !removedEdges.has(edge.id));
+          commitGraph({ nodes: syncReferences(get().nodes, get().edges, edges).filter(node => !removed.has(node.id)), edges,
+            selectedNodeIds: get().selectedNodeIds.filter(id => !removed.has(id)) }, '删除节点或连线');
         },
+        deleteNode: (nodeId: string) => get().deleteElements([nodeId]),
 
         // 更新节点数据
         updateNodeData: (nodeId: string, data: Partial<NodeData>) => {
-          edits.change({
-            nodes: get().nodes.map((node) =>
-              node.id === nodeId
-                ? { ...node, data: { ...node.data, ...data } }
-                : node,
-            ),
-          }, { record: Object.keys(data).every(key => editableData.has(key)), label: '编辑节点内容或参数' });
+          let nodes = get().nodes.map(node => node.id === nodeId ? { ...node, data: { ...node.data, ...data } } : node);
+          const beforeEdges = get().edges;
+          const edges = data.model === undefined && data.type === undefined ? beforeEdges : beforeEdges.filter(edge =>
+            edge.source !== nodeId && edge.target !== nodeId ||
+            isValidCanvasConnection(edge, nodes, beforeEdges.filter(other => other.id !== edge.id)));
+          if (edges.length !== beforeEdges.length) nodes = syncReferences(nodes, beforeEdges, edges);
+          edits.change({ nodes, edges }, { record: Object.keys(data).every(key => editableData.has(key)), label: '编辑节点内容或参数' });
         },
 
         // 复制节点
@@ -423,7 +468,7 @@ export const useCanvasStore = create<CanvasState>()(
             },
           };
 
-          set({ nodes: [...get().nodes, newNode] });
+          commitGraph({ nodes: [...get().nodes, { ...newNode, selected: false }] }, '复制节点');
         },
 
         // 选择
@@ -432,114 +477,13 @@ export const useCanvasStore = create<CanvasState>()(
         },
 
         // 删除选中的节点
-        deleteSelectedNodes: () => {
-          const selectedIds = get().selectedNodeIds;
-          if (selectedIds.length === 0) return;
-          cancelDeletedNodes(get().nodes.filter(node => selectedIds.includes(node.id)), get().currentWorkflowId);
+        deleteSelectedNodes: () => get().deleteElements(get().selectedNodeIds),
 
-          const edges = edgesWithoutNodes(get().edges, new Set(selectedIds));
-          set({
-            nodes: syncReferences(get().nodes, get().edges, edges).filter((node) => !selectedIds.includes(node.id)),
-            edges,
-            selectedNodeIds: [],
-          });
-        },
-
-        // 分组节点
         groupNodes: (nodeIds: string[]) => {
-          if (nodeIds.length === 0) return;
-
-          const nodesToGroup = get().nodes.filter((n) =>
-            nodeIds.includes(n.id),
-          );
-          if (nodesToGroup.length === 0) return;
-
-          // 计算包围盒
-          const minX = Math.min(...nodesToGroup.map((n) => n.position.x));
-          const minY = Math.min(...nodesToGroup.map((n) => n.position.y));
-          const maxX = Math.max(
-            ...nodesToGroup.map(
-              (n) =>
-                n.position.x +
-                (n.measured?.width ?? (typeof n.style?.width === "number"
-                  ? n.style.width
-                  : Number(n.style?.width) || DEFAULT_NODE_WIDTH)),
-            ),
-          );
-          const maxY = Math.max(
-            ...nodesToGroup.map(
-              (n) =>
-                n.position.y +
-                (n.measured?.height ?? (typeof n.style?.height === "number"
-                  ? n.style.height
-                  : Number(n.style?.height) || DEFAULT_NODE_HEIGHT)),
-            ),
-          );
-
-          const padding = 40;
-          const groupId = nanoid();
-
-          // 创建分组节点
-          const groupNode: CanvasNode = {
-            id: groupId,
-            type: NodeType.GROUP,
-            position: { x: minX - padding, y: minY - padding },
-            data: {
-              label: "Group",
-              type: NodeType.GROUP,
-            },
-            style: {
-              width: maxX - minX + padding * 2,
-              height: maxY - minY + padding * 2,
-            },
-            draggable: true,
-          };
-
-          // 更新子节点的位置和父节点关系
-          const updatedNodes = get().nodes.map((node) => {
-            if (nodeIds.includes(node.id)) {
-              return {
-                ...node,
-                position: {
-                  x: node.position.x - minX + padding,
-                  y: node.position.y - minY + padding,
-                },
-                parentId: groupId,
-                extent: "parent" as const,
-              };
-            }
-            return node;
-          });
-
-          set({
-            nodes: [groupNode, ...updatedNodes],
-          });
+          commitGraph({ nodes: groupGraphNodes(get().nodes, nodeIds, nanoid()) }, '分组节点');
         },
-
-        // 取消分组
         ungroupNodes: (groupId: string) => {
-          const groupNode = get().nodes.find((n) => n.id === groupId);
-          if (!groupNode) return;
-
-          // 更新子节点的位置，移除父节点关系
-          const updatedNodes = get()
-            .nodes.filter((n) => n.id !== groupId)
-            .map((node) => {
-              if (node.parentId === groupId) {
-                return {
-                  ...node,
-                  position: {
-                    x: node.position.x + groupNode.position.x,
-                    y: node.position.y + groupNode.position.y,
-                  },
-                  parentId: undefined,
-                  extent: undefined,
-                };
-              }
-              return node;
-            });
-
-          set({ nodes: updatedNodes });
+          commitGraph({ nodes: ungroupGraphNodes(get().nodes, groupId) }, '取消分组');
         },
 
         // 显示右键菜单

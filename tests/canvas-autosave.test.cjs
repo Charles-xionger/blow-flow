@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports -- Node test entry point. */
 require('../scripts/register-typescript.cjs');
 require('fake-indexeddb/auto');
 const { test } = require('node:test');
@@ -592,3 +593,20 @@ for (const outcome of [200, 409, 410]) {
     assert.equal(store.getState().saveStatus, 'synced');
   });
 }
+
+test('undo before the first save persists an empty canvas with a redo branch', async t => {
+  const { createCanvasHistory } = require('../lib/canvas/history.ts');
+  const { store, saver, repository } = await setup(t, 1000, 2000, { history: true });
+  const edit = createCanvasHistory(store.getState, update => store.setState(update));
+  edit.change({ nodes: [node('created')] }, { record: true });
+  edit.undo();
+  await saver.save();
+  const id = store.getState().currentWorkflowId;
+  assert.ok(id);
+  const saved = await repository.read(id);
+  assert.equal(saved.snapshot.nodes.length, 0);
+  assert.equal(saved.snapshot.history.redo.length, 1);
+  store.setState({ history: saved.snapshot.history });
+  edit.redo();
+  assert.equal(store.getState().nodes[0].id, 'created');
+});

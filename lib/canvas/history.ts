@@ -24,7 +24,7 @@ export interface CanvasHistory {
   receipts: string[];
   notice?: string;
 }
-type State = { nodes: Node[]; edges: Edge[]; projectName: string; canvasSession: number; history?: CanvasHistory };
+type State = { nodes: Node[]; edges: Edge[]; projectName: string; canvasSession: number; history?: CanvasHistory; selectedNodeIds?: string[] };
 const transientNode = new Set(['selected', 'dragging', 'measured', 'resizing', 'width', 'height']);
 const transientData = new Set(['activeToolbarItem', 'isStackOpen', 'isLoading', 'error', 'generationStatus', 'generationBlocked', 'generationCanRetrySave', 'generationSaving']);
 const omit = (value: Record<string, unknown>, keys: Set<string>) => Object.fromEntries(Object.entries(value).filter(([key, v]) => !keys.has(key) && v !== undefined));
@@ -78,7 +78,7 @@ function restore(state: State, next: Content) {
     return { ...node, ...Object.fromEntries(Object.entries(previous ?? {}).filter(([key]) => transientNode.has(key))),
       ...(resized ? { width: undefined, height: undefined, measured: undefined } : {}),
       data: { ...node.data, ...Object.fromEntries(Object.entries(previous?.data ?? {}).filter(([key]) => transientData.has(key))) } };
-  }), edges: next.edges.map(edge => ({ ...edge, selected: liveEdges.get(edge.id)?.selected })), projectName: next.name };
+  }), edges: next.edges.map(edge => ({ ...edge, selected: liveEdges.get(edge.id)?.selected })), projectName: next.name, ...(state.selectedNodeIds ? { selectedNodeIds: state.selectedNodeIds.filter(id => next.nodes.some(node => node.id === id)) } : {}) };
 }
 
 const expectedContents = new WeakMap<CanvasHistory, Content>();
@@ -103,7 +103,7 @@ export function restoredHistory(state: Pick<State, 'nodes' | 'edges' | 'projectN
 }
 
 /** Single content mutation boundary. The caller supplies already computed changes; replay has no business side effects. */
-export function createCanvasHistory(get: () => State, set: (state: Partial<State>) => void) {
+export function createCanvasHistory(get: () => State, set: (state: Partial<State>) => void, canRestore?: (next: Content) => boolean) {
   let batch: { key: string; session: number; before: Content; history: CanvasHistory; id: string } | undefined;
   function change(update: Partial<State>, options: { record?: boolean; id?: string; label?: string } = {}) {
     const state = get();
@@ -160,6 +160,9 @@ export function createCanvasHistory(get: () => State, set: (state: Partial<State
     const entry = history.records.find(entry => entry.id === target);
     if (!entry) return;
     const next = immer.applyPatches(content(state), direction === 'undo' ? entry.inverse : entry.patches);
+    if (canRestore && !canRestore(next)) {
+      set({ history: boundary(history, content(state)) }); return;
+    }
     const opposite = direction === 'undo' ? 'redo' : 'undo';
     set({ ...restore(state, next), history: { ...history,
       operations: [...(history.operations ?? []), { id, batchId: entry.id, kind: direction,

@@ -101,7 +101,7 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
         const snapshot = canvasSnapshot(latest);
         const fingerprint = canonicalJSON(snapshot);
         if (target.fingerprint === fingerprint) { target.dirty = false; settledStatus(target); continue; }
-        if (!target.id && !snapshot.nodes.length) { target.dirty = false; settledStatus(target); continue; }
+        if (!target.id && !snapshot.nodes.length && !snapshot.history?.records.length) { target.dirty = false; settledStatus(target); continue; }
         target.id ??= crypto.randomUUID();
         if (store.getState().canvasSession === target.key) store.setState({ currentWorkflowId: target.id });
         status(target, 'saving');
@@ -362,7 +362,7 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
   }
   async function save() {
     if (!store.getState().persistenceReady) throw new Error('画布尚未恢复，请稍后重试');
-    if (!active || (!active.id && !active.latest.nodes.length)) throw new Error('画布为空');
+    if (!active || (!active.id && !active.latest.nodes.length && !active.latest.history?.records.length)) throw new Error('画布为空');
     const target = active;
     await commitLocal();
     await sync(true, target.id ?? undefined);

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
 
 async function openCanvas(page: Page, request: APIRequestContext, data: Record<string, unknown> = {}, upstreamText = '花园') {
@@ -81,7 +82,7 @@ test('直接拖动未选中的节点：全程不挂载节点工具栏和节点�
   await expect(page.getByRole('region', { name: '节点控制台' })).toBeVisible();
 });
 
-const result = `data:image/png;base64,${require('node:fs').readFileSync('tests/fixtures/h3/reference.png').toString('base64')}`;
+const result = `data:image/png;base64,${readFileSync('tests/fixtures/h3/reference.png').toString('base64')}`;
 
 test('节点工具栏提供预览、下载和保存为角色，图片上不再有悬浮按钮', async ({ page, request }) => {
   const node = await openCanvas(page, request, { imageSrc: result });
@@ -487,13 +488,13 @@ test('拖线连接文本节点后，编辑器里出现它的节点引用，手�
   await expect.poll(() => run.body?.prompt).toBe('一朵花花园');
 });
 
-const swatch = (fill: string) => `data:image/png;base64,${require('node:fs').readFileSync(`tests/fixtures/canvas/${fill}.png`).toString('base64')}`;
+const swatch = (fill: string) => `data:image/png;base64,${readFileSync(`tests/fixtures/canvas/${fill}.png`).toString('base64')}`;
 
 test('拖动缩略图调整顺序：编号、发送内容和素材顺序一起更新，重新打开后不变，不影响其他节点和画布', async ({ page, request }) => {
   const run = await captureRun(page);
   const [red, blue] = [swatch('red'), swatch('blue')];
   const id = crypto.randomUUID();
-  const source = (key: string, y: number, imageSrc: string) => ({ id: key, type: 'originalImage', position: { x: 30, y }, data: { type: 'originalImage', label: '原图', customTitle: key, imageSrc } });
+  const source = (key: string, y: number, imageSrc: string) => ({ id: key, type: 'character', position: { x: 30, y }, data: { type: 'character', label: '角色', customTitle: key, imageSrc } });
   const link = (from: string, to: string) => ({ id: `${from}-${to}`, source: from, target: to, sourceHandle: 'output', targetHandle: 'input' });
   expect((await request.put(`/api/workflow/${id}`, { data: { id, requestId: crypto.randomUUID(), baseVersion: 0, snapshot: { name: '排序', nodes: [
     { id: 'image', type: 'textToImage', position: { x: 520, y: 200 }, data: { type: 'textToImage', label: '文生图', model: 'BananaPro', prompt: [{ ref: 'red' }, { text: '和' }, { ref: 'blue' }] } },

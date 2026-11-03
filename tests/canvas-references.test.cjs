@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports -- Node test entry point. */
 require('../scripts/register-typescript.cjs');
 require('fake-indexeddb/auto');
 const { test, beforeEach } = require('node:test');
@@ -188,7 +189,8 @@ test('selecting or dragging keeps node identity, so unrelated updates cost nothi
   assert.equal(store.getState().nodes[0], before);
 });
 
-const image = (id, imageSrc) => node(id, 'originalImage', { imageSrc });
+// Character material supplies images and is accepted by text-to-image alongside text.
+const image = (id, imageSrc) => node(id, 'character', { imageSrc });
 
 test('connecting a text node to text-to-video appends its reference', () => {
   store.setState({ nodes: [node('video', 'textToVideo', { prompt: '手写' }), node('scene', 'text', { prompt: '花园' })] });
