@@ -6,16 +6,24 @@
 
 这些模型使用 Google GenAI SDK，只需配置 `GEMINI_API_KEY` 环境变量即可使用，**无需在前端配置**。
 
+文本和图片目录于 2026-11-03 按 [Google 官方模型目录](https://ai.google.dev/gemini-api/docs/models) 更新。以下是本项目内置的选项，并非 Google 的完整模型清单。
+
 ### 文本模型
 
-- **Gemini 2.5 Pro** (`gemini-2.5-pro`) - 高质量，推理能力强
-- **Gemini 3 Flash Preview** (`gemini-3-flash-preview`) - 最新预览版，速度快
-- **Gemini 3 Pro Preview** (`gemini-3-pro-preview`) - 最新预览版，高质量
+- **Gemini 3.8 Flash** (`gemini-3.8-flash`) - 通用文本生成，分镜自动选择时使用
+- **Gemini 4 Argon** (`gemini-4-argon`) - 复杂推理
+- **Gemini 3.5 Flash-Lite** (`gemini-3.5-flash-lite`) - 低延迟、低成本
+- **Gemini 3 Flash Preview** (`gemini-3-flash-preview`) - 保留的旧文本选项
+- **Gemini 3.1 Flash-Lite** (`gemini-3.1-flash-lite`) - 低成本的旧文本选项
+
+旧项目中的 Gemini 3 Flash Preview 保持原型号。已从目录移除的 Gemini 2.5 Pro 和已停用的 Gemini 3 Pro Preview 在文本选择器中显示为 Gemini 3.8 Flash，保存的项目数据不作批量改写。
 
 ### 图片模型
 
-- **Nano Banana** (`gemini-2.5-flash-image`) - 快速图片生成
-- **Nano Banana Pro** (`gemini-3-pro-image-preview`) - 高保真文本渲染，专业级
+- **Nano Banana 2.1** (`gemini-nano-banana-2.1`) - 新版图片生成与编辑
+- **Nano Banana Pro** (`gemini-3-pro-image`) - 稳定版，专业图片生成
+- **Nano Banana 2** (`gemini-3.1-flash-image`) - 图片生成与多图参考
+- **Nano Banana** (`gemini-2.5-flash-image`) - 保留旧项目使用的型号
 
 ### 视频模型
 
@@ -79,12 +87,13 @@ GEMINI_API_KEY=your_gemini_api_key_here
 
 ### 文本生成
 
-- **速度优先**：Gemini 3 Flash Preview
-- **质量优先**：Gemini 2.5 Pro
+- **通用任务**：Gemini 3.8 Flash
+- **复杂推理**：Gemini 4 Argon
+- **成本优先**：Gemini 3.5 Flash-Lite
 
 ### 图片生成
 
-- **速度优先**：Nano Banana
+- **通用生成与编辑**：Nano Banana 2.1
 - **质量优先**：Nano Banana Pro（支持高保真文本）
 
 ### 视频生成

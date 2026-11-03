@@ -6,7 +6,7 @@ import { memo, useCallback, useMemo } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { Film, Loader2, Minus, Plus } from "lucide-react";
 import { promptIsEmpty, promptSegments, promptText } from "@/lib/canvas/prompt";
-import { getModelsByCategory } from "@/lib/model-registry";
+import { getModelDefinition, getModelsByCategory } from "@/lib/model-registry";
 import { useCanvasStore } from "@/store/useCanvasStore";
 import { NodeType, type NodeData } from "@/types";
 import { NodeShell } from "./NodeShell";
@@ -23,6 +23,10 @@ const CreativeDescNode = (props: NodeProps<Node<NodeData>>) => {
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
   const addMultipleConnectedNodes = useCanvasStore((state) => state.addMultipleConnectedNodes);
   const textModels = useMemo(() => getModelsByCategory("TEXT"), []);
+  const selectedModelName = useMemo(
+    () => getModelDefinition(data.model || "")?.name || data.model || "",
+    [data.model],
+  );
   const segments = useMemo(() => promptSegments(data.prompt), [data.prompt]);
   const shotCount = Math.min(maxShots, Math.max(minShots, data.shotCount || 4));
 
@@ -56,7 +60,7 @@ const CreativeDescNode = (props: NodeProps<Node<NodeData>>) => {
         const errorMsg = result.error || "分镜生成失败";
         throw new Error(
           errorMsg.includes("No text model configured")
-            ? "请先在设置中配置文本模型（如 Gemini 2.5 Pro）"
+            ? "请先在设置中配置文本模型"
             : errorMsg,
         );
       }
@@ -80,7 +84,7 @@ const CreativeDescNode = (props: NodeProps<Node<NodeData>>) => {
               onChange={prompt => updateNodeData(id, { prompt })} />
           }
           config={<>
-            <select aria-label="文本模型" value={data.model || ""} className={consoleSelectClass}
+            <select aria-label="文本模型" value={selectedModelName} className={consoleSelectClass}
               onChange={event => updateNodeData(id, { model: event.target.value })}>
               <option value="">自动选择</option>
               {textModels.map(model => <option key={model.id} value={model.name}>{model.name}</option>)}

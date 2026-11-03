@@ -31,27 +31,33 @@ GEMINI_API_KEY=your_api_key_here
 curl -X POST http://localhost:3000/api/test/gemini \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gemini-3-pro-preview",
+    "model": "gemini-3.8-flash",
     "prompt": "Explain how AI works in a few words"
   }'
 ```
 
 ## 可用模型
 
+以下为 2026-11-03 核对的项目内置选项，来源：[Google 官方模型目录](https://ai.google.dev/gemini-api/docs/models)。
+
 ### 文本生成模型
 
 | 模型名称               | Model ID                 | 特点               |
 | ---------------------- | ------------------------ | ------------------ |
-| Gemini 2.5 Pro         | `gemini-2.5-pro`         | 高质量，推理能力强 |
-| Gemini 3 Flash Preview | `gemini-3-flash-preview` | 最新预览版，速度快 |
-| Gemini 3 Pro Preview   | `gemini-3-pro-preview`   | 最新预览版，高质量 |
+| Gemini 3.8 Flash       | `gemini-3.8-flash`       | 通用文本生成 |
+| Gemini 4 Argon         | `gemini-4-argon`         | 复杂推理 |
+| Gemini 3.5 Flash-Lite  | `gemini-3.5-flash-lite`  | 低延迟、低成本 |
+| Gemini 3 Flash Preview | `gemini-3-flash-preview` | 保留的旧文本选项 |
+| Gemini 3.1 Flash-Lite | `gemini-3.1-flash-lite` | 低成本的旧文本选项 |
 
 ### 图片生成模型
 
 | 模型名称        | Model ID                     | 特点                   |
 | --------------- | ---------------------------- | ---------------------- |
-| Nano Banana     | `gemini-2.5-flash-image`     | 快速图片生成           |
-| Nano Banana Pro | `gemini-3-pro-image-preview` | 高保真文本渲染，专业级 |
+| Nano Banana 2.1 | `gemini-nano-banana-2.1` | 图片生成与编辑 |
+| Nano Banana Pro | `gemini-3-pro-image` | 稳定版，专业图片生成 |
+| Nano Banana 2 | `gemini-3.1-flash-image` | 图片生成与多图参考 |
+| Nano Banana | `gemini-2.5-flash-image` | 保留旧项目使用的型号 |
 
 ### 视频生成模型
 
@@ -67,7 +73,7 @@ curl -X POST http://localhost:3000/api/test/gemini \
 import { generateGeminiText } from "@/lib/ai-services/text/gemini";
 
 const text = await generateGeminiText(
-  "gemini-3-flash-preview",
+  "gemini-3.8-flash",
   "Explain how AI works",
 );
 console.log(text);
@@ -78,28 +84,23 @@ console.log(text);
 ```typescript
 import { streamGeminiText } from "@/lib/ai-services/text/gemini";
 
-await streamGeminiText("gemini-3-flash-preview", "Write a story", (chunk) => {
+await streamGeminiText("gemini-3.8-flash", "Write a story", (chunk) => {
   process.stdout.write(chunk);
 });
 ```
 
 ## 下一步
 
-### 图片生成（Imagen）
+### 图片生成（Nano Banana）
 
-使用相同的 SDK 调用 Imagen 模型生成图片：
+使用项目的图片生成服务：
 
 ```typescript
-import { GoogleGenAI } from "@google/genai";
+import { generateGeminiImage } from "@/lib/ai-services/image/gemini";
 
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-});
-
-const response = await ai.models.generateContent({
-  model: "imagen-3.0-generate-001",
-  contents: "A serene mountain landscape",
-});
+const image = await generateGeminiImage(
+  "gemini-nano-banana-2.1", "A serene mountain landscape", "16:9", "2K",
+);
 ```
 
 ### 多模态输入
@@ -107,8 +108,11 @@ const response = await ai.models.generateContent({
 支持文本 + 图片混合输入：
 
 ```typescript
+import { GoogleGenAI } from "@google/genai";
+
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const response = await ai.models.generateContent({
-  model: "gemini-3-flash-preview",
+  model: "gemini-3.8-flash",
   contents: [
     { text: "What's in this image?" },
     {

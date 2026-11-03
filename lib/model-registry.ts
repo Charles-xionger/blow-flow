@@ -10,16 +10,41 @@ export interface ModelDefinition {
   provider?: "gemini" | "other"; // 用于标识是否使用 Gemini SDK
 }
 
+// Verified 2026-11-03: https://ai.google.dev/gemini-api/docs/models
+// Keep retired names/IDs resolvable for saved projects, but out of new selections.
+const LEGACY_MODEL_KEYS: Record<string, string> = {
+  "Gemini 2.5 Pro": "Gemini 3.8 Flash",
+  "gemini-2.5-pro": "Gemini 3.8 Flash",
+  "Gemini 3 Pro Preview": "Gemini 3.8 Flash",
+  "gemini-3-pro-preview": "Gemini 3.8 Flash",
+  "gemini-3-pro-image-preview": "Nano Banana Pro",
+};
+
 // 内置模型配置
 const BUILTIN_MODELS: Record<string, ModelDefinition> = {
   // === 文本模型 (Gemini) ===
-  "Gemini 2.5 Pro": {
-    id: "gemini-2.5-pro",
-    name: "Gemini 2.5 Pro",
+  "Gemini 3.8 Flash": {
+    id: "gemini-3.8-flash",
+    name: "Gemini 3.8 Flash",
     category: "TEXT",
     defaultEndpoint: "",
     provider: "gemini",
   },
+  "Gemini 4 Argon": {
+    id: "gemini-4-argon",
+    name: "Gemini 4 Argon",
+    category: "TEXT",
+    defaultEndpoint: "",
+    provider: "gemini",
+  },
+  "Gemini 3.5 Flash-Lite": {
+    id: "gemini-3.5-flash-lite",
+    name: "Gemini 3.5 Flash-Lite",
+    category: "TEXT",
+    defaultEndpoint: "",
+    provider: "gemini",
+  },
+  // 保留仍可用的旧文本型号，让用户自行选择成本与效果。
   "Gemini 3 Flash Preview": {
     id: "gemini-3-flash-preview",
     name: "Gemini 3 Flash Preview",
@@ -27,25 +52,39 @@ const BUILTIN_MODELS: Record<string, ModelDefinition> = {
     defaultEndpoint: "",
     provider: "gemini",
   },
-  "Gemini 3 Pro Preview": {
-    id: "gemini-3-pro-preview",
-    name: "Gemini 3 Pro Preview",
+  "Gemini 3.1 Flash-Lite": {
+    id: "gemini-3.1-flash-lite",
+    name: "Gemini 3.1 Flash-Lite",
     category: "TEXT",
     defaultEndpoint: "",
     provider: "gemini",
   },
 
   // === 图片模型 ===
-  "Nano Banana": {
-    id: "gemini-2.5-flash-image",
-    name: "Nano Banana",
+  "Nano Banana 2.1": {
+    id: "gemini-nano-banana-2.1",
+    name: "Nano Banana 2.1",
     category: "IMAGE",
     defaultEndpoint: "",
     provider: "gemini",
   },
   "Nano Banana Pro": {
-    id: "gemini-3-pro-image-preview",
+    id: "gemini-3-pro-image",
     name: "Nano Banana Pro",
+    category: "IMAGE",
+    defaultEndpoint: "",
+    provider: "gemini",
+  },
+  "Nano Banana 2": {
+    id: "gemini-3.1-flash-image",
+    name: "Nano Banana 2",
+    category: "IMAGE",
+    defaultEndpoint: "",
+    provider: "gemini",
+  },
+  "Nano Banana": {
+    id: "gemini-2.5-flash-image",
+    name: "Nano Banana",
     category: "IMAGE",
     defaultEndpoint: "",
     provider: "gemini",
@@ -191,7 +230,9 @@ export function getVideoModels(): Array<{
  */
 export function getModelDefinition(key: string): ModelDefinition | undefined {
   const allModels = getAllModels();
-  return allModels[key];
+  return allModels[key]
+    || Object.values(allModels).find(model => model.id === key)
+    || allModels[LEGACY_MODEL_KEYS[key]];
 }
 
 /**
