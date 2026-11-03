@@ -1,8 +1,9 @@
 "use client";
 
 import { createContext, memo, useContext, type ReactNode } from "react";
-import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
+import { Handle, Position, NodeResizer, type Node, type NodeProps } from "@xyflow/react";
 import type { NodeData } from "@/types";
+import { canvasDraftStorage } from "@/store/useCanvasStore";
 import { nodeName } from "@/lib/canvas/prompt";
 import { EditableTitle } from "./shared/EditableTitle";
 import { QuickAddNode } from "../canvas/QuickAddNode";
@@ -18,9 +19,14 @@ export const BaseNode = memo(function BaseNode({ children, onPointerDownCapture,
 }) {
   const { id, data, selected, dragging, isConnectable } = props;
   const definition = nodeDefinitions[data.type];
+  const width = data.displaySize?.width ?? 320;
+  const height = data.displaySize?.height ?? definition.height;
   return (
-    <SurfaceContext.Provider value={{ selected, loading: !!data.isLoading, error: !!data.error, width: 320, height: definition.height }}>
-      <div style={{ width: 320 }} className="relative" onPointerDownCapture={onPointerDownCapture}>
+    <SurfaceContext.Provider value={{ selected, loading: !!data.isLoading, error: !!data.error, width, height }}>
+      <div style={{ width }} className="relative" onPointerDownCapture={onPointerDownCapture}>
+        <NodeResizer isVisible={selected && !dragging} minWidth={160} minHeight={100}
+          onResizeStart={() => canvasDraftStorage.beginInteraction('resize')}
+          onResizeEnd={() => canvasDraftStorage.endInteraction('resize')} />
         <EditableTitle nodeId={id} defaultTitle={nodeName({ ...data, customTitle: undefined })} customTitle={data.customTitle} />
         {definition.input && <Handle type="target" position={Position.Left} id="input" isConnectable={isConnectable} />}
         <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center">

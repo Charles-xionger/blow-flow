@@ -6,6 +6,7 @@ const imageNodes = new WeakMap<CanvasNode, CanvasNode>();
  * Cache by immutable source node so unrelated edits retain xyflow's reference fast path. */
 export function canvasRenderNodes(nodes: CanvasNode[]): CanvasNode[] {
   return nodes.map(node => {
+    if (node.data.displaySize) return node;
     if (node.type !== NodeType.TEXT_TO_IMAGE && node.type !== NodeType.IMAGE_TO_IMAGE) return node;
     let rendered = imageNodes.get(node);
     if (!rendered) {

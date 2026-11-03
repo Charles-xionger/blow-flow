@@ -1,3 +1,4 @@
+import { restoredHistory } from './history';
 import { canonicalJSON, type CanvasSnapshot, type SaveAcknowledgement, type SaveOperation } from './save-protocol';
 import { recoverySnapshot } from './recovery-copy';
 import { parseLegacyDraft } from './legacy-draft';
@@ -91,6 +92,19 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
       confirmedLocalVersion: 0, serverVersion: 0, updatedAt: Date.now(), recovery: { kind: 'copy', sourceId } };
   }
   return {
+    initializeHistory(id: string): Promise<CanvasDraft> {
+      return transaction('readwrite', async tx => {
+        const drafts = tx.objectStore('drafts');
+        const draft = await result<CanvasDraft>(drafts.get(id));
+        const history = restoredHistory({ ...draft.snapshot, projectName: draft.snapshot.name });
+        if (history === draft.snapshot.history) return draft;
+        // Installing a checkpoint is local bookkeeping, not an implicit content
+        // write. The first real edit submits it with content in the existing save transaction.
+        draft.snapshot = { ...draft.snapshot, history };
+        drafts.put(draft);
+        return draft;
+      });
+    },
     allowGenerationRecovery(id: string, nodeId: string) {
       return transaction('readwrite', async tx => {
         const drafts = tx.objectStore('drafts');
@@ -253,6 +267,10 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
         // or observed deletion. Reading cannot undo either persisted decision.
         if (previous && (previous.recovery || previous.serverVersion > serverVersion ||
             previous.localVersion > previous.confirmedLocalVersion)) return previous;
+        if (!snapshot.history && previous?.snapshot.history &&
+            canonicalJSON({ ...previous.snapshot, history: undefined }) === canonicalJSON({ ...snapshot, history: undefined })) {
+          snapshot = { ...snapshot, history: previous.snapshot.history };
+        }
         const version = previous ? previous.localVersion + (canonicalJSON(previous.snapshot) === canonicalJSON(snapshot) ? 0 : 1) : 0;
         const draft = { id, snapshot, serverVersion, restorationVersion: previous?.restorationVersion,
           localVersion: version, confirmedLocalVersion: version, updatedAt: Date.now(), generationRecoveryReadOnly: previous?.generationRecoveryReadOnly };

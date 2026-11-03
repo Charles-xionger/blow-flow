@@ -1,8 +1,10 @@
+import { useCanvasStore } from "@/store/useCanvasStore";
 import { useEffect } from "react";
 
 export function useKeyboardShortcuts(onSave?: () => void) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.isComposing) return;
       // 检查当前焦点是否在可编辑元素上
       const target = e.target as HTMLElement;
       const isEditableElement =
@@ -27,17 +29,20 @@ export function useKeyboardShortcuts(onSave?: () => void) {
       }
 
       // Ctrl/Cmd + Z: 撤销
-      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && !e.shiftKey) {
         e.preventDefault();
-        // TODO: 实现撤销
-        console.log("Undo triggered");
+        useCanvasStore.getState().undo();
       }
 
       // Ctrl/Cmd + Shift + Z: 重做
-      if ((e.ctrlKey || e.metaKey) && e.key === "z" && e.shiftKey) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && e.shiftKey) {
         e.preventDefault();
-        // TODO: 实现重做
-        console.log("Redo triggered");
+        useCanvasStore.getState().redo();
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        useCanvasStore.getState().redo();
       }
 
       // Delete/Backspace: 删除选中节点

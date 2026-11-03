@@ -24,6 +24,7 @@ export interface NodeData extends Record<string, unknown> {
   // 基础信息
   label: string;
   type: NodeType;
+  displaySize?: { width: number; height: number };
   customTitle?: string; // 用户自定义标题
 
   // 输入
@@ -93,6 +94,7 @@ export type CanvasEdge = Edge;
 
 // 工作流数据
 export interface WorkflowData {
+  history?: import("@/lib/canvas/history").CanvasHistory;
   version?: number;
   id: string;
   name: string;

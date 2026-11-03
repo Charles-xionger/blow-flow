@@ -1,3 +1,4 @@
+import { createCanvasHistory, type CanvasHistory } from '@/lib/canvas/history';
 import { createCanvasAutosave, type SaveStatus } from "@/lib/canvas/autosave";
 import { CanvasStorageError } from "@/lib/canvas/storage-error";
 import { clearedGenerationAssociation, deleteNodeGeneration, generationAssociation } from "@/lib/generation/recovery";
@@ -23,6 +24,11 @@ import { nanoid } from "nanoid";
 import { NodeData, NodeType, CanvasNode, WorkflowData } from "@/types";
 
 interface CanvasState {
+  history?: CanvasHistory;
+  beginEdit: (key: string) => void;
+  endEdit: (key?: string) => void;
+  undo: () => void;
+  redo: () => void;
   recovery?: import('@/lib/canvas/local-repository').CanvasDraft['recovery'];
   generationRecoveryReadOnly?: string[];
   recoveryCopies?: { id: string; name: string }[];
@@ -217,6 +223,10 @@ function createCanvasNode(type: NodeType, position: { x: number; y: number }, da
 
 }
 
+const editableData = new Set(['label', 'customTitle', 'prompt', 'model', 'aspectRatio', 'resolution', 'duration', 'count',
+  'promptOptimize', 'generationWidth', 'generationHeight', 'generationSizePreset', 'usesGenerationTasks',
+  'videoResolution', 'videoAspectRatio', 'videoDuration', 'videoInstanceType', 'shotCount']);
+
 const DEFAULT_NODE_POSITION = { x: 250, y: 150 };
 // 节点默认尺寸
 const DEFAULT_NODE_WIDTH = 320;
@@ -235,7 +245,14 @@ const getInitialTheme = (): boolean => {
 
 export const useCanvasStore = create<CanvasState>()(
   devtools(
-      (set, get) => ({
+      (rawSet, get) => {
+        const edits = createCanvasHistory(get, update => rawSet(update as Partial<CanvasState>));
+        const set = (update: Partial<CanvasState>) => edits.change(update);
+        return ({
+        beginEdit: edits.begin,
+        endEdit: edits.end,
+        undo: () => { if (get().persistenceReady) edits.undo(); },
+        redo: () => { if (get().persistenceReady) edits.redo(); },
         // 初始状态
         nodes: [],
         edges: [],
@@ -271,26 +288,37 @@ export const useCanvasStore = create<CanvasState>()(
         setViewport: (viewport) => set({ viewport }),
 
         onNodesChange: (changes: NodeChange[]) => {
+          const geometry = changes.every(change => ['position', 'dimensions', 'select'].includes(change.type));
+          if (changes.some(change => change.type === 'position' && change.dragging || change.type === 'dimensions' && change.resizing)) edits.begin('geometry');
           cancelDeletedNodes(get().nodes.filter(node => changes.some(change => change.type === "remove" && change.id === node.id)), get().currentWorkflowId);
           const removedIds = new Set(changes.flatMap((change) => change.type === "remove" ? [change.id] : []));
           const edges = removedIds.size ? edgesWithoutNodes(get().edges, removedIds) : get().edges;
-          const updatedNodes = applyNodeChanges(
+          let updatedNodes = applyNodeChanges(
             changes,
             syncReferences(get().nodes, get().edges, edges),
           ) as CanvasNode[];
+
+          // Measurement events are transient. Only explicit resize gestures persist dimensions.
+          for (const change of changes) {
+            if (change.type !== 'dimensions' || !change.setAttributes || !change.dimensions) continue;
+            updatedNodes = updatedNodes.map(node => node.id === change.id ? { ...node,
+              data: { ...node.data, displaySize: change.dimensions },
+              style: { ...node.style, width: change.dimensions!.width, height: change.dimensions!.height } } : node);
+          }
 
           // 更新选中的节点ID列表
           const selectedIds = changes.some((change) => ["select", "remove", "add", "replace"].includes(change.type)) ? updatedNodes
             .filter((node) => node.selected)
             .map((node) => node.id) : get().selectedNodeIds;
 
-          set({
+          edits.change({
             nodes: updatedNodes,
             edges,
             selectedNodeIds: selectedIds.length === get().selectedNodeIds.length &&
               selectedIds.every((id, i) => id === get().selectedNodeIds[i])
               ? get().selectedNodeIds : selectedIds,
-          });
+          } as Partial<CanvasState>, { record: geometry, label: '移动或调整节点尺寸' });
+          if (changes.some(change => change.type === 'position' && change.dragging === false || change.type === 'dimensions' && change.resizing === false)) edits.end('geometry');
         },
 
         onEdgesChange: (changes: EdgeChange[]) => {
@@ -363,13 +391,13 @@ export const useCanvasStore = create<CanvasState>()(
 
         // 更新节点数据
         updateNodeData: (nodeId: string, data: Partial<NodeData>) => {
-          set({
+          edits.change({
             nodes: get().nodes.map((node) =>
               node.id === nodeId
                 ? { ...node, data: { ...node.data, ...data } }
                 : node,
             ),
-          });
+          }, { record: Object.keys(data).every(key => editableData.has(key)), label: '编辑节点内容或参数' });
         },
 
         // 复制节点
@@ -558,6 +586,7 @@ export const useCanvasStore = create<CanvasState>()(
             canvasSession: get().canvasSession + 1,
             selectedNodeIds: [],
             contextMenu: null,
+            history: workflow.history,
             nodes: workflow.nodes,
             edges: workflow.edges,
             projectName: workflow.name,
@@ -570,6 +599,7 @@ export const useCanvasStore = create<CanvasState>()(
         clearWorkflow: () => {
           set({
             canvasSession: get().canvasSession + 1,
+            history: undefined,
             nodes: [],
             edges: [],
             selectedNodeIds: [],
@@ -599,7 +629,7 @@ export const useCanvasStore = create<CanvasState>()(
             updatedAt: Date.now(),
           };
         },
-      }),
+      }); },
     { name: "CanvasStore", enabled: process.env.NODE_ENV !== "production" },
   ),
 );
@@ -612,11 +642,17 @@ export const canvasAutosave = createCanvasAutosave(useCanvasStore, (error) => {
     id: "canvas-autosave-error",
     description: error instanceof Error ? error.message : "未知错误",
   });
-});
+}, undefined, undefined, undefined, { history: true });
 
 // Existing interaction and generation hooks use the same coordinator.
 export const canvasDraftStorage = {
   flush: () => { void canvasAutosave.flush().catch(() => {}); },
-  beginInteraction: canvasAutosave.beginInteraction,
-  endInteraction: canvasAutosave.endInteraction,
+  beginInteraction: (key: string) => {
+    if (key !== 'viewport') useCanvasStore.getState().beginEdit('geometry');
+    canvasAutosave.beginInteraction(key);
+  },
+  endInteraction: (key: string) => {
+    if (key !== 'viewport') useCanvasStore.getState().endEdit('geometry');
+    canvasAutosave.endInteraction(key);
+  },
 };

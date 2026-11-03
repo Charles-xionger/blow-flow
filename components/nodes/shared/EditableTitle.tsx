@@ -21,6 +21,8 @@ export function EditableTitle({
   const [isEditing, setIsEditing] = useState(false);
   const [title, setTitle] = useState(customTitle || defaultTitle);
 
+  const startEditing = () => { setTitle(customTitle || defaultTitle); setIsEditing(true); };
+
   const handleSubmit = () => {
     const trimmedTitle = title.trim();
     if (trimmedTitle && trimmedTitle !== defaultTitle) {
@@ -61,7 +63,7 @@ export function EditableTitle({
       ) : (
         <div
           className="group/title flex min-w-0 items-center gap-1 rounded px-2 py-0.5 hover:bg-gray-800/50"
-          onDoubleClick={() => setIsEditing(true)}
+          onDoubleClick={startEditing}
         >
           <span className="truncate text-xs font-medium text-gray-300" title={customTitle || defaultTitle}>
             {customTitle || defaultTitle}
@@ -69,7 +71,7 @@ export function EditableTitle({
           <Edit3
             size={10}
             className="cursor-pointer text-gray-500 opacity-0 transition-opacity group-hover/title:opacity-100"
-            onClick={() => setIsEditing(true)}
+            onClick={startEditing}
           />
         </div>
       )}

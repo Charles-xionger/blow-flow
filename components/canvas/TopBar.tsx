@@ -1,5 +1,6 @@
 "use client";
 
+import { HistoryControls } from "./HistoryControls";
 import { memo } from "react";
 import React, { useState, useEffect } from "react";
 import { useReactFlow, useStore } from "@xyflow/react";
@@ -275,6 +276,7 @@ export const TopBar = memo(function TopBar() {
             className={`w-px h-5 ${isDark ? "bg-zinc-700" : "bg-gray-200"}`}
           />
 
+          <HistoryControls />
           <span role="status" data-testid="canvas-save-status" title={saveError || undefined}
             className="px-2 text-xs text-zinc-500">
             {{ loading: "正在恢复", idle: "尚未保存", saving: "保存中", pending: "已保存到本地，待同步",

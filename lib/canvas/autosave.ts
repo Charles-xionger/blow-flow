@@ -11,6 +11,7 @@ export type SaveStatus = 'loading' | 'idle' | 'saving' | 'pending' | 'syncing' |
 type State = {
   nodes: CanvasNode[]; edges: Edge[]; viewport: Viewport; projectName: string;
   currentWorkflowId: string | null; canvasSession: number; serverVersion: number;
+  history?: import('./history').CanvasHistory;
   selectedNodeIds?: string[];
   recovery?: CanvasDraft['recovery'];
   generationRecoveryReadOnly?: string[];
@@ -31,7 +32,7 @@ type Session = {
 // writes have a separate queue so a slow HTTP request never blocks durability.
 export function createCanvasAutosave(store: Store, onError: (error: unknown) => void,
   delay = 500, repository: CanvasRepository = createCanvasRepository(), maxWait = 2000,
-  { requestTimeoutMs = 10_000 } = {}) {
+  { requestTimeoutMs = 10_000, history = false } = {}) {
   let active: Session | undefined;
   const sessions = new Set<Session>();
   const interactions = new Set<string>();
@@ -273,7 +274,7 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
         return;
       }
       if (state.nodes === previous.nodes && state.edges === previous.edges &&
-          state.viewport === previous.viewport && state.projectName === previous.projectName) return;
+          state.viewport === previous.viewport && state.projectName === previous.projectName && state.history === previous.history) return;
       active.latest = state;
       active.dirty = true;
       // A drag changes the canvas every frame; report saving once, on release.
@@ -296,7 +297,7 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
     store.setState({ recoveryCopies: (await repository.recoveries()).map(draft => ({ id: draft.id, name: draft.snapshot.name })) });
   }
   function applyDraft(draft: CanvasDraft) {
-    store.setState({ nodes: draft.snapshot.nodes as CanvasNode[], edges: draft.snapshot.edges,
+    store.setState({ history: draft.snapshot.history, nodes: draft.snapshot.nodes as CanvasNode[], edges: draft.snapshot.edges,
       viewport: draft.snapshot.viewport, projectName: draft.snapshot.name, currentWorkflowId: draft.id,
       serverVersion: draft.serverVersion, recovery: draft.recovery, generationRecoveryReadOnly: draft.generationRecoveryReadOnly, selectedNodeIds: [] });
   }
@@ -343,8 +344,10 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
       if (token !== opening) return;
       await refreshCopies();
       if (token !== opening) return;
+      if (draft && history) draft = await repository.initializeHistory(draft.id);
+      if (token !== opening) return;
       if (draft) applyDraft(draft);
-      else store.setState({ nodes: [], edges: [], projectName: '未命名项目', currentWorkflowId: null, serverVersion: 0, recovery: undefined, generationRecoveryReadOnly: undefined });
+      else store.setState({ history: undefined, nodes: [], edges: [], projectName: '未命名项目', currentWorkflowId: null, serverVersion: 0, recovery: undefined, generationRecoveryReadOnly: undefined });
       store.setState({ canvasSession: store.getState().canvasSession + 1 });
       active = session(store.getState()); active.draft = draft; active.localVersion = draft?.localVersion ?? 0; sessions.add(active);
       await repository.setActive(active.id);

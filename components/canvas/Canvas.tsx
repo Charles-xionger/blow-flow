@@ -241,7 +241,16 @@ function CanvasInner() {
   );
 
   return (
-    <div ref={reactFlowWrapper} className="w-full h-full">
+    <div ref={reactFlowWrapper} className="w-full h-full"
+      onFocusCapture={event => {
+        const target = event.target as HTMLElement;
+        if (target.isContentEditable || target.matches('textarea, input:not([type]), input[type="text"], input[type="number"]')) {
+          useCanvasStore.getState().endEdit();
+          useCanvasStore.getState().beginEdit('text');
+        }
+      }}
+      onBlur={() => useCanvasStore.getState().endEdit('text')}>
+
       <CanvasRecovery />
       <ReactFlow
         nodes={renderNodes}

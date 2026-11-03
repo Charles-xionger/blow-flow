@@ -6,6 +6,7 @@ import Document from "@tiptap/extension-document";
 import Paragraph from "@tiptap/extension-paragraph";
 import Text from "@tiptap/extension-text";
 import { Placeholder, UndoRedo } from "@tiptap/extensions";
+import { EditorState } from "@tiptap/pm/state";
 import { Fragment, Slice } from "@tiptap/pm/model";
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, type ReactNodeViewProps } from "@tiptap/react";
 import type { Segment, UpstreamNode } from "@/lib/canvas/prompt";
@@ -158,6 +159,12 @@ export function PromptEditor({ value, upstream, placeholder, onChange }: {
     },
     onUpdate: ({ editor }) => onChange(toSegments(editor.getJSON())),
     onTransaction: ({ editor }) => refreshMenu(editor),
+    onFocus: ({ editor }) => {
+      // A focus session owns native text undo. Previous sessions already belong
+      // to canvas history, so never let local undo cross that handoff boundary.
+      const { doc, selection, plugins, storedMarks } = editor.state;
+      editor.view.updateState(EditorState.create({ doc, selection, plugins, storedMarks }));
+    },
     onBlur: () => showMenu(null),
   });
   const editorRef = useRef(editor);

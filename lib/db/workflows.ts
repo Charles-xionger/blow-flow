@@ -1,3 +1,4 @@
+import { createCanvasHistory } from '../canvas/history';
 import { getDatabase } from "./index";
 import type { Node, Edge, Viewport } from "@xyflow/react";
 import { createHash } from "node:crypto";
@@ -13,6 +14,7 @@ export interface WorkflowData {
   createdAt: number;
   updatedAt: number;
   version: number;
+  history?: import('../canvas/history').CanvasHistory;
 }
 
 interface WorkflowRow {
@@ -76,11 +78,20 @@ export function saveWorkflow(operation: SaveOperation): SaveAcknowledgement {
       if (receipt.digest !== digest) throw new CanvasSaveError("Request ID already used with different content", 409);
       return { id, requestId, version: receipt.version };
     }
-    const existing = db.prepare("SELECT version, data, cover_url FROM workflows WHERE id = ?").get(id) as { version: number; data: string; cover_url: string | null } | undefined;
+    const existing = db.prepare("SELECT version, name, data, cover_url FROM workflows WHERE id = ?").get(id) as { version: number; name: string; data: string; cover_url: string | null } | undefined;
     if ((existing?.version ?? 0) !== baseVersion) throw new CanvasSaveError("Canvas version conflict; local content has been preserved", 409);
     const version = baseVersion + 1;
     const now = Date.now();
-    const data = JSON.stringify({ nodes: snapshot.nodes, edges: snapshot.edges, viewport: snapshot.viewport });
+    let history = snapshot.history;
+    const previous = existing ? JSON.parse(existing.data) : undefined;
+    // Older writers still use version checks, but cannot silently discard the operation log.
+    if (!history && previous?.history) {
+      let state = { ...previous, projectName: existing!.name, canvasSession: 0 };
+      createCanvasHistory(() => state, update => { state = { ...state, ...update }; })
+        .change({ nodes: snapshot.nodes, edges: snapshot.edges, projectName: snapshot.name });
+      history = state.history;
+    }
+    const data = JSON.stringify({ nodes: snapshot.nodes, edges: snapshot.edges, viewport: snapshot.viewport, history });
     const cover = projectCover(snapshot.nodes, existing ? JSON.parse(existing.data).nodes : [], existing?.cover_url);
     db.prepare(`INSERT INTO workflows (id, name, data, created_at, updated_at, version, cover_url, node_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET name = excluded.name, data = excluded.data,

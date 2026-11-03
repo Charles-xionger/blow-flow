@@ -1,7 +1,7 @@
 import type { Node, Edge, Viewport } from '@xyflow/react';
 import type { CanvasSnapshot } from './save-protocol';
 
-type GraphState = { nodes: Node[]; edges: Edge[]; viewport: Viewport; projectName: string };
+type GraphState = { history?: CanvasSnapshot['history']; nodes: Node[]; edges: Edge[]; viewport: Viewport; projectName: string };
 export function canvasSnapshot(state: GraphState): CanvasSnapshot {
   // UI-only xyflow and node-menu fields must not produce durable versions.
   const nodes = state.nodes.map(node => {
@@ -12,5 +12,5 @@ export function canvasSnapshot(state: GraphState): CanvasSnapshot {
     return { ...content, data };
   });
   const edges = state.edges.map(edge => { const { selected, ...content } = edge; void selected; return content; });
-  return { name: state.projectName, nodes, edges, viewport: state.viewport };
+  return { name: state.projectName, nodes, edges, viewport: state.viewport, ...(state.history ? { history: state.history } : {}) };
 }

@@ -1,6 +1,8 @@
+import { validateHistory } from './history';
 import type { Node, Edge, Viewport } from '@xyflow/react';
 
 export interface CanvasSnapshot {
+  history?: import('./history').CanvasHistory;
   name: string;
   nodes: Node[];
   edges: Edge[];
@@ -35,6 +37,10 @@ export function validateSaveOperation(value: unknown): asserts value is SaveOper
         Number.isFinite(node.position.x) && Number.isFinite(node.position.y) && node.data && typeof node.data === 'object') ||
       !snapshot.edges.every(edge => edge && typeof edge.id === 'string' && typeof edge.source === 'string' && typeof edge.target === 'string')) {
     throw new CanvasSaveError('Invalid canvas save: id, requestId, baseVersion and complete snapshot are required');
+  }
+  if (snapshot.history !== undefined) {
+    try { validateHistory(snapshot.history, { ...snapshot, projectName: snapshot.name }); }
+    catch (error) { throw new CanvasSaveError(error instanceof Error ? error.message : 'Invalid canvas history'); }
   }
 }
 
