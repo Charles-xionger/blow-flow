@@ -164,7 +164,10 @@ export class GenerationWorker {
         return;
       }
       if (result.code === 805) {
-        this.update(task, { status: 'failed', error: '平台生成失败', lease_until: 0 });
+        const reason = (result.data as { failedReason?: { exception_type?: unknown } } | undefined)?.failedReason;
+        const outOfMemory = /OutOfMemory/i.test(String(reason?.exception_type ?? ''));
+        this.update(task, { status: 'failed', lease_until: 0,
+          error: outOfMemory ? '平台生成失败：显存不足，请降低分辨率或时长，或选择高性能渠道' : '平台生成失败' });
         return;
       }
       if (result.code !== 0) throw new PlatformError(transientPlatformErrors.has(result.code) ? 'transient' : 'business');

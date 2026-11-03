@@ -5,6 +5,8 @@ export interface GenerationReference { kind: ReferenceKind; url: string; useAudi
 export interface GenerationInput {
   prompt: string; width: number; height: number;
   duration?: number; references?: GenerationReference[];
+  /** RunningHub machine pool; absent means the platform's standard 24G instance. */
+  instanceType?: 'plus';
 }
 export interface CreateGeneration {
   requestId: string; modelId: string; input: GenerationInput;

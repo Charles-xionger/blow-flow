@@ -284,3 +284,32 @@ test('reference failures identify the stage without storing credentials or signe
     assert.ok(!JSON.stringify(diagnostics).includes('hidden'));
   }
 });
+
+test('the high-performance channel is chosen per task and only sent when requested', async t => {
+  for (const instanceType of [undefined, 'plus']) {
+    const { service } = setup(t);
+    service.create({ ...request(), input: { ...request().input, instanceType } });
+    const io = mockIO(); const worker = new GenerationWorker(service, io); t.after(() => worker.close());
+    await worker.tick();
+    assert.equal(io.submits.length, 1);
+    assert.equal(io.submits[0].instanceType, instanceType);
+    assert.equal('instanceType' in io.submits[0], !!instanceType);
+  }
+  const { service, db } = setup(t);
+  for (const instanceType of ['standard', 'default', true, ''])
+    assert.throws(() => service.create({ ...request(), input: { ...request().input, instanceType } }));
+  assert.equal(db.prepare('SELECT count(*) as count FROM generation_tasks').get().count, 0);
+});
+
+test('a platform out-of-memory failure tells the user how to recover', async t => {
+  const { service } = setup(t);
+  const task = service.create(request());
+  const io = mockIO(); const fetch = io.fetch;
+  io.fetch = async (url, init) => url.endsWith('/outputs')
+    ? Response.json({ code: 805, msg: 'APIKEY_TASK_STATUS_ERROR', data: { failedReason: { exception_type: 'torch.OutOfMemoryError' } } })
+    : fetch(url, init);
+  const worker = new GenerationWorker(service, io); t.after(() => worker.close());
+  await worker.tick(); await worker.tick();
+  assert.equal(service.get(task.id).status, 'failed');
+  assert.match(service.get(task.id).error, /显存不足.*高性能/);
+});

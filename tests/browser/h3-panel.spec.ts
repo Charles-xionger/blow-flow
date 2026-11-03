@@ -60,10 +60,16 @@ test('H3 combines canvas references and uploads, persists ordering and submits t
   await page.getByRole('combobox', { name: '视频画幅' }).selectOption('9:16');
   await page.getByRole('combobox', { name: '视频目标时长' }).selectOption('7');
   await expect(page.getByRole('combobox', { name: '视频画幅' })).toHaveValue('9:16');
+  const channel = page.getByRole('button', { name: '高性能 48G 渠道' });
+  const memoryHint = page.getByText('1080p 在标准渠道可能显存不足');
+  await expect(channel).toHaveAttribute('aria-pressed', 'false'); await expect(memoryHint).toBeVisible();
+  await channel.click(); await expect(channel).toHaveAttribute('aria-pressed', 'true');
+  await expect(memoryHint).toHaveCount(0);
   await refs.first().getByRole('button', { name: '<Picture 1>', exact: true }).click();
   await expect(page.getByRole('textbox', { name: '提示词' })).toHaveText('人物走过田野<Picture 1>');
   await expect.poll(async () => (await read()).videoReferenceAudio?.['node:source-video']).toBe(false);
   await expect.poll(async () => (await read()).videoResolution).toBe('1080p');
+  await expect.poll(async () => (await read()).videoInstanceType).toBe('plus');
   await page.reload();
   await page.locator('.react-flow__node[data-id="h3"]').click();
   await expect(refs).toHaveCount(4); await expect(refs.first()).toContainText('reference.png');
@@ -77,6 +83,7 @@ test('H3 combines canvas references and uploads, persists ordering and submits t
   await page.getByRole('button', { name: '生成', exact: true }).click();
   await expect.poll(() => submitted?.input.width).toBe(1088);
   expect(submitted?.input.height).toBe(1920); expect(submitted?.input.duration).toBe(7);
+  expect(submitted?.input.instanceType).toBe('plus');
   expect(submitted?.input.references).toEqual([
     { kind: 'image', url: assets + '/upload.png' }, { kind: 'image', url: assets + '/linked.png' },
     { kind: 'video', url: assets + '/linked.mp4', useAudio: false }, { kind: 'audio', url: assets + '/voice.wav' },

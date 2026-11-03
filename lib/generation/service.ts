@@ -165,7 +165,8 @@ function validateRequest(value: unknown): CreateGeneration {
   const r = object(value);
   onlyKeys(r, ['requestId', 'modelId', 'input', 'canvasId', 'nodeId']);
   const input = object(r.input);
-  onlyKeys(input, ['prompt', 'width', 'height', 'referenceImages', 'duration', 'references']);
+  onlyKeys(input, ['prompt', 'width', 'height', 'referenceImages', 'duration', 'references', 'instanceType']);
+  if (input.instanceType !== undefined && input.instanceType !== 'plus') throw new GenerationError('无效的执行渠道');
   if (input.referenceImages !== undefined && (!Array.isArray(input.referenceImages) || input.referenceImages.length))
     throw new GenerationError('此模型不支持参考图');
   if (typeof input.width !== 'number' || typeof input.height !== 'number') throw new GenerationError('尺寸必须为数字');
@@ -187,7 +188,8 @@ function validateRequest(value: unknown): CreateGeneration {
   return { requestId: text(r.requestId), modelId: text(r.modelId), canvasId: text(r.canvasId), nodeId: text(r.nodeId),
     input: { prompt: text(input.prompt), width: input.width, height: input.height,
       ...(input.duration !== undefined ? { duration: input.duration as number } : {}),
-      ...(references !== undefined ? { references } : {}) } satisfies GenerationInput };
+      ...(references !== undefined ? { references } : {}),
+      ...(input.instanceType === 'plus' ? { instanceType: 'plus' as const } : {}) } satisfies GenerationInput };
 }
 
 function validateModelInput(model: ModelConfig, input: GenerationInput) {

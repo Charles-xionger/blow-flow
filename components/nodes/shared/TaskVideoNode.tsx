@@ -14,7 +14,7 @@ import { mediaUploadLimit } from "@/lib/upload-limits";
 import type { Node, NodeProps } from "@xyflow/react";
 import { createVideoSourcesSelector } from "@/lib/canvas/video-sources";
 import { canvasExperimentDisabled } from "@/lib/canvas/performance-experiment";
-import { Upload, ArrowUp, ArrowDown, X } from "lucide-react";
+import { Upload, ArrowUp, ArrowDown, X, Zap } from "lucide-react";
 import { NodeShell } from "../NodeShell";
 import { useCanvasStore } from "@/store/useCanvasStore";
 import type { NodeData } from "@/types";
@@ -115,6 +115,7 @@ export function TaskVideoNode({ node, model, models, task }: Props) {
   const duration =
     data.videoDuration ?? model?.capabilities.video?.defaultDuration ?? 7;
   const dims = videoDimensions(resolution, ratio);
+  const instanceType = data.videoInstanceType;
   const capabilities = model?.capabilities.video;
   const counts = {
     image: references.filter((r) => r.kind === "image").length,
@@ -259,6 +260,7 @@ export function TaskVideoNode({ node, model, models, task }: Props) {
         prompt,
         ...dims,
         duration,
+        ...(instanceType ? { instanceType } : {}),
         references: references.map(({ kind, url, useAudio }) => ({
           kind,
           url,
@@ -299,10 +301,6 @@ export function TaskVideoNode({ node, model, models, task }: Props) {
             <div className={styles.panel}>
               <div className={styles.heading}>
                 <span>参考素材</span>
-                <span className={styles.muted}>
-                  {counts.image}/9 图 · {counts.video}/3 视频 · {counts.audio}/3
-                  音频
-                </span>
               </div>
               <div className={styles.references}>
                 {references.map((ref, index) => (
@@ -419,6 +417,11 @@ export function TaskVideoNode({ node, model, models, task }: Props) {
               {tooMany ? (
                 <p className={styles.error}>参考素材数量超限，请移除多余素材</p>
               ) : null}
+              {resolution === "1080p" && !instanceType ? (
+                <p className={styles.muted}>
+                  1080p 在标准渠道可能显存不足，可点击 ⚡ 选择高性能 48G 渠道
+                </p>
+              ) : null}
               {invalidSize ? (
                 <p className={styles.error}>
                   此画幅与分辨率组合超出模型尺寸范围
@@ -498,6 +501,22 @@ export function TaskVideoNode({ node, model, models, task }: Props) {
                   </option>
                 ))}
               </select>
+              <button
+                type="button"
+                aria-label="高性能 48G 渠道"
+                aria-pressed={!!instanceType}
+                title={instanceType ? "高性能 48G 渠道" : "标准 24G 渠道"}
+                onClick={() =>
+                  change({ videoInstanceType: instanceType ? undefined : "plus" })
+                }
+                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors ${
+                  instanceType
+                    ? "bg-amber-500/20 text-amber-400"
+                    : "text-zinc-400 hover:bg-white/10 hover:text-white"
+                }`}
+              >
+                <Zap size={15} fill={instanceType ? "currentColor" : "none"} />
+              </button>
             </>
           }
         />

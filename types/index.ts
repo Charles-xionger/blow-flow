@@ -51,6 +51,7 @@ export interface NodeData extends Record<string, unknown> {
   videoResolution?: VideoResolution;
   videoAspectRatio?: string;
   videoDuration?: number;
+  videoInstanceType?: 'plus';
 
   // 状态
   isLoading?: boolean;

@@ -33,7 +33,8 @@ export function submission(snapshot: TaskSnapshot, input: GenerationInput & { se
   if (snapshot.model.category === 'VIDEO') connectVideoReferences(graph, snapshot, input, references);
   // Pin the whole exported graph, including bypass, weights and LoRAs, so editing
   // the remote workflow after enqueueing cannot alter an existing task's meaning.
-  return { workflowId: snapshot.model.workflowId, workflow: JSON.stringify(graph), nodeInfoList };
+  return { workflowId: snapshot.model.workflowId, workflow: JSON.stringify(graph), nodeInfoList,
+    ...(input.instanceType === 'plus' ? { instanceType: 'plus' } : {}) };
 }
 
 export async function platformCall(snapshot: TaskSnapshot, endpoint: 'create' | 'outputs', body: object,
