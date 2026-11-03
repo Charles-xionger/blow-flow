@@ -15,6 +15,7 @@ for (const method of ['file', 'paste'] as const) {
     expect(response.ok()).toBeTruthy();
     const imageUrl = 'https://upload-fixture.test/image.png';
     await page.route(imageUrl, route => route.fulfill({ path: path.resolve('tests/fixtures/h3/reference.png'), contentType: 'image/png' }));
+    await page.route('**/api/canvas-preview?**', route => route.fulfill({ path: path.resolve('tests/fixtures/h3/reference.png'), contentType: 'image/png' }));
     let uploads = 0;
     await page.route('**/api/upload/image', route => {
       uploads++;

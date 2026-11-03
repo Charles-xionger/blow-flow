@@ -1,5 +1,7 @@
 "use client";
 
+import { nodeContentEqual } from "@/lib/canvas/node-content";
+
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { useShallow } from "zustand/react/shallow";
@@ -231,4 +233,4 @@ const StartEndToVideoNode = (props: NodeProps<Node<NodeData>>) => {
 
 StartEndToVideoNode.displayName = "StartEndToVideoNode";
 
-export default memo(StartEndToVideoNode);
+export default memo(StartEndToVideoNode, nodeContentEqual);

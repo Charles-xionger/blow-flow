@@ -1,5 +1,7 @@
 "use client";
 
+import { nodeContentEqual } from "@/lib/canvas/node-content";
+
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { useUpstreamNodes } from "@/hooks/useUpstreamNodes";
@@ -114,4 +116,4 @@ const TextToVideoNode = (props: NodeProps<Node<NodeData>>) => {
 
 TextToVideoNode.displayName = "TextToVideoNode";
 
-export default memo(TextToVideoNode);
+export default memo(TextToVideoNode, nodeContentEqual);

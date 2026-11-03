@@ -1,5 +1,7 @@
 "use client";
 
+import { CanvasPreview } from "@/components/ui/canvas-preview";
+
 import { Image as ImageIcon, Loader2 } from "lucide-react";
 import type { NodeData } from "@/types";
 
@@ -7,8 +9,7 @@ import type { NodeData } from "@/types";
 export function ImageStage({ data }: { data: NodeData }) {
   return <>
     {data.imageSrc && !data.isLoading ? (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img src={data.imageSrc} alt="Generated" draggable={false} className="w-full h-full object-contain" />
+        <CanvasPreview src={data.imageSrc} alt="Generated" draggable={false} className="w-full h-full object-contain" />
     ) : (
       <div role="img" aria-label="尚无生成图片" className="w-full h-full flex items-center justify-center text-zinc-500">
         <div className="w-16 h-16 rounded-2xl flex items-center justify-center bg-zinc-800/50 text-zinc-500">

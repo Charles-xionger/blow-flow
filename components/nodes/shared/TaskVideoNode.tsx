@@ -1,6 +1,8 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { CanvasPreview } from "@/components/ui/canvas-preview";
+
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   appendPromptText,
   promptIsEmpty,
@@ -11,6 +13,8 @@ import {
 import { mediaUploadLimit } from "@/lib/upload-limits";
 import type { Node, NodeProps } from "@xyflow/react";
 import { useShallow } from "zustand/react/shallow";
+import { createVideoSourcesSelector } from "@/lib/canvas/video-sources";
+import { canvasExperimentDisabled } from "@/lib/canvas/performance-experiment";
 import { Upload, ArrowUp, ArrowDown, X } from "lucide-react";
 import { NodeShell } from "../NodeShell";
 import { useCanvasStore } from "@/store/useCanvasStore";
@@ -49,15 +53,16 @@ const emptyOrder: string[] = [];
 
 export function TaskVideoNode({ node, model, models, task }: Props) {
   const { id, data } = node;
+  useEffect(() => {
+    if (process.env.NEXT_PUBLIC_CANVAS_PERF_EXPERIMENT === "1") performance.mark("canvas:video-content-render");
+  });
   const update = useCanvasStore((s) => s.updateNodeData);
-  const sources = useCanvasStore(
-    useShallow((s) =>
-      s.edges
-        .filter((e) => e.target === id)
-        .map((e) => s.nodes.find((n) => n.id === e.source))
-        .filter((n) => !!n),
-    ),
-  );
+  const selectSources = useMemo(() => createVideoSourcesSelector(id), [id]);
+  const sources = useCanvasStore(selectSources);
+  // Preserve the old whole-node subscription only in explicitly enabled experiments.
+  useCanvasStore(useShallow((s) => canvasExperimentDisabled('subscriptions')
+    ? s.edges.filter(e => e.target === id).map(e => s.nodes.find(n => n.id === e.source))
+    : []));
   const [uploading, setUploading] = useState(false);
   const uploadingRef = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -66,17 +71,14 @@ export function TaskVideoNode({ node, model, models, task }: Props) {
   const references = useMemo(() => {
     const connected: VideoReference[] = [];
     for (const source of sources) {
-      const url =
-        source.data.videoSrc ||
-        source.data.characterData?.referenceImages[0] ||
-        source.data.imageSrc;
+      const url = source.url;
       if (!url) continue;
-      const kind = source.data.videoSrc ? "video" : "image";
+      const kind = source.kind;
       const refId = `node:${source.id}`;
       connected.push({
         id: refId,
         sourceNodeId: source.id,
-        name: source.data.customTitle || source.data.label,
+        name: source.name,
         kind,
         url,
         ...(kind === "video"
@@ -107,7 +109,7 @@ export function TaskVideoNode({ node, model, models, task }: Props) {
   // A connected node with no material yet is not numbered, so a reference to it reads as its name.
   for (const source of sources)
     if (!tags.has(source.id)) {
-      const name = source.data.customTitle || source.data.label;
+      const name = source.name;
       tags.set(source.id, name);
       upstream.push({ id: source.id, kind: "image", label: name, name });
     }
@@ -315,10 +317,8 @@ export function TaskVideoNode({ node, model, models, task }: Props) {
                     data-testid="video-reference"
                   >
                     <div className={styles.preview}>
-                      {/* Uploaded references use their original URLs; do not proxy them through an image optimizer. */}
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
                       {ref.kind === "image" ? (
-                        <img src={ref.url} alt={ref.name} />
+                        <CanvasPreview compact className="h-16 w-[108px]" src={ref.url} alt={ref.name} />
                       ) : ref.kind === "video" ? (
                         <video src={ref.url} controls preload="metadata" />
                       ) : (

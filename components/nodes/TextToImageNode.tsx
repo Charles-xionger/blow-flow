@@ -1,5 +1,7 @@
 "use client";
 
+import { nodeContentEqual } from "@/lib/canvas/node-content";
+
 import { memo, useCallback, useState, useEffect, useMemo } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { NodeShell } from "./NodeShell";
@@ -202,4 +204,4 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
 
 TextToImageNode.displayName = "TextToImageNode";
 
-export default memo(TextToImageNode);
+export default memo(TextToImageNode, nodeContentEqual);

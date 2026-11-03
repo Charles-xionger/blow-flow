@@ -1,5 +1,9 @@
 "use client";
 
+import { nodeContentEqual } from "@/lib/canvas/node-content";
+
+import { CanvasPreview } from "@/components/ui/canvas-preview";
+
 import { memo, useState } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { Edit, Library, Sparkles, User } from "lucide-react";
@@ -34,8 +38,7 @@ const CharacterNode = (props: NodeProps<Node<NodeData>>) => {
           {/* 角色头像区域 */}
           <div className="relative h-40 bg-gradient-to-b from-purple-900/20 to-zinc-900">
             {character.referenceImages[0] ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={character.referenceImages[0]} alt={character.name} draggable={false} className="w-full h-full object-cover" />
+              <CanvasPreview src={character.referenceImages[0]} alt={character.name} draggable={false} className="w-full h-full object-cover" />
             ) : (
               <div className="w-full h-full flex items-center justify-center">
                 <User className="w-16 h-16 text-purple-500/30" />
@@ -97,4 +100,4 @@ const CharacterNode = (props: NodeProps<Node<NodeData>>) => {
   );
 };
 
-export default memo(CharacterNode);
+export default memo(CharacterNode, nodeContentEqual);

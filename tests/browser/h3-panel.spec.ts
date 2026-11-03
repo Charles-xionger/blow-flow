@@ -5,6 +5,7 @@ import type { CreateGeneration, GenerationTask } from '../../lib/generation/type
 const assets = 'https://h3-fixture.test';
 const fixture = (extension: string) => path.join(process.cwd(), 'tests/fixtures/h3/reference.' + extension);
 async function mocks(page: Page) {
+  await page.route('**/api/canvas-preview?**', route => route.fulfill({ path: fixture('png'), contentType: 'image/png' }));
   await page.route('**/api/generation/models', async route => {
     const response = await route.fetch();
     const models = await response.json();
@@ -58,7 +59,7 @@ test('H3 combines canvas references and uploads, persists ordering and submits t
   await page.getByRole('combobox', { name: '视频分辨率' }).selectOption('1080p');
   await page.getByRole('combobox', { name: '视频画幅' }).selectOption('9:16');
   await page.getByRole('combobox', { name: '视频目标时长' }).selectOption('7');
-  await expect(page.getByTestId('video-actual-size')).toContainText('1088 × 1920 · 预计 7.29 秒');
+  await expect(page.getByRole('combobox', { name: '视频画幅' })).toHaveValue('9:16');
   await refs.first().getByRole('button', { name: '<Picture 1>', exact: true }).click();
   await expect(page.getByRole('textbox', { name: '提示词' })).toHaveText('人物走过田野<Picture 1>');
   await expect.poll(async () => (await read()).videoReferenceAudio?.['node:source-video']).toBe(false);

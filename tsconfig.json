@@ -30,7 +30,9 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts",
     ".next-canvas-test/types/**/*.ts",
-    ".next-canvas-test/dev/types/**/*.ts"
+    ".next-canvas-test/dev/types/**/*.ts",
+    ".next-canvas-perf/types/**/*.ts",
+    ".next-canvas-perf/dev/types/**/*.ts"
   ],
   "exclude": ["node_modules"]
 }

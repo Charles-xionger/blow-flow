@@ -180,13 +180,13 @@ export function PromptEditor({ value, upstream, placeholder, onChange }: {
         {menu && (
           <div role="listbox" aria-label="引用连接的节点" className="absolute bottom-full left-0 z-20 mb-1 w-52 rounded-xl border border-white/10 bg-[#262626] p-1 shadow-2xl">
             {menu.items.map((node, index) => (
-              <button key={node.id} type="button" role="option" aria-selected={index === menu.index}
-                onMouseDown={event => { event.preventDefault(); insert(editor, node, menu.from); }}
+              <div key={node.id} role="option" aria-selected={index === menu.index}
+                onMouseDown={event => { if ((event.target as Element).closest("button")) return; event.preventDefault(); insert(editor, node, menu.from); }}
                 className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-zinc-200 ${index === menu.index ? "bg-white/10" : ""}`}>
                 <UpstreamThumbnail node={node} className="h-6 w-6 shrink-0 rounded text-[10px]" />
                 <span className="flex-1 truncate">{node.label}</span>
                 {node.label !== node.name && <span className="truncate text-[11px] text-zinc-500">{node.name}</span>}
-              </button>
+              </div>
             ))}
           </div>
         )}

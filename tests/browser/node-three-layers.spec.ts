@@ -84,7 +84,7 @@ test('直接拖动未选中的节点：全程不挂载节点工具栏和节点�
   await expect(page.getByRole('region', { name: '节点控制台' })).toBeVisible();
 });
 
-const result = `data:image/svg+xml;base64,${Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="#718bb8"/></svg>').toString('base64')}`;
+const result = `data:image/png;base64,${require('node:fs').readFileSync('tests/fixtures/h3/reference.png').toString('base64')}`;
 
 test('节点工具栏提供预览、下载和保存为角色，图片上不再有悬浮按钮', async ({ page, request }) => {
   const node = await openCanvas(page, request, { imageSrc: result });
@@ -490,7 +490,7 @@ test('拖线连接文本节点后，编辑器里出现它的节点引用，手�
   await expect.poll(() => run.body?.prompt).toBe('一朵花花园');
 });
 
-const swatch = (fill: string) => `data:image/svg+xml;base64,${Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="${fill}"/></svg>`).toString('base64')}`;
+const swatch = (fill: string) => `data:image/png;base64,${require('node:fs').readFileSync(`tests/fixtures/canvas/${fill}.png`).toString('base64')}`;
 
 test('拖动缩略图调整顺序：编号、发送内容和素材顺序一起更新，重新打开后不变，不影响其他节点和画布', async ({ page, request }) => {
   const run = await captureRun(page);
@@ -907,7 +907,7 @@ async function openSourceNode(page: Page, request: APIRequestContext, node: Reco
 
 test('原图：只有节点工具栏，可以上传、预览、下载和删除图片', async ({ page, request }) => {
   const imageUrl = 'https://upload-fixture.test/original.png';
-  await page.route(imageUrl, route => route.fulfill({ body: Buffer.from(result.split(',')[1], 'base64'), contentType: 'image/svg+xml', headers: { 'access-control-allow-origin': '*' } }));
+  await page.route(imageUrl, route => route.fulfill({ body: Buffer.from(result.split(',')[1], 'base64'), contentType: 'image/png', headers: { 'access-control-allow-origin': '*' } }));
   await page.route('**/api/upload/image', route => route.fulfill({ json: { success: true, data: { url: imageUrl } } }));
   const { node, toolbar } = await openSourceNode(page, request, { id: 'original', type: 'originalImage', data: { type: 'originalImage', label: '原图' } });
   await expect(toolbar).toBeVisible();

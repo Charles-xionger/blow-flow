@@ -1,5 +1,7 @@
 "use client";
 
+import { CanvasPreview } from "@/components/ui/canvas-preview";
+
 import { useRef, useState, type PointerEvent } from "react";
 import { X } from "lucide-react";
 import type { UpstreamNode } from "@/lib/canvas/prompt";
@@ -10,8 +12,7 @@ export const upstreamTitle = (node: UpstreamNode) => node.label === node.name ? 
 /** Thumbnail of an upstream node, or a text mark when it has no image. */
 export function UpstreamThumbnail({ node, className }: { node: UpstreamNode; className: string }) {
   return node.src
-    // eslint-disable-next-line @next/next/no-img-element
-    ? <img src={node.src} alt="" draggable={false} className={`${className} object-cover`} />
+    ? <CanvasPreview compact src={node.src} alt="" draggable={false} className={`${className} object-cover`} />
     : <span aria-hidden className={`${className} flex items-center justify-center bg-zinc-700 text-zinc-300`}>{node.kind === "text" ? "文" : node.kind === "video" ? "视" : "图"}</span>;
 }
 

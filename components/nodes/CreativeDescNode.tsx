@@ -1,5 +1,7 @@
 "use client";
 
+import { nodeContentEqual } from "@/lib/canvas/node-content";
+
 import { memo, useCallback, useMemo } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { Film, Loader2, Minus, Plus } from "lucide-react";
@@ -123,4 +125,4 @@ const CreativeDescNode = (props: NodeProps<Node<NodeData>>) => {
 
 CreativeDescNode.displayName = "CreativeDescNode";
 
-export default memo(CreativeDescNode);
+export default memo(CreativeDescNode, nodeContentEqual);

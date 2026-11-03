@@ -1,5 +1,7 @@
 "use client";
 
+import { nodeContentEqual } from "@/lib/canvas/node-content";
+
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { Loader2, Sparkles } from "lucide-react";
@@ -200,4 +202,4 @@ const ImageToVideoNode = (props: NodeProps<Node<NodeData>>) => {
 
 ImageToVideoNode.displayName = "ImageToVideoNode";
 
-export default memo(ImageToVideoNode);
+export default memo(ImageToVideoNode, nodeContentEqual);

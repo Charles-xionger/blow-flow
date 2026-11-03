@@ -54,3 +54,6 @@ next-env.d.ts
 .next-canvas-test/
 /test-results/
 /playwright-report/
+
+.next-canvas-perf/
+.scratch/canvas-drag-performance/measurements/

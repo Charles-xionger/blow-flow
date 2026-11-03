@@ -1,5 +1,7 @@
 "use client";
 
+import { nodeContentEqual } from "@/lib/canvas/node-content";
+
 import { memo, useMemo } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { useUpstreamNodes } from "@/hooks/useUpstreamNodes";
@@ -40,4 +42,4 @@ const TextNode = (props: NodeProps<Node<NodeData>>) => {
 
 TextNode.displayName = "TextNode";
 
-export default memo(TextNode);
+export default memo(TextNode, nodeContentEqual);

@@ -1,5 +1,7 @@
 "use client";
 
+import { nodeContentEqual } from "@/lib/canvas/node-content";
+
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { RefreshCw } from "lucide-react";
@@ -129,4 +131,4 @@ const ImageToImageNode = (props: NodeProps<Node<NodeData>>) => {
 
 ImageToImageNode.displayName = "ImageToImageNode";
 
-export default memo(ImageToImageNode);
+export default memo(ImageToImageNode, nodeContentEqual);

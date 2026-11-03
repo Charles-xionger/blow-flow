@@ -1,5 +1,9 @@
 "use client";
 
+import { nodeContentEqual } from "@/lib/canvas/node-content";
+
+import { CanvasPreview } from "@/components/ui/canvas-preview";
+
 import { memo, useCallback, useEffect, useRef } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import { Image as ImageIcon, Trash2, Upload, X } from "lucide-react";
@@ -84,8 +88,7 @@ const OriginalImageNode = (props: NodeProps<Node<NodeData>>) => {
           <span className="text-xs opacity-40 mt-1">{data.error}</span>
         </div>
       ) : data.imageSrc ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={data.imageSrc} alt="Uploaded image" draggable={false} className="w-full h-full object-contain" />
+            <CanvasPreview src={data.imageSrc} alt="Uploaded image" draggable={false} className="w-full h-full object-contain" />
       ) : (
         <div className="w-full h-full flex flex-col items-center justify-center text-zinc-500">
           <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 bg-zinc-800/50 text-zinc-500">
@@ -102,4 +105,4 @@ const OriginalImageNode = (props: NodeProps<Node<NodeData>>) => {
 
 OriginalImageNode.displayName = "OriginalImageNode";
 
-export default memo(OriginalImageNode);
+export default memo(OriginalImageNode, nodeContentEqual);
