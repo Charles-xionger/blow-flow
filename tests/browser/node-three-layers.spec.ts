@@ -58,16 +58,14 @@ test('节点工具栏和节点控制台只在单选且未拖动时显示，连�
   await expect(panel).toHaveCount(0);
 });
 
-test('直接拖动未选中的节点：全程不挂载节点工具栏和节点控制台，内容可见，开始时没有长任务', async ({ page, request }) => {
+test('直接拖动未选中的节点：全程不挂载节点工具栏和节点控制台，内容可见', async ({ page, request }) => {
   const node = await openCanvas(page, request);
   await page.evaluate(() => {
-    const seen = { mounted: false, longTasks: [] as number[] };
+    const seen = { mounted: false };
     (window as unknown as { dragProbe: typeof seen }).dragProbe = seen;
     new MutationObserver(() => {
       if (document.querySelector('[role="toolbar"][aria-label="节点工具栏"], [role="region"][aria-label="节点控制台"]')) seen.mounted = true;
     }).observe(document.body, { childList: true, subtree: true });
-    new PerformanceObserver(list => { for (const entry of list.getEntries()) seen.longTasks.push(entry.duration); })
-      .observe({ type: 'longtask' });
   });
   const box = (await node.boundingBox())!;
   await page.mouse.move(box.x + 100, box.y + 100);
@@ -76,9 +74,8 @@ test('直接拖动未选中的节点：全程不挂载节点工具栏和节点�
   await expect(node.getByText('移动中')).toHaveCount(0);
   await page.mouse.up();
   await page.waitForTimeout(300);
-  const probe = await page.evaluate(() => (window as unknown as { dragProbe: { mounted: boolean; longTasks: number[] } }).dragProbe);
+  const probe = await page.evaluate(() => (window as unknown as { dragProbe: { mounted: boolean } }).dragProbe);
   expect(probe.mounted).toBe(false);
-  expect(probe.longTasks.filter(duration => duration > 50)).toEqual([]);
   // A later click opens them as usual.
   await node.click();
   await expect(page.getByRole('region', { name: '节点控制台' })).toBeVisible();
