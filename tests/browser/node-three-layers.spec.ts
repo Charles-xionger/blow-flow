@@ -40,18 +40,48 @@ test('节点工具栏和节点控制台只在单选且未拖动时显示，连�
   await page.mouse.click(950, 650);
   await node.click();
   await expect(panel).toBeVisible();
+  await panel.evaluate(element => { (element as HTMLElement & { mark?: boolean }).mark = true; });
   const box = (await node.boundingBox())!;
   await page.mouse.move(box.x + 100, box.y + 100);
   await page.mouse.down();
   await page.mouse.move(box.x + 160, box.y + 120, { steps: 5 });
-  await expect(toolbar).toHaveCount(0);
-  await expect(panel).toHaveCount(0);
+  await expect(toolbar).toBeHidden();
+  await expect(panel).toBeHidden();
+  await expect(node.getByText('移动中')).toHaveCount(0);
   await page.mouse.up();
   await expect(toolbar).toBeVisible();
   await expect(panel).toBeVisible();
+  // Hidden while dragging, never remounted: console state survives the drag.
+  expect(await panel.evaluate(element => (element as HTMLElement & { mark?: boolean }).mark)).toBe(true);
   await page.mouse.click(950, 650);
   await expect(toolbar).toHaveCount(0);
   await expect(panel).toHaveCount(0);
+});
+
+test('直接拖动未选中的节点：全程不挂载节点工具栏和节点控制台，内容可见，开始时没有长任务', async ({ page, request }) => {
+  const node = await openCanvas(page, request);
+  await page.evaluate(() => {
+    const seen = { mounted: false, longTasks: [] as number[] };
+    (window as unknown as { dragProbe: typeof seen }).dragProbe = seen;
+    new MutationObserver(() => {
+      if (document.querySelector('[role="toolbar"][aria-label="节点工具栏"], [role="region"][aria-label="节点控制台"]')) seen.mounted = true;
+    }).observe(document.body, { childList: true, subtree: true });
+    new PerformanceObserver(list => { for (const entry of list.getEntries()) seen.longTasks.push(entry.duration); })
+      .observe({ type: 'longtask' });
+  });
+  const box = (await node.boundingBox())!;
+  await page.mouse.move(box.x + 100, box.y + 100);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 160, box.y + 120, { steps: 5 });
+  await expect(node.getByText('移动中')).toHaveCount(0);
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  const probe = await page.evaluate(() => (window as unknown as { dragProbe: { mounted: boolean; longTasks: number[] } }).dragProbe);
+  expect(probe.mounted).toBe(false);
+  expect(probe.longTasks.filter(duration => duration > 50)).toEqual([]);
+  // A later click opens them as usual.
+  await node.click();
+  await expect(page.getByRole('region', { name: '节点控制台' })).toBeVisible();
 });
 
 const result = `data:image/svg+xml;base64,${Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="#718bb8"/></svg>').toString('base64')}`;
@@ -133,6 +163,25 @@ const savedPrompt = async (request: APIRequestContext, page: Page) => {
   const { data } = await (await request.get(`/api/workflow/${id}`)).json();
   return data.nodes.find((node: { id: string }) => node.id === 'image').data.prompt;
 };
+
+test('节点控制台打开时连线新增节点引用，不在 React 提交中创建引用标签', async ({ page, request }) => {
+  const errors: string[] = [];
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  const node = await openCanvas(page, request, { prompt: '一朵花' }, '花园');
+  await node.click();
+  const layer = page.getByRole('region', { name: '节点控制台' }).getByRole('list', { name: '连接的上游节点' });
+  await layer.getByRole('listitem').hover();
+  await layer.getByRole('button', { name: /^断开/ }).click();
+  const from = (await page.locator('.react-flow__node[data-id="text"] [data-handleid="output"]').boundingBox())!;
+  const to = (await node.locator('[data-handleid="input"]').boundingBox())!;
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 8 });
+  await page.mouse.up();
+  // The console stays open, so the new reference arrives as an outside change to a live editor.
+  await expect(editorOf(page).locator('[data-node-reference]')).toHaveCount(1);
+  expect(errors.filter(text => text.includes('flushSync'))).toEqual([]);
+});
 
 test('未选中的节点不挂载编辑器，旧提示词字符串显示为可编辑内容', async ({ page, request }) => {
   const node = await openCanvas(page, request);

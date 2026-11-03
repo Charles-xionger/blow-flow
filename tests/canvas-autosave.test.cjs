@@ -130,6 +130,23 @@ test('drag batches until release; continuous non-drag editing has a maximum loca
   await saver.flush();
 });
 
+test('save status stays put while dragging and becomes saving on release', async t => {
+  const { store, saver } = await setup(t);
+  store.setState({ nodes: [node('one')] });
+  await saver.flush();
+  assert.equal(store.getState().saveStatus, 'synced');
+  saver.beginInteraction('drag');
+  const statuses = [];
+  const unsubscribe = store.subscribe(state => statuses.push(state.saveStatus));
+  for (let i = 0; i < 5; i++) store.setState({ nodes: [{ ...node('one'), position: { x: i, y: 0 } }] });
+  unsubscribe();
+  assert.deepEqual(new Set(statuses), new Set(['synced']));
+  saver.endInteraction('drag');
+  assert.equal(store.getState().saveStatus, 'saving');
+  await saver.flush();
+  assert.equal(store.getState().saveStatus, 'synced');
+});
+
 test('wrong response identity never confirms local content', async t => {
   const { store, saver, repository } = await setup(t);
   global.fetch = async () => Response.json({ success: true, data: { id: 'wrong', requestId: 'wrong', version: 1 } });

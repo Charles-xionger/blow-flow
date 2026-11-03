@@ -164,9 +164,12 @@ export function PromptEditor({ value, upstream, placeholder, onChange }: {
 
   // Outside changes such as draft recovery; our own edits already match, so typing is never reset.
   useEffect(() => {
-    if (editor.view.composing || JSON.stringify(toSegments(editor.getJSON())) === JSON.stringify(value)) return;
-    // Out of history: undo must not bring back a reference whose connection is gone.
-    editor.chain().setMeta("addToHistory", false).setContent(toDocument(value), { emitUpdate: false }).run();
+    // Reference tags are React node views, which flushSync on creation; React forbids that inside an effect.
+    queueMicrotask(() => {
+      if (editor.isDestroyed || editor.view.composing || JSON.stringify(toSegments(editor.getJSON())) === JSON.stringify(value)) return;
+      // Out of history: undo must not bring back a reference whose connection is gone.
+      editor.chain().setMeta("addToHistory", false).setContent(toDocument(value), { emitUpdate: false }).run();
+    });
   }, [editor, value]);
 
   return (

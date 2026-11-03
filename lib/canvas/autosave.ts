@@ -276,6 +276,8 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
           state.viewport === previous.viewport && state.projectName === previous.projectName) return;
       active.latest = state;
       active.dirty = true;
+      // A drag changes the canvas every frame; report saving once, on release.
+      if (interactions.size) return;
       status(active, 'saving');
       schedule();
     });
@@ -424,6 +426,11 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
   }
   return { start, open, save, flush, recover, prepareSwitch, deleted, allowGenerationRecovery,
     beginInteraction(key: string) { interactions.add(key); clearTimers(); },
-    endInteraction(key: string) { interactions.delete(key); if (active?.dirty) schedule(); },
+    endInteraction(key: string) {
+      interactions.delete(key);
+      if (!active?.dirty || interactions.size) return;
+      status(active, 'saving');
+      schedule();
+    },
   };
 }
