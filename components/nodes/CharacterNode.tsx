@@ -2,161 +2,98 @@
 
 import { memo, useState } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
-import { BaseNode, NodeSurface } from "./BaseNode";
-import { User, Edit, Sparkles } from "lucide-react";
+import { Edit, Library, Sparkles, User } from "lucide-react";
 import type { NodeData } from "@/types";
 import { CharacterModal } from "../character/CharacterModal";
+import { NodeShell, NodeToolbarButton } from "./NodeShell";
+
+type LoraStatus = NonNullable<NonNullable<NodeData["characterData"]>["loraStatus"]>;
+const loraStatus: Record<Exclude<LoraStatus, "none">, { label: string; className: string }> = {
+  pending: { label: "Pending", className: "text-gray-400" },
+  training: { label: "Training...", className: "text-yellow-400" },
+  ready: { label: "Ready", className: "text-green-400" },
+  failed: { label: "Failed", className: "text-red-400" },
+};
 
 const CharacterNode = (props: NodeProps<Node<NodeData>>) => {
   const { data } = props;
-
   const [showCharacterModal, setShowCharacterModal] = useState(false);
-
   const character = data.characterData;
-
-  // 编辑当前角色
-  const handleEditCurrent = () => {
-    if (character) {
-      setShowCharacterModal(true);
-    }
-  };
-
-  // 打开侧边栏角色库
-  const handleOpenCharacterLibrary = () => {
-    // 触发打开侧边栏的角色面板
-    window.dispatchEvent(
-      new CustomEvent("openSidebarPanel", { detail: { panel: "CHARACTER" } }),
-    );
-  };
+  const lora = character?.loraStatus && character.loraStatus !== "none" ? loraStatus[character.loraStatus] : undefined;
 
   return (
-    <BaseNode {...props}>
-
-      {/* 节点主体 */}
-      <NodeSurface>
-        {character ? (
-          <div className="h-full flex flex-col">
-            {/* 角色头像区域 */}
-            <div className="relative h-40 bg-gradient-to-b from-purple-900/20 to-zinc-900">
-              {character.referenceImages[0] ? (
-                <img
-                  src={character.referenceImages[0]}
-                  alt={character.name}
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center">
-                  <User className="w-16 h-16 text-purple-500/30" />
-                </div>
-              )}
-              {/* 参考图数量标识 */}
-              {character.referenceImages.length > 1 && (
-                <div className="absolute bottom-2 right-2 bg-black/60 backdrop-blur-sm px-2 py-1 rounded text-xs text-white">
-                  +{character.referenceImages.length - 1}
-                </div>
-              )}
-            </div>
-
-            {/* 角色信息 */}
-            <div className="flex-1 p-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <h3 className="font-semibold text-white truncate">
-                  {character.name}
-                </h3>
-                <button
-                  onClick={handleEditCurrent}
-                  className="p-1 hover:bg-white/5 rounded transition-colors"
-                  onMouseDown={(e) => e.stopPropagation()}
-                  title="编辑角色"
-                >
-                  <Edit className="w-4 h-4 text-gray-400" />
-                </button>
+    <NodeShell {...props} stageTestId="character-stage"
+      toolbar={<>
+        <NodeToolbarButton label="编辑角色" icon={Edit} disabled={!character} onClick={() => setShowCharacterModal(true)} />
+        <NodeToolbarButton label="打开角色库" icon={Library}
+          onClick={() => window.dispatchEvent(new CustomEvent("openSidebarPanel", { detail: { panel: "CHARACTER" } }))} />
+      </>}
+    >
+      {character ? (
+        <div className="h-full flex flex-col">
+          {/* 角色头像区域 */}
+          <div className="relative h-40 bg-gradient-to-b from-purple-900/20 to-zinc-900">
+            {character.referenceImages[0] ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={character.referenceImages[0]} alt={character.name} draggable={false} className="w-full h-full object-cover" />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center">
+                <User className="w-16 h-16 text-purple-500/30" />
               </div>
-
-              <p className="text-xs text-gray-400 line-clamp-2">
-                {character.description}
-              </p>
-
-              {/* 标签 */}
-              {character.tags.length > 0 && (
-                <div className="flex flex-wrap gap-1">
-                  {character.tags.slice(0, 3).map((tag, index) => (
-                    <span
-                      key={index}
-                      className="px-2 py-0.5 bg-purple-500/20 text-purple-300 text-xs rounded"
-                    >
-                      {tag}
-                    </span>
-                  ))}
-                  {character.tags.length > 3 && (
-                    <span className="px-2 py-0.5 bg-zinc-800 text-gray-400 text-xs rounded">
-                      +{character.tags.length - 3}
-                    </span>
-                  )}
-                </div>
-              )}
-
-              {/* LoRA状态 */}
-              {character.loraStatus && character.loraStatus !== "none" && (
-                <div className="flex items-center gap-1 text-xs">
-                  <Sparkles className="w-3 h-3" />
-                  <span
-                    className={
-                      character.loraStatus === "ready"
-                        ? "text-green-400"
-                        : character.loraStatus === "training"
-                          ? "text-yellow-400"
-                          : character.loraStatus === "failed"
-                            ? "text-red-400"
-                            : "text-gray-400"
-                    }
-                  >
-                    LoRA:{" "}
-                    {character.loraStatus === "ready"
-                      ? "Ready"
-                      : character.loraStatus === "training"
-                        ? "Training..."
-                        : character.loraStatus === "failed"
-                          ? "Failed"
-                          : "Pending"}
-                  </span>
-                </div>
-              )}
-            </div>
+            )}
+            {/* 参考图数量标识 */}
+            {character.referenceImages.length > 1 && (
+              <div className="absolute bottom-2 right-2 bg-black/60 backdrop-blur-sm px-2 py-1 rounded text-xs text-white">
+                +{character.referenceImages.length - 1}
+              </div>
+            )}
           </div>
-        ) : (
-          <div className="h-full flex flex-col items-center justify-center p-6 text-center">
-            <User className="w-16 h-16 text-purple-500/30 mb-4" />
-            <p className="text-sm text-gray-400 mb-4">
-              未选择角色
-              <br />
-              请在侧边栏角色库中选择
-            </p>
-            <button
-              onClick={handleOpenCharacterLibrary}
-              onMouseDown={(e) => e.stopPropagation()}
-              className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm rounded-lg transition-colors"
-            >
-              打开角色库
-            </button>
-          </div>
-        )}
-      </NodeSurface>
 
-      {/* 角色编辑模态框 */}
+          <div className="flex-1 p-3 space-y-2">
+            <h3 className="font-semibold text-white truncate">{character.name}</h3>
+            <p className="text-xs text-gray-400 line-clamp-2">{character.description}</p>
+
+            {character.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {character.tags.slice(0, 3).map((tag, index) => (
+                  <span key={index} className="px-2 py-0.5 bg-purple-500/20 text-purple-300 text-xs rounded">{tag}</span>
+                ))}
+                {character.tags.length > 3 && (
+                  <span className="px-2 py-0.5 bg-zinc-800 text-gray-400 text-xs rounded">+{character.tags.length - 3}</span>
+                )}
+              </div>
+            )}
+
+            {lora && (
+              <div className="flex items-center gap-1 text-xs">
+                <Sparkles className="w-3 h-3" />
+                <span className={lora.className}>LoRA: {lora.label}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="h-full flex flex-col items-center justify-center p-6 text-center">
+          <User className="w-16 h-16 text-purple-500/30 mb-4" />
+          <p className="text-sm text-gray-400">
+            未选择角色
+            <br />
+            请在角色库中选择
+          </p>
+        </div>
+      )}
+      {/* Outside the toolbar, which unmounts when the node loses selection. */}
       {showCharacterModal && character && (
         <CharacterModal
           character={character}
           onClose={(saved) => {
             setShowCharacterModal(false);
-            if (saved) {
-              // 触发角色列表刷新
-              window.dispatchEvent(new CustomEvent("characterSaved"));
-            }
+            // 触发角色列表刷新
+            if (saved) window.dispatchEvent(new CustomEvent("characterSaved"));
           }}
         />
       )}
-    </BaseNode>
+    </NodeShell>
   );
 };
 

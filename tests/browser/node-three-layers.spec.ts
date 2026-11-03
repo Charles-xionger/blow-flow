@@ -843,3 +843,71 @@ test('分镜：没有连接层，编辑器、镜头数量和运行在控制台�
   await expect(editorOf(page)).toHaveText('勇士出发');
   await expect(editorOf(page).locator('[data-node-reference]')).toHaveCount(0);
 });
+
+async function openSourceNode(page: Page, request: APIRequestContext, node: Record<string, unknown>) {
+  const id = crypto.randomUUID();
+  expect((await request.put(`/api/workflow/${id}`, { data: { id, requestId: crypto.randomUUID(), baseVersion: 0, snapshot: { name: '素材节点', nodes: [
+    { position: { x: 300, y: 200 }, ...node },
+  ], edges: [], viewport: { x: 0, y: 0, zoom: 1 } } } })).ok()).toBeTruthy();
+  await page.goto(`/?project=${id}`);
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
+  const shown = page.locator(`.react-flow__node[data-id="${node.id}"]`);
+  await shown.click();
+  return { node: shown, toolbar: page.getByRole('toolbar', { name: '节点工具栏' }) };
+}
+
+test('原图：只有节点工具栏，可以上传、预览、下载和删除图片', async ({ page, request }) => {
+  const imageUrl = 'https://upload-fixture.test/original.png';
+  await page.route(imageUrl, route => route.fulfill({ body: Buffer.from(result.split(',')[1], 'base64'), contentType: 'image/svg+xml', headers: { 'access-control-allow-origin': '*' } }));
+  await page.route('**/api/upload/image', route => route.fulfill({ json: { success: true, data: { url: imageUrl } } }));
+  const { node, toolbar } = await openSourceNode(page, request, { id: 'original', type: 'originalImage', data: { type: 'originalImage', label: '原图' } });
+  await expect(toolbar).toBeVisible();
+  await expect(page.getByRole('region', { name: '节点控制台' })).toHaveCount(0);
+  for (const name of ['预览', '下载', '删除图片']) await expect(toolbar.getByRole('button', { name, exact: true })).toBeDisabled();
+  const chooser = page.waitForEvent('filechooser');
+  await toolbar.getByRole('button', { name: '上传图片', exact: true }).click();
+  await (await chooser).setFiles({ name: 'photo.png', mimeType: 'image/png', buffer: Buffer.from('png') });
+  await expect(node.getByAltText('Uploaded image')).toBeVisible();
+  await expect(toolbar.getByRole('button', { name: '重新上传', exact: true })).toBeVisible();
+  await toolbar.getByRole('button', { name: '预览', exact: true }).click();
+  await expect(page.locator('body > div.fixed img')).toHaveAttribute('src', imageUrl);
+  await page.keyboard.press('Escape');
+  const download = page.waitForEvent('download');
+  await toolbar.getByRole('button', { name: '下载', exact: true }).click();
+  expect((await download).suggestedFilename()).toMatch(/^image-\d+\.png$/);
+  await toolbar.getByRole('button', { name: '删除图片', exact: true }).click();
+  await expect(node.getByAltText('Uploaded image')).toHaveCount(0);
+  await expect(toolbar.getByRole('button', { name: '上传图片', exact: true })).toBeVisible();
+});
+
+test('角色：节点展示区显示角色信息，编辑角色和打开角色库在节点工具栏，取消选中不关闭编辑', async ({ page, request }) => {
+  const { node, toolbar } = await openSourceNode(page, request, { id: 'hero', type: 'character', data: { type: 'character', label: '角色',
+    characterData: { name: '小明', id: 'hero-character', description: '勇敢的少年', tags: ['少年', '勇士'], referenceImages: [swatch('blue'), swatch('green')] } } });
+  await expect(node.getByText('小明')).toBeVisible();
+  await expect(node.getByText('勇敢的少年')).toBeVisible();
+  await expect(node.getByText('勇士')).toBeVisible();
+  await expect(page.getByTestId('character-stage').getByRole('button')).toHaveCount(0);
+  await expect(page.getByRole('region', { name: '节点控制台' })).toHaveCount(0);
+  await toolbar.getByRole('button', { name: '编辑角色', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '编辑角色' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('heading', { name: '编辑角色' })).toBeVisible();
+  await page.getByRole('button', { name: '取消', exact: true }).click();
+  await node.click();
+  await expect(page.getByRole('heading', { name: '编辑角色' })).toHaveCount(0);
+  await expect(toolbar).toBeVisible();
+  await toolbar.getByRole('button', { name: '打开角色库', exact: true }).click();
+  await expect(page.getByText('角色', { exact: true }).first()).toBeVisible();
+  const empty = await openSourceNode(page, request, { id: 'blank', type: 'character', data: { type: 'character', label: '角色' } });
+  await expect(empty.toolbar.getByRole('button', { name: '编辑角色', exact: true })).toBeDisabled();
+  await expect(empty.toolbar.getByRole('button', { name: '打开角色库', exact: true })).toBeEnabled();
+});
+
+test('原图：上传失败时节点展示区显示错误，依赖图片的操作不可用，删除图片可以清除错误', async ({ page, request }) => {
+  const { node, toolbar } = await openSourceNode(page, request, { id: 'original', type: 'originalImage', data: { type: 'originalImage', label: '原图', imageSrc: result, error: '上传失败了' } });
+  await expect(node).toContainText('上传失败了');
+  for (const name of ['预览', '下载', '保存为角色']) await expect(toolbar.getByRole('button', { name, exact: true })).toBeDisabled();
+  await toolbar.getByRole('button', { name: '删除图片', exact: true }).click();
+  await expect(node).not.toContainText('上传失败了');
+  await expect(toolbar.getByRole('button', { name: '上传图片', exact: true })).toBeVisible();
+});
