@@ -12,7 +12,6 @@ import {
 } from "@/lib/canvas/prompt";
 import { mediaUploadLimit } from "@/lib/upload-limits";
 import type { Node, NodeProps } from "@xyflow/react";
-import { useShallow } from "zustand/react/shallow";
 import { createVideoSourcesSelector } from "@/lib/canvas/video-sources";
 import { canvasExperimentDisabled } from "@/lib/canvas/performance-experiment";
 import { Upload, ArrowUp, ArrowDown, X } from "lucide-react";
@@ -57,12 +56,8 @@ export function TaskVideoNode({ node, model, models, task }: Props) {
     if (process.env.NEXT_PUBLIC_CANVAS_PERF_EXPERIMENT === "1") performance.mark("canvas:video-content-render");
   });
   const update = useCanvasStore((s) => s.updateNodeData);
-  const selectSources = useMemo(() => createVideoSourcesSelector(id), [id]);
+  const selectSources = useMemo(() => createVideoSourcesSelector(id, { includeGeometry: canvasExperimentDisabled('subscriptions') }), [id]);
   const sources = useCanvasStore(selectSources);
-  // Preserve the old whole-node subscription only in explicitly enabled experiments.
-  useCanvasStore(useShallow((s) => canvasExperimentDisabled('subscriptions')
-    ? s.edges.filter(e => e.target === id).map(e => s.nodes.find(n => n.id === e.source))
-    : []));
   const [uploading, setUploading] = useState(false);
   const uploadingRef = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);

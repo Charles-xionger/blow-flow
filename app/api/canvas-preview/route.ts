@@ -1,11 +1,12 @@
-import { canvasPreviewCache, previewLimits } from '@/lib/canvas-preview/server';
+import { canvasPreviewCache, maxPreviewSourceLength } from '@/lib/canvas-preview/server';
 
 export const runtime = 'nodejs';
 
 async function respond(source: string, request: Request) {
+  const began = performance.now();
   try {
     const result = await canvasPreviewCache.get(source);
-    const headers = { 'Content-Type': 'image/webp', 'Cache-Control': 'private, no-cache', ETag: result.etag, 'X-Content-Type-Options': 'nosniff' };
+    const headers = { 'Content-Type': 'image/webp', 'Cache-Control': result.stale ? 'private, no-store' : 'private, no-cache', ETag: result.etag, 'X-Content-Type-Options': 'nosniff', 'X-Canvas-Preview-Cache': result.stale ? 'stale' : result.cache, 'Server-Timing': `canvas-preview;dur=${(performance.now() - began).toFixed(1)}` };
     if (request.headers.get('if-none-match') === result.etag) return new Response(null, { status: 304, headers });
     return new Response(new Uint8Array(result.bytes), { headers });
   } catch {
@@ -28,7 +29,7 @@ export async function POST(request: Request) {
       const { done, value } = await reader.read();
       if (done) break;
       length += value.byteLength;
-      if (length > Math.ceil(previewLimits.bytes * 4 / 3) + 128) return new Response(null, { status: 413 });
+      if (length > maxPreviewSourceLength) return new Response(null, { status: 413 });
       chunks.push(value);
     }
     return respond(Buffer.concat(chunks).toString('utf8'), request);

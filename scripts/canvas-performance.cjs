@@ -101,6 +101,15 @@ async function main() {
     await start(); // A fresh process owns the cold server cache for each independent run.
     const context = await browser.newContext({ viewport: { width: 1728, height: 1117 }, deviceScaleFactor: 1 });
     const page = await context.newPage();
+    await page.addInitScript(() => {
+      window.canvasPreviewLoads = [];
+      document.addEventListener('load', event => {
+        if (event.target instanceof HTMLImageElement && event.target.closest('[data-canvas-preview]')) {
+          window.canvasPreviewLoads.push(performance.now());
+          performance.mark('canvas:preview-loaded');
+        }
+      }, true);
+    });
     // Never issue paid generation or resume a real task from the snapshot.
     await page.route('**/api/generation/tasks**', route => route.fulfill({ status: 400, json: { error: 'Performance fixture: generation disabled' } }));
     await page.route('**/api/generate/**', route => route.abort());
@@ -112,7 +121,9 @@ async function main() {
     await traceStart(cdp);
     const began = performance.now();
     let previewWaitMs;
-    page.on('response', response => { if (response.url().includes('/api/canvas-preview')) void response.finished().then(() => { previewWaitMs ??= performance.now() - began; }); });
+    let serverTiming;
+    let serverCache;
+    page.on('response', response => { if (response.url().includes('/api/canvas-preview')) void response.finished().then(() => { previewWaitMs ??= performance.now() - began; serverTiming ??= response.headers()['server-timing']; serverCache ??= response.headers()['x-canvas-preview-cache']; }); });
     await page.goto(base + `/canvas?project=${id}&preview=${config.preview}&subscriptions=${config.subscriptions}`);
     const node = page.locator(`.react-flow__node[data-id="${original.id}"]`);
     await node.waitFor();
@@ -122,8 +133,11 @@ async function main() {
     await drag(page);
     const label = `${config.name}-${repeat}-${selected ? 'selected' : 'unselected'}`;
     const cold = await traceEnd(cdp, label + '-cold');
-    results.push({ config: config.name, repeat, selected, cache: 'cold', previewWaitMs, ...cold });
+    const coldResult = { config: config.name, repeat, selected, cache: 'cold', ...cold };
+    results.push(coldResult);
     await page.waitForFunction(() => [...document.querySelectorAll('[data-canvas-preview] img')].length > 0 && [...document.querySelectorAll('[data-canvas-preview] img')].every(img => img.complete && img.naturalWidth > 0));
+    Object.assign(coldResult, { previewWaitMs, serverTiming, serverCache,
+      imageLoadedAfterNavigationMs: await page.evaluate(() => window.canvasPreviewLoads[0]) });
     await page.mouse.click(80,950);
     if (selected) await node.click({ position: { x: 100, y: 100 } });
     await page.evaluate(() => performance.clearMarks());

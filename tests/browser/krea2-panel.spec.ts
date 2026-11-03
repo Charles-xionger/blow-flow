@@ -1,4 +1,5 @@
 import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
+import sharp from 'sharp';
 
 async function openCanvas(page: Page, request: APIRequestContext, data: Record<string, unknown> = {}, zoom = 1) {
   const id = crypto.randomUUID();
@@ -133,7 +134,7 @@ test('Krea2 size presets persist actual dimensions without resizing or adding la
   await settings.click();
   const dialog = page.getByRole('dialog', { name: '图像设置' });
   await dialog.getByRole('button', { name: '2K', exact: true }).click();
-  await expect(dialog.getByText('实际生成尺寸：3640 × 2048 px', { exact: true })).toBeVisible();
+  await expect.poll(async () => [(await read()).generationWidth, (await read()).generationHeight]).toEqual([3640, 2048]);
   await dialog.getByRole('button', { name: '9:16', exact: true }).click();
   await expect.poll(async () => [(await read()).generationWidth, (await read()).generationHeight]).toEqual([2048, 3640]);
   expect(await page.getByTestId('image-preview').boundingBox()).toEqual(previewBefore);
@@ -152,7 +153,7 @@ test('Krea2 size presets persist actual dimensions without resizing or adding la
 
 test('the floating panel and size settings stay usable in a narrow viewport', async ({ page, request }) => {
   await page.setViewportSize({ width: 760, height: 540 });
-  await openCanvas(page, request);
+  const { read } = await openCanvas(page, request);
   const panel = panelOf(page);
   await expect.poll(async () => { const box = await panel.boundingBox(); return box!.x + box!.width; }).toBeLessThanOrEqual(744);
   await expect.poll(async () => { const box = await panel.boundingBox(); return box!.y + box!.height; }).toBeLessThanOrEqual(524);
@@ -161,7 +162,7 @@ test('the floating panel and size settings stay usable in a narrow viewport', as
   await dialog.getByRole('button', { name: '2K', exact: true }).click();
   await expect.poll(async () => { const box = await dialog.boundingBox(); return box!.y + box!.height; }).toBeLessThanOrEqual(524);
   await dialog.getByRole('button', { name: '21:9', exact: true }).click();
-  await expect(dialog.getByText('实际生成尺寸：4776 × 2048 px', { exact: true })).toBeVisible();
+  await expect.poll(async () => [(await read()).generationWidth, (await read()).generationHeight]).toEqual([4776, 2048]);
 });
 
 test('landscape and portrait results fit inside the stable image node without cropping', async ({ page, request }, testInfo) => {
@@ -173,12 +174,12 @@ test('landscape and portrait results fit inside the stable image node without cr
   ]) {
     const { width, height, ...model } = data;
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="#718bb8"/><rect x="20" y="20" width="${width - 40}" height="${height - 40}" fill="none" stroke="#ffd28a" stroke-width="20"/><circle cx="${width / 2}" cy="${height / 2}" r="200" fill="#ffd28a"/></svg>`;
-    const imageSrc = `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
+    const imageSrc = `data:image/png;base64,${(await sharp(Buffer.from(svg)).png().toBuffer()).toString('base64')}`;
     await openCanvas(page, request, { ...model, imageSrc });
     const surface = page.getByTestId('image-preview');
     const image = surface.getByRole('img', { name: 'Generated' });
     await expect.poll(() => image.evaluate((element: HTMLImageElement) => ({ width: element.naturalWidth, height: element.naturalHeight })))
-      .toEqual({ width, height });
+      .toEqual(width > height ? { width: 1024, height: 576 } : { width: 576, height: 1024 });
     await expect(image).toHaveCSS('object-fit', 'contain');
     const before = await surface.boundingBox();
     expect(before).toMatchObject({ width: 320, height: 240 });
@@ -188,7 +189,7 @@ test('landscape and portrait results fit inside the stable image node without cr
     await dialog.getByRole('button', { name: '9:16', exact: true }).click();
     await page.keyboard.press('Escape');
     expect(await surface.boundingBox()).toEqual(before);
-    await expect(image).toHaveAttribute('src', imageSrc);
+    await expect(image).toHaveAttribute('src', /^blob:/);
     await page.mouse.move(1100, 800);
     await page.screenshot({ path: testInfo.outputPath(`${model.model}-${model.type}-contained.png`), animations: 'disabled' });
   }
@@ -231,5 +232,5 @@ test('custom size input preserves old pixels, commits on blur, and submits the d
   await page.getByRole('button', { name: '生成', exact: true }).click();
   await expect.poll(() => submitted?.input).toEqual({ width: 1008, height: 1200, prompt: '一朵花' });
   await settings.click();
-  await expect(dialog.getByText('实际生成尺寸：1008 × 1200 px', { exact: true })).toBeVisible();
+  await expect.poll(async () => [(await read()).generationWidth, (await read()).generationHeight]).toEqual([1008, 1200]);
 });

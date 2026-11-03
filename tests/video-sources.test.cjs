@@ -27,3 +27,13 @@ test('upstream movement preserves the video material subscription, while materia
   state.nodes = [];
   assert.deepEqual(select(state), []);
 });
+
+test('performance baseline restores the complete source-node dependency for material recomputation', () => {
+  const select = createVideoSourcesSelector('h3', { includeGeometry: true });
+  const state = { nodes: [{ id: 'source', position: { x: 0, y: 0 }, data: { label: '图', imageSrc: 'original.png' } }], edges: [{ source: 'source', target: 'h3' }] };
+  const before = select(state);
+  assert.equal(select(state), before);
+  const moved = { ...state, nodes: applyNodeChanges([{ id: 'source', type: 'position', position: { x: 10, y: 20 }, dragging: true }], state.nodes) };
+  assert.notEqual(select(moved), before);
+  assert.deepEqual(select(moved), before);
+});

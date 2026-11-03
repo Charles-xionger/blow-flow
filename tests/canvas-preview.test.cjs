@@ -102,3 +102,20 @@ test('saturated preview queues reject extra work and become available again; evi
   await evicting.get(origin + 'one'); await evicting.get(origin + 'one');
   assert.deepEqual(headers, [{}, {}]);
 });
+
+test('temporary source failure retains its available preview, but a confirmed replacement invalidates the old material', async () => {
+  process.env.OSS_BUCKET_NAME = 'preview-test'; process.env.OSS_REGION = 'oss-cn-test';
+  const bytes = await picture(32, 16);
+  let status = 200; let version = 'first'; let body = bytes;
+  const cache = createPreviewCache({ fetch: async () => new Response(body, { status, headers: { etag: version } }) });
+  const url = 'https://preview-test.oss-cn-test.aliyuncs.com/replace.png';
+  const original = await cache.get(url);
+  status = 503;
+  const retained = await cache.get(url);
+  assert.deepEqual(retained.bytes, original.bytes);
+  assert.equal(retained.stale, true);
+  status = 200; version = 'replacement'; body = Buffer.from('corrupt replacement');
+  await assert.rejects(cache.get(url));
+  status = 503;
+  await assert.rejects(cache.get(url));
+});

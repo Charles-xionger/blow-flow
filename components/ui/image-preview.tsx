@@ -71,6 +71,8 @@ export function ImagePreview({ src, alt = "图片", onClose }: {
         className="max-w-[90vw] max-h-[90vh] overflow-auto relative"
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Full viewing deliberately loads the original material. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={src}
           alt={alt}
