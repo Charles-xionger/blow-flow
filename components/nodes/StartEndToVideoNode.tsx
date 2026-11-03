@@ -1,23 +1,21 @@
 "use client";
 
-import { memo, useCallback, useMemo, useState, useEffect } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
-import { BaseNode, NodeSurface } from "./BaseNode";
-import { promptText } from "@/lib/canvas/prompt";
-import { useNodeInputs } from "@/hooks/useNodeInputs";
-import { useCanvasStore } from "@/store/useCanvasStore";
-import {
-  Video,
-  Sparkles,
-  AlertCircle,
-  ArrowRightLeft,
-  Loader2,
-  Wand2,
-} from "lucide-react";
-import type { NodeData } from "@/types";
+import { useShallow } from "zustand/react/shallow";
+import { ArrowRightLeft, Loader2, Sparkles } from "lucide-react";
+import { useUpstreamNodes } from "@/hooks/useUpstreamNodes";
+import { expandPrompt, promptIsEmpty, promptSegments, referenceMaterials, type PromptGraph } from "@/lib/canvas/prompt";
 import { getVideoModels } from "@/lib/model-registry";
-import { Textarea } from "@/components/ui/textarea";
-import { ImageWithActions } from "@/components/ui/image-with-actions";
+import { useCanvasStore } from "@/store/useCanvasStore";
+import type { NodeData } from "@/types";
+import { NodeShell } from "./NodeShell";
+import { consoleSelectClass, narrowConsoleSelectClass } from "./shared/ConsoleControls";
+import { NodeConnections } from "./shared/NodeConnections";
+import { NodeConsole } from "./shared/NodeConsole";
+import { PromptEditor } from "./shared/PromptEditor";
+import { VideoStage } from "./shared/VideoStage";
+import { VideoToolbarActions } from "./shared/VideoToolbarActions";
 
 const durations = [
   { value: "5", label: "5秒" },
@@ -36,119 +34,82 @@ const aspectRatios = [
   { value: "9:16", label: "竖屏 (9:16)" },
 ];
 
+// The first two images in the connection layer, so frame order, numbering and what is sent always agree.
+const framesOf = (nodeId: string, graph: PromptGraph) => referenceMaterials(nodeId, graph).slice(0, 2);
+
 const StartEndToVideoNode = (props: NodeProps<Node<NodeData>>) => {
-  const { id, data, selected } = props;
+  const { id, data } = props;
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
-  const singleSelected = useCanvasStore((state) => state.selectedNodeIds.length === 1);
-
-  // 只有在单选状态下才显示控制面板
-  const shouldShowPanel = selected && singleSelected;
-  const inputs = useNodeInputs(id);
-
-  // 计算输入图片
-  const inputImages = useMemo(() => {
-    const images = inputs
-      .map((sourceData) => {
-        if (!sourceData) return null;
-
-        // 支持角色节点 - 使用角色的第一张参考图
-        if (sourceData.characterData?.referenceImages?.[0]) {
-          return sourceData.characterData.referenceImages[0];
-        }
-
-        // 支持普通图片节点
-        return sourceData.imageSrc;
-      })
-      .filter(Boolean) as string[];
-
-    return images.slice(0, 2); // 只取前两张
-  }, [inputs]);
-
-  const [videoModels, setVideoModels] = useState<
-    Array<{ value: string; label: string }>
-  >([]);
-
-  // 本地状态用于输入框，防止中文输入法问题
-  const [localPrompt, setLocalPrompt] = useState(promptText(data.prompt));
+  const [videoModels, setVideoModels] = useState<Array<{ value: string; label: string }>>([]);
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
-  const [promptError, setPromptError] = useState<string | undefined>();
 
-  // 同步外部数据变化到本地状态
-  useEffect(() => {
-    setLocalPrompt(promptText(data.prompt));
-  }, [data.prompt]);
+  const upstream = useUpstreamNodes(id);
+  // Only the open console shows these, so closed nodes skip the work on every store change.
+  const imageCount = useCanvasStore((state) => props.selected ? referenceMaterials(id, state).length : 0);
+  const frameSources = useCanvasStore(useShallow((state) => props.selected ? framesOf(id, state).map(frame => frame.source) : []));
+  // Swapping moves whole nodes, so it only swaps the frames when each frame is its node's only image.
+  const canSwap = useCanvasStore((state) => {
+    if (!props.selected) return false;
+    const [start, end, next] = referenceMaterials(id, state).map(material => material.source);
+    return !!end && start !== end && next !== end;
+  });
+  const hasPrompt = useCanvasStore((state) => !!props.selected && !promptIsEmpty(expandPrompt(id, state)));
+  const segments = useMemo(() => promptSegments(data.prompt), [data.prompt]);
+  const hasFrames = imageCount >= 2;
+  const frameTag = (index: number) => {
+    const role = index ? "尾帧" : "首帧";
+    const title = frameSources[index] && `图片${index + 1} · ${upstream.find(node => node.id === frameSources[index])?.name ?? ""}`;
+    return (
+      <span aria-label={title ? `${role}：${title}` : undefined}
+        className={`rounded-md px-1.5 py-0.5 ${index ? "bg-red-500/15 text-red-300" : "bg-green-500/15 text-green-300"}`}>
+        {role} {title || "未连接"}
+      </span>
+    );
+  };
 
   // 加载视频模型列表 - 从数据库API异步获取
   useEffect(() => {
+    let active = true;
     const loadModels = async () => {
+      const builtinModels = getVideoModels();
       try {
-        // 先加载内置模型
-        const builtinModels = getVideoModels();
-
-        // 然后从数据库API获取配置的模型
         const response = await fetch("/api/model-config");
-        if (response.ok) {
-          const result = await response.json();
-          if (result.success && result.data) {
-            // 根据 category 字段过滤视频模型
-            const dbModels = Object.entries(result.data)
-              .filter(([, config]: [string, any]) => {
-                return config.category === "VIDEO";
-              })
-              .map(([name]: [string, any]) => ({
-                value: name, // 使用数据库中的 model_name 作为 value
-                label: name, // 显示完整的模型名称
-              }));
-
-            console.log(
-              "[StartEndToVideoNode] Loaded video models from database:",
-              dbModels,
-            );
-
-            // 合并并去重
-            const allModels = [...dbModels, ...builtinModels];
-            const uniqueModels = allModels.filter(
-              (model, index, self) =>
-                index === self.findIndex((m) => m.value === model.value),
-            );
-
-            setVideoModels(uniqueModels);
-            return;
-          }
-        }
-
-        // 如果获取失败，使用内置模型
-        setVideoModels(builtinModels);
+        const result = response.ok ? await response.json() : undefined;
+        if (!result?.success || !result.data) throw new Error("模型配置不可用");
+        const dbModels = Object.entries(result.data)
+          .filter(([, config]: [string, any]) => config.category === "VIDEO")
+          .map(([name]) => ({ value: name, label: name }));
+        const allModels = [...dbModels, ...builtinModels];
+        if (active) setVideoModels(allModels.filter((model, index) => index === allModels.findIndex(m => m.value === model.value)));
       } catch (error) {
         console.error("[StartEndToVideoNode] Failed to load models:", error);
-        // 降级到内置模型
-        setVideoModels(getVideoModels());
+        if (active) setVideoModels(builtinModels);
       }
     };
-
-    loadModels();
+    void loadModels();
+    return () => { active = false; };
   }, []);
 
-  const [startImage, endImage] = data.swapFrames
-    ? [inputImages[1], inputImages[0]]
-    : inputImages;
+  // Swapping reorders the connections, so the numbers in the prompt follow the frames.
+  const swapFrames = () => {
+    const [start, end] = frameSources;
+    const order = upstream.map(node => node.id === start ? end : node.id === end ? start : node.id);
+    useCanvasStore.getState().reorderUpstream(id, order);
+  };
 
   const handleGeneratePrompt = useCallback(async () => {
-    if (inputImages.length < 2) {
-      setPromptError("需要连接两个图片节点");
-      return;
-    }
+    const canvas = useCanvasStore.getState();
+    const [startImage, endImage] = framesOf(id, canvas).map(frame => frame.src);
+    if (!endImage) return;
 
     setIsGeneratingPrompt(true);
-    setPromptError(undefined);
-
     try {
       const response = await fetch("/api/generate-prompt", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           nodeType: "startEndToVideo",
-          currentPrompt: localPrompt,
+          currentPrompt: expandPrompt(id, canvas),
           context: {
             startImage,
             endImage,
@@ -161,318 +122,110 @@ const StartEndToVideoNode = (props: NodeProps<Node<NodeData>>) => {
       });
 
       const result = await response.json();
-      console.log("[StartEndToVideoNode] Prompt generation result:", result);
-
       if (result.success && result.data) {
-        setLocalPrompt(result.data);
         updateNodeData(id, { prompt: result.data });
       } else {
-        throw new Error(result.error || "生成失败");
+        throw new Error(result.error || "生成提示词失败");
       }
     } catch (error) {
       console.error("[StartEndToVideoNode] Prompt generation error:", error);
-      setPromptError(error instanceof Error ? error.message : "生成提示词失败");
+      updateNodeData(id, { error: error instanceof Error ? error.message : "生成提示词失败" });
     } finally {
       setIsGeneratingPrompt(false);
     }
-  }, [
-    id,
-    localPrompt,
-    inputImages,
-    startImage,
-    endImage,
-    data.aspectRatio,
-    data.duration,
-    data.resolution,
-    data.model,
-    updateNodeData,
-  ]);
+  }, [id, data.duration, data.resolution, data.aspectRatio, data.model, updateNodeData]);
 
   const handleGenerate = useCallback(async () => {
-    // 先同步本地输入到 store
-    if (localPrompt !== data.prompt) {
-      updateNodeData(id, { prompt: localPrompt });
-    }
-
-    if (!localPrompt || inputImages.length < 2) return;
+    // Upstream content is read now, so a run always uses its current value.
+    const canvas = useCanvasStore.getState();
+    const prompt = expandPrompt(id, canvas);
+    const frames = framesOf(id, canvas).map(frame => frame.src);
+    const [startImage, endImage] = frames;
+    if (promptIsEmpty(prompt) || !endImage) return;
 
     updateNodeData(id, { isLoading: true, error: undefined });
-
-    const requestPayload = {
-      prompt: localPrompt,
-      startImage,
-      endImage,
-      model:
-        data.model ||
-        videoModels[0]?.value ||
-        "wan2.2-kf2v-flash-首尾帧生成视频模型",
-      duration: parseInt(data.duration || "5"),
-      resolution: data.resolution || "720P",
-      aspectRatio: data.aspectRatio || "16:9",
-      promptOptimize: data.promptOptimize || false,
-    };
-
-    console.log(
-      "[StartEndToVideoNode] Generating video with payload:",
-      requestPayload,
-    );
-
     try {
       const response = await fetch("/api/generate/start-end-to-video", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestPayload),
+        body: JSON.stringify({
+          prompt,
+          startImage,
+          endImage,
+          model: data.model || videoModels[0]?.value || "wan2.2-kf2v-flash-首尾帧生成视频模型",
+          duration: parseInt(data.duration || "5"),
+          resolution: data.resolution || "720P",
+          aspectRatio: data.aspectRatio || "16:9",
+          promptOptimize: data.promptOptimize || false,
+        }),
       });
 
       const result = await response.json();
-      console.log("[StartEndToVideoNode] API response:", result);
-
       if (result.success && result.data) {
-        updateNodeData(id, {
-          isLoading: false,
-          videoSrc: result.data,
-          inputImages,
-        });
+        updateNodeData(id, { isLoading: false, videoSrc: result.data, inputImages: frames });
       } else {
         throw new Error(result.error || "生成失败");
       }
     } catch (error) {
       console.error("[StartEndToVideoNode] Generation error:", error);
-      updateNodeData(id, {
-        isLoading: false,
-        error: error instanceof Error ? error.message : "生成失败",
-      });
+      updateNodeData(id, { isLoading: false, error: error instanceof Error ? error.message : "生成失败" });
     }
-  }, [
-    id,
-    localPrompt,
-    data.prompt,
-    data.model,
-    data.aspectRatio,
-    data.duration,
-    data.resolution,
-    data.promptOptimize,
-    inputImages,
-    startImage,
-    endImage,
-    updateNodeData,
-    videoModels,
-  ]);
+  }, [id, data.model, data.duration, data.resolution, data.aspectRatio, data.promptOptimize, updateNodeData, videoModels]);
 
-  const hasResult = !!data.videoSrc && !data.isLoading;
+  const promptAction = hasPrompt ? "优化提示词" : "AI 生成提示词";
 
   return (
-    <BaseNode {...props}>
-
-      {/* 节点显示区域 */}
-      <NodeSurface>
-        {hasResult ? (
-          <div className="relative w-full h-full">
-            <video
-              src={data.videoSrc}
-              className="w-full h-full object-contain"
-              controls
-              loop
-            />
-          </div>
-        ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center text-zinc-500">
-            <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 bg-zinc-800/50 text-zinc-500">
-              <Video size={28} className="opacity-60" />
+    <NodeShell {...props} stageTestId="video-preview"
+      toolbar={<VideoToolbarActions src={data.isLoading ? undefined : data.videoSrc} />}
+      console={
+        <NodeConsole data={data} onRun={() => void handleGenerate()} runDisabled={!hasFrames || !hasPrompt}
+          notice={!hasFrames ? `请连接两个图片节点作为首尾帧（当前 ${imageCount}/2）` : imageCount > 2 ? "只使用连接层的前两张图片作为首尾帧" : undefined}
+          connections={upstream.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <NodeConnections nodeId={id} upstream={upstream} />
+              <div className="flex items-center gap-2 text-xs text-zinc-400">
+                {frameTag(0)}
+                <button type="button" aria-label="交换首尾帧" title="交换首尾帧" onClick={swapFrames}
+                  disabled={data.isLoading || !canSwap}
+                  className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-white/10 hover:text-white disabled:pointer-events-none disabled:opacity-30">
+                  <ArrowRightLeft size={12} />
+                </button>
+                {frameTag(1)}
+              </div>
             </div>
-            <span className="text-sm font-medium opacity-60">首尾帧生视频</span>
-            <span className="text-xs opacity-40 mt-1">选中节点开始创作</span>
-          </div>
-        )}
-
-        {data.isLoading && (
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center z-20">
-            <Loader2 size={32} className="text-pink-500 animate-spin mb-3" />
-            <span className="text-white/80 text-sm font-medium">生成中...</span>
-          </div>
-        )}
-      </NodeSurface>
-
-      {/* 控制面板 */}
-      {shouldShowPanel && (
-        <div
-          className="node-panel nodrag nopan nowheel absolute top-full left-1/2 -translate-x-1/2 min-w-100 pt-4 z-70 pointer-events-auto"
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <div className="bg-[#1a1a1a]/95 backdrop-blur-xl border border-zinc-700/50 rounded-2xl p-4 flex flex-col gap-3">
-            {/* 输入图片预览 */}
-            {inputImages.length === 2 ? (
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="text-xs font-medium text-zinc-400">
-                    首尾帧
-                  </label>
-                  <button
-                    onClick={() =>
-                      updateNodeData(id, { swapFrames: !data.swapFrames })
-                    }
-                    className="text-xs text-pink-400 hover:text-pink-300 flex items-center gap-1 transition-colors"
-                    disabled={data.isLoading}
-                  >
-                    <ArrowRightLeft size={12} />
-                    交换
-                  </button>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="relative rounded-lg overflow-hidden border-2 border-green-500/50 h-24 bg-zinc-800/50">
-                    <ImageWithActions
-                      src={startImage}
-                      alt="Start Frame"
-                      className="w-full h-full object-contain"
-                    />
-                    <span className="absolute top-1 left-1 bg-green-500 text-white text-xs px-1.5 py-0.5 rounded z-20">
-                      首帧
-                    </span>
-                  </div>
-                  <div className="relative rounded-lg overflow-hidden border-2 border-red-500/50 h-24 bg-zinc-800/50">
-                    <ImageWithActions
-                      src={endImage}
-                      alt="End Frame"
-                      className="w-full h-full object-contain"
-                    />
-                    <span className="absolute top-1 left-1 bg-red-500 text-white text-xs px-1.5 py-0.5 rounded z-20">
-                      尾帧
-                    </span>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/10 px-3 py-2 rounded-lg border border-amber-500/20">
-                <AlertCircle size={16} />
-                <span>
-                  请连接两个图片节点作为首尾帧（当前 {inputImages.length}/2）
-                </span>
-              </div>
-            )}
-
-            <Textarea
-              className="nodrag w-full border rounded-xl px-4 py-3 text-sm leading-relaxed resize-none min-h-18 max-h-32 overflow-y-auto bg-zinc-800/80 hover:bg-zinc-800 border-zinc-700 focus:border-purple-500 text-white placeholder-zinc-500"
-              placeholder="描述你想要的视频内容..."
-              value={localPrompt}
-              onChange={(e) => {
-                setLocalPrompt(e.target.value);
-                updateNodeData(id, { prompt: e.target.value });
-              }}
-              onBlur={() => updateNodeData(id, { prompt: localPrompt })}
-              onMouseDown={(e) => e.stopPropagation()}
-              onWheel={(e) => e.stopPropagation()}
-              rows={3}
-            />
-
-            <div className="flex items-center gap-2">
-              <select
-                value={data.model || videoModels[0]?.value || ""}
-                onChange={(e) => updateNodeData(id, { model: e.target.value })}
-                className="h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-pink-500/20"
-              >
-                {videoModels.map((m) => (
-                  <option key={m.value} value={m.value}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                value={data.aspectRatio || "16:9"}
-                onChange={(e) =>
-                  updateNodeData(id, { aspectRatio: e.target.value })
-                }
-                className="h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-pink-500/20"
-              >
-                {aspectRatios.map((a) => (
-                  <option key={a.value} value={a.value}>
-                    {a.label}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                value={data.resolution || "720P"}
-                onChange={(e) =>
-                  updateNodeData(id, { resolution: e.target.value })
-                }
-                className="h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-pink-500/20"
-              >
-                {resolutions.map((r) => (
-                  <option key={r.value} value={r.value}>
-                    {r.label}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                value={data.duration || "5"}
-                onChange={(e) =>
-                  updateNodeData(id, { duration: e.target.value })
-                }
-                className="h-8 px-3 text-sm rounded-lg bg-zinc-800/80 border border-zinc-700 text-white focus:outline-none focus:ring-2 focus:ring-pink-500/20"
-              >
-                {durations.map((d) => (
-                  <option key={d.value} value={d.value}>
-                    {d.label}
-                  </option>
-                ))}
-              </select>
-
-              <button
-                className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-all border ${
-                  isGeneratingPrompt
-                    ? "text-pink-400 bg-pink-500/20 border-pink-500/30 cursor-wait"
-                    : "text-zinc-400 hover:text-pink-400 border-zinc-700 hover:border-pink-500/30 hover:bg-pink-500/10"
-                }`}
-                onClick={handleGeneratePrompt}
-                disabled={isGeneratingPrompt || inputImages.length < 2}
-                title={"AI生成提示词"}
-              >
-                {isGeneratingPrompt ? (
-                  <Loader2 size={15} className="animate-spin" />
-                ) : (
-                  <Sparkles size={15} />
-                )}
-              </button>
-
-              <div className="flex-1" />
-
-              <button
-                onClick={handleGenerate}
-                disabled={
-                  data.isLoading || !localPrompt || inputImages.length < 2
-                }
-                className={`shrink-0 h-8 px-4 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 whitespace-nowrap transition-all active:scale-[0.98] ${
-                  data.isLoading || !localPrompt || inputImages.length < 2
-                    ? "bg-gray-400 text-white cursor-not-allowed"
-                    : "bg-linear-to-r from-pink-600 to-pink-500 hover:from-pink-500 hover:to-pink-400 text-white shadow-lg shadow-pink-500/25 hover:shadow-pink-500/40"
-                }`}
-              >
-                {data.isLoading ? (
-                  <Loader2 className="animate-spin" size={15} />
-                ) : (
-                  <Wand2 size={15} />
-                )}
-                <span>{data.isLoading ? "生成中" : "生成"}</span>
-              </button>
-            </div>
-
-            {data.error && (
-              <div className="text-xs text-red-400 bg-red-500/10 px-3 py-2 rounded-lg border border-red-500/20">
-                {data.error}
-              </div>
-            )}
-
-            {promptError && (
-              <div className="text-xs text-amber-400 bg-amber-500/10 px-3 py-2 rounded-lg border border-amber-500/20">
-                {promptError}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </BaseNode>
+          )}
+          editor={
+            <PromptEditor value={segments} upstream={upstream} placeholder="描述你想要的视频内容..."
+              onChange={prompt => updateNodeData(id, { prompt })} />
+          }
+          config={<>
+            <select aria-label="视频模型" value={data.model || videoModels[0]?.value || ""} className={consoleSelectClass}
+              onChange={event => updateNodeData(id, { model: event.target.value })}>
+              {videoModels.map(model => <option key={model.value} value={model.value}>{model.label}</option>)}
+            </select>
+            <select aria-label="视频时长" value={data.duration || "5"} className={narrowConsoleSelectClass}
+              onChange={event => updateNodeData(id, { duration: event.target.value })}>
+              {durations.map(duration => <option key={duration.value} value={duration.value}>{duration.label}</option>)}
+            </select>
+            <select aria-label="视频分辨率" value={data.resolution || "720P"} className={narrowConsoleSelectClass}
+              onChange={event => updateNodeData(id, { resolution: event.target.value })}>
+              {resolutions.map(resolution => <option key={resolution.value} value={resolution.value}>{resolution.label}</option>)}
+            </select>
+            <select aria-label="视频画幅" value={data.aspectRatio || "16:9"} className={narrowConsoleSelectClass}
+              onChange={event => updateNodeData(id, { aspectRatio: event.target.value })}>
+              {aspectRatios.map(ratio => <option key={ratio.value} value={ratio.value}>{ratio.label}</option>)}
+            </select>
+            <button type="button" aria-label={promptAction} title={promptAction} disabled={isGeneratingPrompt || !hasFrames}
+              onClick={() => void handleGeneratePrompt()}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-white/10 hover:text-white disabled:pointer-events-none disabled:opacity-30">
+              {isGeneratingPrompt ? <Loader2 className="animate-spin" size={15} /> : <Sparkles size={15} />}
+            </button>
+          </>}
+        />
+      }
+    >
+      <VideoStage data={data} emptyLabel="首尾帧生视频" />
+    </NodeShell>
   );
 };
 

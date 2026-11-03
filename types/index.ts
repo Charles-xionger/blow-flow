@@ -64,7 +64,6 @@ export interface NodeData extends Record<string, unknown> {
   duration?: string;
   count?: number;
   promptOptimize?: boolean;
-  swapFrames?: boolean; // START_END_TO_VIDEO 专用
 
   // Creative Desc 专用
   optimizedPrompt?: string;

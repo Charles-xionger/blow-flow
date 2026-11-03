@@ -605,7 +605,7 @@ test('图生图：生成中节点展示区显示进度，控制台的按钮不�
 });
 
 const videoAsset = 'https://video-fixture.test/result.mp4';
-async function openVideoNode(page: Page, request: APIRequestContext, type: 'textToVideo' | 'imageToVideo', data: Record<string, unknown> = {}, sources: Record<string, unknown>[] = []) {
+async function openVideoNode(page: Page, request: APIRequestContext, type: 'textToVideo' | 'imageToVideo' | 'startEndToVideo', data: Record<string, unknown> = {}, sources: Record<string, unknown>[] = []) {
   await page.route('https://video-fixture.test/**', route => route.fulfill({ path: 'tests/fixtures/h3/reference.mp4', contentType: 'video/mp4', headers: { 'access-control-allow-origin': '*' } }));
   const id = crypto.randomUUID();
   expect((await request.put(`/api/workflow/${id}`, { data: { id, requestId: crypto.randomUUID(), baseVersion: 0, snapshot: { name: '视频', nodes: [
@@ -729,4 +729,46 @@ test('图生视频：连接多张图片时提示此模型只使用第一张', as
   await expect(single.panel.getByText('此模型只使用连接层的第一张图片')).toHaveCount(0);
   const many = await openVideoNode(page, request, 'imageToVideo', {}, [imageSource('red', 30, 'red'), imageSource('blue', 330, 'blue')]);
   await expect(many.panel.getByText('此模型只使用连接层的第一张图片')).toBeVisible();
+});
+
+test('首尾帧：标出首帧和尾帧，交换后发送的首尾帧和引用编号一起交换；拖动时控制台隐藏', async ({ page, request }) => {
+  const runs = await captureVideo(page, 'start-end-to-video');
+  const { node, panel } = await openVideoNode(page, request, 'startEndToVideo', { prompt: [{ text: '从' }, { ref: 'red' }, { text: '到' }, { ref: 'blue' }] },
+    [imageSource('red', 30, 'red'), imageSource('blue', 330, 'blue')]);
+  await expect(panel.getByLabel('首帧：图片1 · red')).toBeVisible();
+  await expect(panel.getByLabel('尾帧：图片2 · blue')).toBeVisible();
+  await panel.getByRole('button', { name: '交换首尾帧' }).click();
+  await expect(panel.getByLabel('首帧：图片1 · blue')).toBeVisible();
+  await expect(panel.getByLabel('尾帧：图片2 · red')).toBeVisible();
+  await expect(panel.getByRole('list', { name: '连接的上游节点' }).getByRole('listitem').first()).toHaveAttribute('title', '图片1 · blue');
+  await panel.getByRole('combobox', { name: '视频时长' }).selectOption('8');
+  await panel.getByRole('button', { name: '生成', exact: true }).click();
+  await expect.poll(() => runs[0]?.prompt).toBe('从图片2到图片1');
+  expect(runs[0]).toMatchObject({ startImage: swatch('blue'), endImage: swatch('red'), duration: 8 });
+  await expect(panel.getByRole('alert')).toHaveText('测试已捕获');
+  const box = (await node.boundingBox())!;
+  await page.mouse.move(box.x + 100, box.y + 60);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 160, box.y + 80, { steps: 5 });
+  await expect(panel).toHaveCount(0);
+  await page.mouse.up();
+});
+
+test('首尾帧：少于两张图片或提示词为空时不能运行，并给出提示', async ({ page, request }) => {
+  const single = await openVideoNode(page, request, 'startEndToVideo', {}, [imageSource('red', 30, 'red')]);
+  await expect(single.panel.getByRole('button', { name: '生成', exact: true })).toBeDisabled();
+  await expect(single.panel.getByText('请连接两个图片节点作为首尾帧（当前 1/2）')).toBeVisible();
+  await expect(single.panel.getByRole('button', { name: '交换首尾帧' })).toBeDisabled();
+  const empty = await openVideoNode(page, request, 'startEndToVideo', { prompt: ' ' }, [imageSource('red', 30, 'red'), imageSource('blue', 330, 'blue')]);
+  await expect(empty.panel.getByRole('button', { name: '生成', exact: true })).toBeDisabled();
+  await expect(empty.panel.getByText(/请连接两个图片节点/)).toHaveCount(0);
+});
+
+test('首尾帧：尾帧来自有多张参考图的角色时不能交换，避免另一张图片被挤出', async ({ page, request }) => {
+  const hero = { id: 'hero', type: 'character', position: { x: 30, y: 330 }, data: { type: 'character', label: '角色', customTitle: '小明',
+    characterData: { name: '小明', id: 'hero-character', description: '描述', tags: [], referenceImages: [swatch('blue'), swatch('green')] } } };
+  const { panel } = await openVideoNode(page, request, 'startEndToVideo', {}, [imageSource('red', 30, 'red'), hero]);
+  await expect(panel.getByLabel('首帧：图片1 · red')).toBeVisible();
+  await expect(panel.getByLabel('尾帧：图片2 · 小明')).toBeVisible();
+  await expect(panel.getByRole('button', { name: '交换首尾帧' })).toBeDisabled();
 });

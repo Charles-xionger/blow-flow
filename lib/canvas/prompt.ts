@@ -71,7 +71,13 @@ export function upstreamNodes(nodeId: string, graph: PromptGraph): UpstreamNode[
 
 /** Connected material is used whether or not the prompt references it. */
 export function referenceImages(nodeId: string, graph: PromptGraph): string[] {
-  return sourcesOf(nodeId, graph).filter(node => !textSources.has(node.data.type)).flatMap(node => imagesOf(node.data));
+  return referenceMaterials(nodeId, graph).map(material => material.src);
+}
+
+/** The images `referenceImages` sends, each with the upstream node it comes from. */
+export function referenceMaterials(nodeId: string, graph: PromptGraph): { src: string; source: string }[] {
+  return sourcesOf(nodeId, graph).filter(node => !textSources.has(node.data.type))
+    .flatMap(node => imagesOf(node.data).map(src => ({ src, source: node.id })));
 }
 
 /** The text sent to a model: exactly what the editor shows, with references resolved at run time. */

@@ -173,7 +173,6 @@ function createCanvasNode(type: NodeType, position: { x: number; y: number }, da
         resolution: "720p",
         duration: "5s",
         count: 1,
-        swapFrames: false,
       },
     },
     [NodeType.CREATIVE_DESC]: {

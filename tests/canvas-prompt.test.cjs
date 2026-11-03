@@ -1,7 +1,7 @@
 require('../scripts/register-typescript.cjs');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { appendPromptText, expandPrompt, promptIsEmpty, promptSegments, promptText, promptWithLabels, referenceImages, upstreamNodes } = require('../lib/canvas/prompt.ts');
+const { appendPromptText, expandPrompt, promptIsEmpty, promptSegments, promptText, promptWithLabels, referenceImages, referenceMaterials, upstreamNodes } = require('../lib/canvas/prompt.ts');
 
 test('an old prompt string reads as one text segment and an absent prompt as none', () => {
   assert.deepEqual(promptSegments('一朵花'), [{ text: '一朵花' }]);
@@ -98,4 +98,9 @@ test('appending text keeps references and joins the last text segment', () => {
   assert.deepEqual(appendPromptText([{ ref: 'a' }], '<Audio 1>'), [{ ref: 'a' }, { text: '<Audio 1>' }]);
   assert.deepEqual(appendPromptText('手写', '<Audio 1>'), [{ text: '手写<Audio 1>' }]);
   assert.deepEqual(appendPromptText(undefined, '<Audio 1>'), [{ text: '<Audio 1>' }]);
+});
+
+test('each sent image names the upstream node it comes from, in connection order', () => {
+  const graph = { nodes: [target(''), character('hero', '小明', ['1.png', '2.png']), text('t', '花园'), original('photo', 'a.png')], edges: link('hero', 't', 'photo') };
+  assert.deepEqual(referenceMaterials('target', graph), [{ src: '1.png', source: 'hero' }, { src: '2.png', source: 'hero' }, { src: 'a.png', source: 'photo' }]);
 });
