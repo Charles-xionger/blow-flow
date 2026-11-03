@@ -45,6 +45,8 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 
 ## 画布保存与测试
 
+测试选择、最终回归时机和源码变更检测见 [测试约定](docs/agents/testing.md)。
+
 画布编辑约 500ms 合并一次，先在 IndexedDB `ai-flow-canvas` 提交草稿和待同步请求，再通过 `/api/workflow` 写入 SQLite。顶部“已同步”表示当前修改已经获得服务端确认；本地写入失败时不会绕过本地存储直接上传。保存按钮和 Ctrl/Cmd+S 使用同一链路。
 
 保存协议要求 `id`、`requestId`、`baseVersion` 和完整 `snapshot: { name, nodes, edges, viewport }`。新画布预期版本为 0；读取和列表返回 `version`，更新使用该版本。同请求重放不会重复递增版本；版本冲突返回 409，无版本写入返回 400。历史 SQLite 画布自动初始化为版本 1。
