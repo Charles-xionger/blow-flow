@@ -34,7 +34,7 @@ export function createPiRuntime(service: AgentService, options: {
         const convert = async (message: AgentMessage): Promise<UserMessage> => {
             const content: UserMessage['content'] = [{ type: 'text', text: `${message.role === 'assistant' ? '此前助手回复：' : ''}${message.text}` }];
             for (const reference of message.references) {
-                const resolved = await resolveReference(service, context.task.projectId, reference);
+                const resolved = await resolveReference(service, context.task.projectId, reference, { historical: true });
                 content.push({ type: 'text', text: resolved.context });
                 if (resolved.image)
                     content.push(resolved.image);

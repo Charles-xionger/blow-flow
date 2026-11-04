@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import sharp from 'sharp';
-import Database from 'better-sqlite3';
+import { getDatabase, closeDatabase } from '../../lib/db';
+import { saveWorkflow } from '../../lib/db/workflows';
+import { CanvasAgentService } from '../../lib/agent/canvas';
 import type { AssistantMessage } from '@mariozechner/pi-ai';
 import { AgentService } from '../../lib/agent/service';
 import { registerReadTools } from '../../lib/agent/mcp';
@@ -8,7 +10,8 @@ import { createPiRuntime } from '../../lib/agent/runtime';
 async function main(){
 const {createAssistantMessageEventStream}=await import('@mariozechner/pi-ai');
 const pixel=(await sharp({create:{width:2,height:2,channels:3,background:'red'}}).png().toBuffer()).toString('base64');
-const db=new Database(':memory:');db.exec('CREATE TABLE workflows(id TEXT PRIMARY KEY,data TEXT,deleted_at INTEGER)');db.prepare('INSERT INTO workflows VALUES(?,?,NULL)').run('project',JSON.stringify({nodes:[{id:'hero',type:'text',data:{text:'阿青',imageSrc:`data:image/png;base64,${pixel}`}}],edges:[]}));
+process.env.DATABASE_PATH=':memory:';
+const db=getDatabase();saveWorkflow({id:'project',requestId:'seed',baseVersion:0,snapshot:{name:'project',nodes:[{id:'hero',type:'text',position:{x:0,y:0},data:{type:'text',text:'阿青',imageSrc:`data:image/png;base64,${pixel}`}}],edges:[],viewport:{x:0,y:0,zoom:1}}});
 const service=new AgentService(db);registerReadTools(service);const task=service.send('project',{requestId:'message',text:'读取画布中的主角',modelId:'gemini-flash',references:[{nodeId:'hero'}]});
 let turn=0;
 await service.runNext(createPiRuntime(service,{apiKey:'test-only',streamFn:(model,context)=>{
@@ -28,6 +31,16 @@ await service.runNext(createPiRuntime(service,{apiKey:'test-only',streamFn:model
  return stream;
 }}));
 assert.equal(service.task(streamFailure.id).status,'failed');
-db.close();
+new CanvasAgentService().apply('project','delete-hero',[{kind:'delete',id:'hero'}]);
+const unrelated=service.send('project',{requestId:'unrelated',text:'写一个新的故事',modelId:'gemini-flash'});
+let calls=0;
+await service.runNext(createPiRuntime(service,{apiKey:'test-only',streamFn:(model,context)=>{
+ calls++;assert.match(JSON.stringify(context.messages),/hero/);
+ const stream=createAssistantMessageEventStream();
+ stream.push({type:'done',reason:'stop',message:{role:'assistant',api:model.api,provider:model.provider,model:model.id,content:[{type:'text',text:'新故事'}],stopReason:'stop',timestamp:Date.now(),usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}}}});return stream;
+}}));
+assert.equal(service.task(unrelated.id).status,'completed');assert.equal(calls,1);
+assert.throws(()=>service.send('project',{requestId:'invalid-ref',text:'看看',modelId:'gemini-flash',references:[{nodeId:'hero'}]}),/Reference node not found/);
+closeDatabase();
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});
