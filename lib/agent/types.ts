@@ -17,7 +17,7 @@ export interface AgentQuestion {
     id: string;
     text: string;
     options: string[];
-    scope?: { kind: 'delete'; ids: string[] };
+    scope?: { kind: 'delete'; ids: string[] } | { kind: 'generation'; items: { nodeId: string; modelId: string; specification?: string; input: import('../generation/types').GenerationInput }[] };
     answer?: string;
     cancelled?: boolean;
 }
@@ -34,11 +34,13 @@ export interface AgentTask {
     modelId: string;
     status: AgentStatus;
     question?: AgentQuestion;
+    awaitingGeneration?: boolean;
     steps: AgentStep[];
     error?: string;
     createdAt: number;
 }
 export interface AgentSnapshot {
+    generations?: { id: string; taskId: string; status: string; items: { nodeId: string; note?: string; task?: import('../generation/types').GenerationTask }[] }[];
     tasks: AgentTask[];
     messages: AgentMessage[];
 }

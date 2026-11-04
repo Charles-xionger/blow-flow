@@ -16,6 +16,7 @@ export interface PublicModel {
   id: string; name: string; category: 'IMAGE' | 'VIDEO' | 'TEXT'; configured: boolean;
   capabilities: {
     prompt: true; referenceImages: boolean;
+    image?: { maxImages: number; sizes: string[]; aspectRatios: string[] };
     dimensions: { min: number; max: number; step: number; defaultWidth: number; defaultHeight: number };
     video?: { minDuration: number; maxDuration: number; defaultDuration: number; fps: number;
       maxImages: number; maxVideos: number; maxAudios: number };
@@ -28,7 +29,7 @@ export interface GenerationTask extends CreateGeneration {
 }
 export interface WorkflowNode { inputs: Record<string, unknown>; class_type: string; _meta?: Record<string, unknown> }
 export interface ModelConfig {
-  id: string; name: string; category: 'IMAGE' | 'VIDEO'; adapter: 'runninghub-workflow'; version: string; connectionId: string;
+  id: string; name: string; category: 'IMAGE' | 'VIDEO'; adapter: 'runninghub-workflow' | 'gemini-image'; version: string; connectionId: string;
   workflowId: string; workflow: Record<string, WorkflowNode>; outputNode: string;
   mapping: Record<'prompt' | 'width' | 'height' | 'seed', { nodeId: string; fieldName: string }>
     & Partial<Record<'customResolution' | 'duration', { nodeId: string; fieldName: string }>>;

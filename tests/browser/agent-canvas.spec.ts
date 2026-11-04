@@ -7,6 +7,7 @@ test('Agent edits update an open parameter console, undo across reload, and fini
       data: { type: 'textToImage', label: 'Image', model: 'runninghub-krea2', usesGenerationTasks: true, generationWidth: 1920, generationHeight: 1080 } }], edges: [], viewport: { x: 0, y: 0, zoom: 1 } } } });
   await page.goto(`/canvas?project=${id}`);
   await page.locator('.react-flow__node').click();
+  await expect(page.getByRole('combobox', { name: '生图模型' })).toContainText('Krea2');
   await page.getByRole('button', { name: '图像设置', exact: true }).click();
   await expect(page.getByLabel('生成宽度')).toHaveValue('1920');
   // Send through the public task API while keeping the console open.

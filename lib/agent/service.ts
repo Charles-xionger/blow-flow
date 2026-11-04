@@ -3,7 +3,19 @@ import { randomUUID, createHash } from 'node:crypto';
 import type { AgentMessage, AgentRuntime, AgentTask, AgentSnapshot, AgentTool, AgentReference } from './types';
 const active = new Set(['queued', 'running', 'waiting', 'interrupted']);
 export class AgentService {
+    generationSummary?: (projectId: string) => AgentSnapshot['generations'];
+    generationPending?: (taskId: string) => boolean;
+    wakeAfterGeneration(taskId: string) {
+        this.db.transaction(() => {
+            const task = this.task(taskId);
+            if (task.status === 'waiting' && task.awaitingGeneration && !this.generationPending?.(taskId)) {
+                task.status = 'queued'; delete task.awaitingGeneration; this.save(task);
+            }
+        }).immediate();
+    }
     private tools = new Map<string, AgentTool>();
+    private lifecycle: { send?: (task: AgentTask) => void; answer?: (task: AgentTask, text: string) => void; stop?: (task: AgentTask) => void; tick?: () => void }[] = [];
+    registerLifecycle(hooks: typeof this.lifecycle[number]) { this.lifecycle.push(hooks); }
     constructor(private db: Database.Database) {
         db.exec(`CREATE TABLE IF NOT EXISTS agent_tasks(id TEXT PRIMARY KEY, project_id TEXT NOT NULL, status TEXT NOT NULL, data TEXT NOT NULL);
       CREATE UNIQUE INDEX IF NOT EXISTS agent_project_active ON agent_tasks(project_id) WHERE status IN ('queued','running','waiting','interrupted');
@@ -21,7 +33,7 @@ export class AgentService {
         data: string;
     } | undefined; if (!row)
         throw new Error('Project not found'); return JSON.parse(row.data); }
-    snapshot(projectId: string): AgentSnapshot { this.canvas(projectId); return { tasks: (this.db.prepare('SELECT data FROM agent_tasks WHERE project_id=? ORDER BY rowid').all(projectId) as {
+    snapshot(projectId: string): AgentSnapshot { this.canvas(projectId); return { generations: this.generationSummary?.(projectId), tasks: (this.db.prepare('SELECT data FROM agent_tasks WHERE project_id=? ORDER BY rowid').all(projectId) as {
             data: string;
         }[]).map(r => JSON.parse(r.data)), messages: (this.db.prepare('SELECT data FROM agent_messages WHERE project_id=? ORDER BY rowid').all(projectId) as {
             data: string;
@@ -61,12 +73,14 @@ export class AgentService {
             if (!reference.nodeId && (!/^image\/(png|jpeg|webp)$/.test(reference.mimeType ?? '') || !reference.data || reference.data.length > 14000000 || !/^[a-zA-Z0-9+/=]+$/.test(reference.data)))
                 throw new Error('Invalid image reference');
         }
-        return this.request(projectId, input.requestId, { type: 'send', ...input }, () => { const prior = this.snapshot(projectId).tasks.find(t => active.has(t.status)); const task = prior ?? { id: randomUUID(), projectId, modelId: input.modelId, status: 'queued' as const, steps: [], createdAt: Date.now() }; this.save(task); this.message(task, 'user', input.text, input.references); return task; });
+        return this.request(projectId, input.requestId, { type: 'send', ...input }, () => { const prior = this.snapshot(projectId).tasks.find(t => active.has(t.status)); const task = prior ?? { id: randomUUID(), projectId, modelId: input.modelId, status: 'queued' as const, steps: [], createdAt: Date.now() }; if (prior) this.lifecycle.forEach(h => h.send?.(task)); if (task.awaitingGeneration) { task.status = 'queued'; delete task.awaitingGeneration; } this.save(task); this.message(task, 'user', input.text, input.references); return task; });
     }
     stop(projectId: string, requestId: string) {
         return this.request(projectId, requestId, { type: 'stop' }, () => { const task = this.snapshot(projectId).tasks.find(t => active.has(t.status)) ?? this.snapshot(projectId).tasks.at(-1); if (!task)
             throw new Error('No task'); if (active.has(task.status)) {
             task.status = 'stopped';
+            this.lifecycle.forEach(h => h.stop?.(task));
+            delete task.awaitingGeneration;
             if (task.question && !task.question.answer)
                 task.question.cancelled = true;
             this.save(task);
@@ -80,7 +94,7 @@ export class AgentService {
         if (!input.text.trim())
             throw new Error('Answer required');
         return this.request(projectId, input.requestId, { type: 'answer', ...input }, () => { const task = this.snapshot(projectId).tasks.find(t => t.status === 'waiting' && t.question?.id === input.questionId); if (!task?.question)
-            throw new Error('Question is no longer pending'); task.question.answer = input.text; task.status = 'queued'; this.message(task, 'user', input.text); this.save(task); return task; });
+            throw new Error('Question is no longer pending'); this.lifecycle.forEach(h => h.answer?.(task, input.text)); task.question.answer = input.text; task.status = 'queued'; this.message(task, 'user', input.text); this.save(task); return task; });
     }
     consumeQuestion(taskId: string, questionId: string) {
         const task = this.task(taskId);
@@ -142,6 +156,7 @@ export class AgentService {
         }
     }
     async runNext(runtime: AgentRuntime): Promise<boolean> {
+        this.lifecycle.forEach(h => h.tick?.());
         const task = this.db.transaction(() => { const row = this.db.prepare("SELECT data FROM agent_tasks WHERE status='queued' ORDER BY rowid LIMIT 1").get() as {
             data: string;
         } | undefined; if (!row)
@@ -158,7 +173,10 @@ export class AgentService {
                     this.message(task, 'assistant', text); }, pendingMessages: () => this.snapshot(task.projectId).messages.filter(m => m.taskId === task.id && m.role === 'user' && !seen.has(m.id)).map(m => { seen.add(m.id); return m; }) });
             const current = this.task(task.id);
             if (current.status === 'running') {
-                current.status = this.snapshot(task.projectId).messages.some(m => m.taskId === task.id && m.role === 'user' && !seen.has(m.id)) ? 'queued' : 'completed';
+                const hasMessages = this.snapshot(task.projectId).messages.some(m => m.taskId === task.id && m.role === 'user' && !seen.has(m.id));
+                const pendingGeneration = this.generationPending?.(task.id);
+                current.status = hasMessages ? 'queued' : pendingGeneration ? 'waiting' : 'completed';
+                if (!hasMessages && pendingGeneration) current.awaitingGeneration = true;
                 this.save(current);
             }
         }

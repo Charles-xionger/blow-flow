@@ -1,3 +1,4 @@
+import { geminiImageParameters } from './gemini-image';
 import { validGenerationDimensions } from './dimensions';
 import { validReferenceUrl } from './reference-files';
 import { validateGenerationConfig } from './config';
@@ -32,6 +33,9 @@ export class GenerationService {
       CREATE INDEX IF NOT EXISTS generation_queue ON generation_tasks(connection_id, status, created_at);
       CREATE TABLE IF NOT EXISTS generation_deleted_nodes (
         canvas_id TEXT NOT NULL, node_id TEXT NOT NULL, PRIMARY KEY(canvas_id, node_id));
+      CREATE TABLE IF NOT EXISTS generation_permissions (
+        request_id TEXT PRIMARY KEY, owner_task_id TEXT NOT NULL, approved INTEGER NOT NULL DEFAULT 0,
+        bindings TEXT NOT NULL, request_json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS generation_diagnostics (
         id INTEGER PRIMARY KEY, task_id TEXT NOT NULL, created_at INTEGER NOT NULL, response TEXT NOT NULL);
     `);
@@ -57,6 +61,37 @@ export class GenerationService {
     if (!c || !c.baseUrl || !process.env[c.apiKeyEnv]) return false;
     try { const url = new URL(c.baseUrl); return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash; } catch { return false; }
   }
+  validate(value: unknown): CreateGeneration {
+    const request = validateRequest(value);
+    const model = this.config.models.find(m => m.id === request.modelId);
+    if (!model) throw new GenerationError('未知模型');
+    if (!this.configured(this.config.connections.find(c => c.id === model.connectionId))) throw new GenerationError('平台连接未配置', 503);
+    if (!validGenerationDimensions(model.capabilities.dimensions, request.input.width, request.input.height)) throw new GenerationError('无效的生成尺寸');
+    validateModelInput(model, request.input);
+    return request;
+  }
+  cancelRequests(requestIds: string[]) {
+    for (const id of requestIds) {
+      this.db.prepare('UPDATE generation_permissions SET approved=0 WHERE request_id=?').run(id);
+      this.db.prepare("UPDATE generation_tasks SET status='cancelled', lease_token=NULL, lease_until=0, updated_at=? WHERE request_id=? AND (status='queued' OR (status='submitting' AND submission_started=0))").run(Date.now(), id);
+    }
+  }
+  /** Runs in the same immediate transaction as recording the paid boundary. */
+  authorizeSubmission(task: TaskRecord): boolean {
+    const permission = this.db.prepare('SELECT * FROM generation_permissions WHERE request_id=?').get(task.request_id) as { approved: number; owner_task_id: string; bindings: string; request_json: string } | undefined;
+    if (!permission) return true; // Existing manual generation follows its existing rules.
+    if (!permission.approved || permission.request_json !== task.request_json) return false;
+    const owner = this.db.prepare('SELECT status FROM agent_tasks WHERE id=?').get(permission.owner_task_id) as { status: string } | undefined;
+    if (!owner || ['stopped', 'failed', 'interrupted'].includes(owner.status)) return false;
+    const request: CreateGeneration = JSON.parse(task.request_json);
+    const row = this.db.prepare('SELECT data FROM workflows WHERE id=? AND deleted_at IS NULL').get(request.canvasId) as {data:string}|undefined;
+    if (!row) return false;
+    const canvas = JSON.parse(row.data);
+    return (JSON.parse(permission.bindings) as { id: string; version: number }[]).every(binding => {
+      const node = canvas.nodes.find((n: {id:string}) => n.id === binding.id);
+      return node && (node.data.generationContentVersion ?? 0) === binding.version;
+    });
+  }
   create(value: unknown): GenerationTask {
     const request = validateRequest(value);
     const requestJson = JSON.stringify(request);
@@ -72,7 +107,7 @@ export class GenerationService {
       if (!model) throw new GenerationError('未知模型');
       const connection = this.config.connections.find(c => c.id === model.connectionId);
       if (!connection || !this.configured(connection)) throw new GenerationError('平台连接未配置', 503);
-      if (model.adapter !== 'runninghub-workflow') throw new GenerationError('不支持的适配器');
+      if (!['runninghub-workflow','gemini-image'].includes(model.adapter)) throw new GenerationError('不支持的适配器');
       const d = model.capabilities.dimensions;
       if (!validGenerationDimensions(d, request.input.width, request.input.height))
         throw new GenerationError(`尺寸必须为 ${d.min}–${d.max} 范围内 ${d.step} 的倍数`);
@@ -84,7 +119,7 @@ export class GenerationService {
       this.db.prepare(`INSERT INTO generation_tasks
         (id, request_id, request_json, connection_id, snapshot, input, status, created_at, updated_at, submission_started)
         VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)`).run(id, request.requestId, requestJson,
-        connection.id, JSON.stringify({ model, connection }), JSON.stringify(input), now, now, model.category === 'VIDEO' ? 0 : 1);
+        connection.id, JSON.stringify({ model, connection }), JSON.stringify(input), now, now, 0);
       return this.get(id);
     }).immediate();
   }
@@ -193,6 +228,11 @@ function validateRequest(value: unknown): CreateGeneration {
 }
 
 function validateModelInput(model: ModelConfig, input: GenerationInput) {
+  if (model.adapter === 'gemini-image') {
+    geminiImageParameters(input);
+    if (input.duration !== undefined || input.instanceType !== undefined || (input.references ?? []).some(r => r.kind !== 'image') || (input.references?.length ?? 0) > 8) throw new GenerationError('不支持的 Gemini 图片参数');
+    return;
+  }
   const video = model.capabilities.video;
   if (!video) {
     if (input.duration !== undefined || input.references !== undefined) throw new GenerationError('此模型不支持视频或参考素材参数');
