@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports -- Node CommonJS test fixture. */
 const {test}=require('node:test');
 const {execFileSync}=require('node:child_process');
 const path=require('node:path');

@@ -37,3 +37,17 @@ test('generation batch details survive reopening and can be modified, cancelled 
  await expect(reopened.getByLabel('生成进度').last()).toContainText('已保存');
  await expect.poll(async()=>reopened.evaluate(()=>document.querySelectorAll('.react-flow__node img').length)).toBeGreaterThan(0);
 });
+
+test('a real worker restart shows saved progress and resumes only after clicking continue',async({page,request,context})=>{
+ await page.goto('/canvas');await page.getByRole('button',{name:'创作助手',exact:true}).click();
+ await page.getByLabel('创作要求').fill('测试服务重启');await page.getByRole('button',{name:'发送',exact:true}).click();
+ await expect(page.getByLabel('助手消息')).toContainText('进度已保存，等待测试重启');
+ expect((await request.post('http://127.0.0.1:3218/restart-agent')).ok()).toBeTruthy();
+ await expect(page.getByRole('button',{name:'继续创作',exact:true})).toBeVisible();
+ await context.setOffline(true);await page.getByLabel('创作要求').fill('重连前保留输入');await context.setOffline(false);
+ await page.reload();
+ await expect(page.getByLabel('助手消息')).toContainText('进度已保存，等待测试重启');
+ await expect(page.getByLabel('助手消息')).not.toContainText('收到：测试服务重启');
+ await page.getByRole('button',{name:'继续创作',exact:true}).click();
+ await expect(page.getByLabel('助手消息')).toContainText('收到：测试服务重启');
+});

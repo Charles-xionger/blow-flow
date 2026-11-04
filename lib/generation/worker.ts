@@ -67,6 +67,7 @@ export class GenerationWorker {
       if (!task) {
         const queued = db.prepare(`SELECT * FROM generation_tasks WHERE status='queued' ORDER BY created_at, rowid`).all() as TaskRecord[];
         task = queued.find(candidate => {
+          if (this.service.submissionPaused(candidate)) return false;
           const snapshot: TaskSnapshot = JSON.parse(candidate.snapshot);
           const active = db.prepare(`SELECT COUNT(*) AS count FROM generation_tasks WHERE connection_id=?
             AND status IN ('submitting','running','uncertain','timed_out')`).get(candidate.connection_id) as { count: number };
@@ -103,6 +104,10 @@ export class GenerationWorker {
   }
   private startSubmission(task: TaskRecord, snapshot: TaskSnapshot): boolean {
     return this.service.db.transaction(() => {
+      if (this.service.submissionPaused(task)) {
+        this.update(task, {status:'queued', submission_started:0, lease_until:0, lease_token:null});
+        return false;
+      }
       if (!this.service.authorizeSubmission(task)) {
         this.update(task, { status: 'cancelled', error: '批准已失效或任务已停止；请重新确认', lease_until: 0, lease_token: null });
         return false;
