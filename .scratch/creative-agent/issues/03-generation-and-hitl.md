@@ -4,7 +4,7 @@
 
 **Blocked by:** 02: Agent 编辑画布、参数修改与实时同步
 
-**Status:** claimed
+Status: resolved
 
 依据：[父规格](../spec.md)，ADR-0001、ADR-0002、ADR-0007、ADR-0008、ADR-0009。
 
@@ -22,7 +22,7 @@
 - [x] 一批部分失败保留成功结果并报告失败原因；重新生成须用户明确确认，不自动反复尝试或换模型。状态查询和重试保存已有产物可以自动进行。
 - [x] 提交结果不明确时沿用待核实处理，不直接再次提交；成功但保存失败时仅重试产物保存，不重新生成。
 - [x] 通过公开 Agent 任务入口和可控模型/供应商输入验证批准、失效、幂等、后台写回、连续执行、停止、部分失败和保存恢复；浏览器覆盖批次确认、修改、取消、关页重开及结果同步。
-- [ ] 完成类型检查、受影响代码 lint、完整快速测试及完整浏览器回归；自动化不调用真实付费图片/视频接口。真实图片、视频及参考效果、连续创作由用户人工验收，明确记录已完成与待验收场景，不混同替代服务测试。
+- [x] 完成类型检查、受影响代码 lint、完整快速测试及完整浏览器回归；自动化不调用真实付费图片/视频接口。真实图片、视频及参考效果、连续创作由用户人工验收，明确记录已完成与待验收场景，不混同替代服务测试。
 
 
 ## Comments
@@ -36,3 +36,7 @@
 - Red/green evidence includes missing approval implementation, missing Gemini adapter, own-output attachment incorrectly invalidating sibling approval, and planning returning too early to remain stoppable. Eight public Agent generation cases cover approval/idempotence, revocation/scoped stop, save recovery/attachment, image references, success+failure+uncertainty, stop/input-change races, closed-page continuation/deletion, and durable generation wait. Existing generation/H3/canvas cases also pass.
 - Validation: `pnpm typecheck` and affected-file ESLint pass. Full fast suite: 256 passed, 0 failed (5.67 s). Final focused browser run (`agent-sidebar.spec.ts` + `agent-canvas.spec.ts`): 4 passed, 0 failed (46.5 s). Earlier focused runs exposed and fixed fixture preview/model-load readiness issues; these are not represented as full-browser passes. `NODE_OPTIONS=--no-experimental-webstorage` is required for Node 25; browser run uses the cached Inter response path supplied by integration.
 - Actual Gemini/RunningHub paid generation, real image/video reference effects and real creative quality/continuous creation remain **not manually accepted**. Automated model/provider/storage boundaries are controlled; no real paid calls were made. Full browser regression is still pending at the integration boundary, so the final validation checkbox remains open.
+
+## Answer
+
+已合并到 `integration/creative-agent`，本票实现及自动化验证完成。最终类型检查、53 个受影响文件 lint、269 项快速测试及 125 项完整浏览器测试全部通过；审查修复和首轮失败后的完整重跑见 [最终验证](../implementation-results.md)。真实供应商与创作效果保持待人工验收，不纳入本次自动化通过声明。

@@ -4,7 +4,7 @@
 
 **Blocked by:** 01: Agent 侧栏、后台任务与 MCP 接入
 
-**Status:** resolved
+Status: resolved
 
 依据：[父规格](../spec.md)，ADR-0007、ADR-0009。
 
@@ -20,7 +20,7 @@
 - [x] 评估并接入适合当前画布的成熟布局方案，优先考虑 elkjs；Agent 描述布局意图，由确定性代码计算坐标，考虑节点尺寸、连线和分组。
 - [x] 新增内容默认只布局新增节点，在相关节点附近寻找可用位置，不移动已有节点；明确要求整理才调整已有布局，指定选区时只整理选区。一次整理可整体撤销，不影响范围外内容。
 - [x] 通过公开任务及画布接口验证写入、参数校验、批次历史、重复请求、同内容覆盖、无关编辑保留和删除目标；浏览器验证参数控制台实时更新、布局范围、实际节点尺寸、undo/redo、断网重开和项目切换。
-- [ ] 最终集成边界执行完整浏览器回归（由主 Agent 协调，在 02–04 集成后执行）；本票类型检查、受影响代码 lint、完整快速测试及定向浏览器验证已完成。真实供应商生成不属于本票验证前置条件。
+- [x] 最终集成边界执行完整浏览器回归（由主 Agent 协调，在 02–04 集成后执行）；本票类型检查、受影响代码 lint、完整快速测试及定向浏览器验证已完成。真实供应商生成不属于本票验证前置条件。
 
 ## Comments
 
@@ -48,3 +48,7 @@ Live reconciliation is part of the existing IndexedDB/autosave coordinator. It r
 - Real Gemini and paid image/video calls were not run; user acceptance remains separate.
 
 - Final read-only review also normalized the confirmed baseline when adopting a recovery snapshot or restored project; typecheck, scoped lint and the full 248-case fast suite passed after that bookkeeping fix. The final full browser suite will cover those shared recovery paths.
+
+## Answer
+
+已合并到 `integration/creative-agent`，本票实现及自动化验证完成。最终类型检查、53 个受影响文件 lint、269 项快速测试及 125 项完整浏览器测试全部通过；审查修复和首轮失败后的完整重跑见 [最终验证](../implementation-results.md)。真实供应商与创作效果保持待人工验收，不纳入本次自动化通过声明。

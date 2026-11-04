@@ -4,7 +4,7 @@
 
 **Blocked by:** 03: 图片、视频生成与批次 HITL
 
-**Status:** claimed
+Status: resolved
 
 依据：[父规格](../spec.md)，ADR-0002、ADR-0008、ADR-0009。
 
@@ -19,7 +19,7 @@
 - [ ] 完成自由创作组合场景：参考图理解与提问、技能按需使用、节点与参数修改、局部布局、批次批准、图片/视频连续执行、部分失败与确认重试、停止及历史回放；不要求模型每次选择完全一致的内部步骤。
 - [x] 浏览器组合覆盖关页重开、断网恢复、服务重启继续和快速项目切换；确认打开画布实时同步，未打开画布后台执行，不串项目、不覆盖无关编辑。
 - [x] 按父规格逐项核对首版行为与明确排除项，修复集成缺口，不把首版恢复扩展为任意步骤全自动续跑、外部 MCP 或多 Agent 并发协作。
-- [ ] 完成类型检查、受影响代码 lint、完整快速测试及完整浏览器回归，验证期间保持应用、测试、配置和环境不变；全量结果与失败后定向复测分别报告。真实供应商生成仍由用户人工验收，保留可执行场景与实际验收状态，不自动发起付费调用。
+- [x] 完成类型检查、受影响代码 lint、完整快速测试及完整浏览器回归，验证期间保持应用、测试、配置和环境不变；全量结果与失败后定向复测分别报告。真实供应商生成仍由用户人工验收，保留可执行场景与实际验收状态，不自动发起付费调用。
 
 ## Comments
 
@@ -44,3 +44,7 @@ No real paid provider calls were made. The following scenarios are executable by
 3. Change a pending proposal, cancel another, and stop while a batch is partly submitted. Confirm unpaid items stop and already-submitted results remain available; retry only selected failed output after a fresh approval.
 4. Kill/restart the Agent worker during planning and during generation tracking. After the lease expires, confirm “待继续”; observe submitted results saving without clicking continue, then continue planning once. Repeat while awaiting a question/approval and verify it remains unanswered.
 5. Edit an unrelated node while the assistant works, switch projects and return; inspect same-content override history, unrelated edits, deleted-target behavior and undo/redo without paid calls.
+
+## Answer
+
+已合并到 `integration/creative-agent`，本票实现及自动化验证完成。最终类型检查、53 个受影响文件 lint、269 项快速测试及 125 项完整浏览器测试全部通过；审查修复和首轮失败后的完整重跑见 [最终验证](../implementation-results.md)。真实供应商与创作效果保持待人工验收，不纳入本次自动化通过声明。

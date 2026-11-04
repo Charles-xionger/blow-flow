@@ -35,3 +35,7 @@ The integration owner's first full browser run on `eff80a7` completed with **123
 - Red/green public autosave regression reproduced the unexpected remote rename, then verified idle preservation and durable conflict recovery for both human-only and mixed deltas. Existing Agent merge tests still verify unrelated local edits, exact inverse undo and retained provenance.
 - Completed-source validation: typecheck and scoped lint passed; **187 related Agent/canvas fast tests passed, 4.42 s**; affected browser consistency + Agent canvas files **9 passed, 0 failed, 52.8 s**, including both originally failed cases and live Agent synchronization. Source guard remained enabled; sources were frozen during checks. `git diff --check` passed.
 - The integration owner must rerun full fast and full browser validation after this shared persistence fix. No final full-suite pass is claimed here. Manual provider acceptance remains pending.
+
+## Final integration validation
+
+补充修复合并后，类型检查和全部 53 个受影响文件 ESLint 通过；完整快速测试 269/269（8.06 秒）、完整浏览器 125/125（5.8 分钟）通过，源码检测通过。此前全量 123/125 的失败及定向复测记录保留如上。两个审查轴均已只读复核原发现得到修复。详见 [implementation-results.md](implementation-results.md)。
