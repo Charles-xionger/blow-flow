@@ -3,17 +3,8 @@ import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv
 import type Database from 'better-sqlite3';
 import { randomUUID, createHash } from 'node:crypto';
 import type { AgentMessage, AgentRuntime, AgentTask, AgentSnapshot, AgentTool, AgentReference } from './types';
+import { redactedFailure } from './redact';
 const active = new Set(['queued', 'running', 'waiting', 'interrupted']);
-const secretName = String.raw`(?:x-goog-api-key|x-api-key|api[_-]?key|access[_-]?token|token|key|authorization)`;
-/** Server-log form of a failure: provider text kept, credentials masked. */
-function redactedFailure(error: unknown) {
-    const text = error instanceof Error ? error.message : String(error);
-    return text
-        .replace(/AIza[0-9A-Za-z_-]{10,}/g, '<REDACTED>')
-        .replace(/Bearer\s+[^\s"',}]+/gi, 'Bearer <REDACTED>')
-        .replace(new RegExp(String.raw`("${secretName}"\s*:\s*)"[^"]*"`, 'gi'), '$1"<REDACTED>"')
-        .replace(new RegExp(String.raw`\b(${secretName}\s*[:=]\s*)(?!<REDACTED>|Bearer )[^&\s"',}]+`, 'gi'), '$1<REDACTED>');
-}
 export class AgentService {
     private workerId = randomUUID();
     private leaseMs: number;

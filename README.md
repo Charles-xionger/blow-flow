@@ -56,7 +56,7 @@ pnpm test:browser
 
 管理员配置 `GEMINI_API_KEY`，并在运行 Web 服务之外启动 `pnpm agent:worker`。两者必须使用同一个 `DATABASE_PATH`；关闭浏览器不会停止 worker。每项目同时一个任务，worker 最多并行处理八个项目。不要将 worker 放在请求结束即销毁的 serverless 生命周期内。
 
-本地追踪：运行 `scripts/setup-langfuse.sh`，按提示用 Docker 启动 Langfuse（网页 http://localhost:3100，避开 Web 的 3000），并把 `LANGFUSE_BASE_URL`、`LANGFUSE_PUBLIC_KEY`、`LANGFUSE_SECRET_KEY` 写入 `.env.local`。部署文件与生成的密钥在已忽略的 `.langfuse/`，可重复运行。助手任务失败原因另见 agent worker 的终端输出（凭据已打码）。
+本地追踪：运行 `scripts/setup-langfuse.sh`，按提示用 Docker 启动 Langfuse（网页 http://localhost:3100，避开 Web 的 3000），并把 `LANGFUSE_BASE_URL`、`LANGFUSE_PUBLIC_KEY`、`LANGFUSE_SECRET_KEY` 写入 `.env.local`。部署文件与生成的密钥在已忽略的 `.langfuse/`，可重复运行。agent worker 启动时读到这三个变量即开启追踪（启动日志会显示），每次任务运行在 Langfuse 记为一条 trace：会话为项目 ID，包含每轮模型调用（输入、输出、用量）、工具调用的参数与结果、失败原因；参考图只记录摘要，凭据已打码。未配置时追踪关闭，失败原因仍输出在 agent worker 终端。
 
 可用 `AGENT_CONFIG_PATH` 指向管理员维护的 JSON：
 

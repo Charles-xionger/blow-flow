@@ -9,3 +9,7 @@ test('real Pi agent executes project tools through real internal MCP with contro
 test('uploaded originals persist through real Pi planning into approved image and video references',()=>{
  execFileSync(process.execPath,['--import','tsx',path.join(__dirname,'fixtures/agent-upload.ts')],{cwd:path.join(__dirname,'..'),stdio:'pipe'});
 });
+
+test('real Pi runs are traced to Langfuse observations without image bytes or credentials',()=>{
+ execFileSync(process.execPath,['--import','tsx',path.join(__dirname,'fixtures/agent-tracing.ts')],{cwd:path.join(__dirname,'..'),stdio:'pipe'});
+});
