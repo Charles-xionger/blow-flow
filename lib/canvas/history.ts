@@ -9,6 +9,7 @@ const immer = new Immer({ autoFreeze: false });
 
 type Content = { nodes: Node[]; edges: Edge[]; name: string };
 export interface HistoryOperation {
+  source?: 'agent';
   time?: number;
   label?: string;
   details?: string[];
@@ -143,7 +144,7 @@ export function createCanvasHistory(get: () => State, publish: (state: Partial<S
     publish(update);
   };
   let batch: { key: string; session: number; before: Content; history: CanvasHistory; id: string } | undefined;
-  function change(update: Partial<State>, options: { record?: boolean; id?: string; label?: string } = {}) {
+  function change(update: Partial<State>, options: { record?: boolean; id?: string; label?: string; source?: 'agent' } = {}) {
     const state = get();
     if (update.canvasSession !== undefined && update.canvasSession !== state.canvasSession) {
       batch = undefined; set({ ...update, history: update.history }); return;
@@ -160,10 +161,10 @@ export function createCanvasHistory(get: () => State, publish: (state: Partial<S
     const [, currentPatches, currentInverse] = difference(before, after);
     if (!currentPatches.length) {
       set({ ...update, ...(state.history && history !== state.history ? { history } : {}), ...(options.id ? { history: { ...history, receipts: [...history.receipts, options.id],
-        operations: [...(history.operations ?? []), { id: options.id, kind: 'noop', time: Date.now(), patches: [], inverse: [] }] } } : {}) }); return;
+        operations: [...(history.operations ?? []), { id: options.id, ...(options.source ? { source: options.source } : {}), kind: 'noop', time: Date.now(), patches: [], inverse: [] }] } } : {}) }); return;
     }
     const operationId = options.id ?? crypto.randomUUID();
-    const operation: HistoryOperation = { id: operationId, batchId: batch?.id ?? operationId,
+    const operation: HistoryOperation = { id: operationId, ...(options.source ? { source: options.source } : {}), batchId: batch?.id ?? operationId,
       time: Date.now(), label: options.label ?? '编辑', details: historyDetails(before, after),
       kind: options.record ? 'edit' : 'boundary', patches: currentPatches, inverse: currentInverse };
     const operations = [...(history.operations ?? []), operation];
@@ -238,7 +239,7 @@ export function validateHistory(value: unknown, state: Pick<State, 'nodes' | 'ed
       !Array.isArray(history.records) || !history.records.every(entry => entry && typeof entry.id === 'string' && typeof entry.label === 'string' && patches(entry.patches) && patches(entry.inverse)) ||
       !strings(history.undo) || !strings(history.redo) || !strings(history.receipts)) throw new Error('Invalid canvas history');
   if (history.operations !== undefined && (!Array.isArray(history.operations) || !history.operations.every(op => op && typeof op.id === 'string' &&
-      (op.batchId === undefined || typeof op.batchId === 'string') && ['edit', 'undo', 'redo', 'boundary', 'noop'].includes(op.kind) && patches(op.patches) && patches(op.inverse)))) throw new Error('Invalid canvas history operations');
+      (op.source === undefined || op.source === 'agent') && (op.batchId === undefined || typeof op.batchId === 'string') && ['edit', 'undo', 'redo', 'boundary', 'noop'].includes(op.kind) && patches(op.patches) && patches(op.inverse)))) throw new Error('Invalid canvas history operations');
   const metadata = (entry: { time?: number; label?: string; details?: string[] }) =>
     (entry.time === undefined || Number.isFinite(entry.time) && entry.time >= 0 && entry.time <= 8.64e15) &&
     (entry.label === undefined || typeof entry.label === 'string') &&
