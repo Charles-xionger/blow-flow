@@ -1,6 +1,7 @@
 import type { CanvasNode } from '@/types';
 import type { Edge, Viewport } from '@xyflow/react';
 import { createCanvasRepository, type CanvasDraft, type CanvasRepository } from './local-repository';
+import { mergeRemoteCanvas } from './remote-merge';
 import { canonicalJSON } from './save-protocol';
 import { canvasSnapshot } from './snapshot';
 import { LEGACY_CANVAS_KEY } from './legacy-draft';
@@ -54,6 +55,8 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
   }
   let unsubscribe: (() => void) | undefined;
   let opening = 0;
+  let remoteTimer: ReturnType<typeof setInterval> | undefined;
+  let publishingRemote = false;
   const clearTimers = () => { clearTimeout(timer); clearTimeout(deadline); timer = deadline = undefined; };
   const status = (target: Session, saveStatus: SaveStatus, error?: unknown) => {
     // A request can outlive an editor visit. Its state belongs to the canvas,
@@ -147,6 +150,45 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
       settledStatus(target);
     }
   }
+  async function mergeIncoming(target: Session, remote: Awaited<ReturnType<typeof readRemote>>, rejectedRequestId?: string) {
+    await commitLocal();
+    const work = async () => {
+    const before = await repository.read(target.id!);
+    if (!before || before.serverVersion >= remote.version) return before;
+    const merged = await repository.mergeRemote(target.id!, remote.snapshot, remote.version, rejectedRequestId);
+    if (merged.serverVersion !== remote.version) return merged;
+    for (const editor of sessions) {
+      if (editor.id !== target.id) continue;
+      const current = store.getState();
+      const visible = current.persistenceReady && current.canvasSession === editor.key && current.currentWorkflowId === editor.id;
+      // Rebase edits that arrived during IndexedDB work too, before publishing.
+      const snapshot = visible && canonicalJSON(canvasSnapshot(current)) !== canonicalJSON(before.snapshot)
+        ? mergeRemoteCanvas(before.confirmedSnapshot ?? before.snapshot, canvasSnapshot(current), remote.snapshot) : merged.snapshot;
+      editor.draft = merged;
+      editor.localVersion = merged.localVersion;
+      editor.fingerprint = canonicalJSON(merged.snapshot);
+      if (visible) {
+        publishingRemote = true;
+        try { store.setState({ nodes: snapshot.nodes.map(node => {
+          const live = current.nodes.find(value => value.id === node.id);
+          return { ...node, selected: live?.selected, measured: live?.measured, dragging: live?.dragging,
+            data: { ...node.data, activeToolbarItem: live?.data.activeToolbarItem, isStackOpen: live?.data.isStackOpen } } as CanvasNode;
+        }), edges: snapshot.edges.map(edge => ({ ...edge, selected: current.edges.find(value => value.id === edge.id)?.selected })), history: snapshot.history,
+          projectName: snapshot.name, serverVersion: merged.serverVersion, recovery: merged.recovery,
+          selectedNodeIds: current.selectedNodeIds?.filter(id => snapshot.nodes.some(node => node.id === id)) }); }
+        finally { publishingRemote = false; }
+        editor.latest = store.getState();
+        editor.dirty = canonicalJSON(canvasSnapshot(editor.latest)) !== editor.fingerprint;
+      }
+    }
+    return merged;
+    };
+    const incoming = localWork.catch(() => {}).then(work);
+    localWork = incoming.then(() => {});
+    const merged = await incoming;
+    await commitLocal();
+    return merged;
+  }
   async function syncCanvas(editor: Session, force: boolean) {
     // A stale editor can acquire a recovery-copy ID during this request. Keep
     // the worker bound to the original canvas for every response and retry.
@@ -168,6 +210,13 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
         if (target.draft.recovery) return;
       }
       let operation = await repository.pending(target.id);
+      if (history && !operation && target.draft && !target.draft.recovery) {
+        const remote = await readRemote(target.id);
+        if (remote.version > target.draft.serverVersion) {
+          target.draft = await mergeIncoming(editor, remote);
+          operation = await repository.pending(target.id);
+        }
+      }
       while (operation) {
         if (operation.retry?.blocked && !force) throw new Error(operation.retry.error || '同步已暂停，本地内容已保留');
         if (!online()) { settledStatus(target); break; }
@@ -198,7 +247,22 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
         } catch (error) {
           if (error instanceof CanvasStorageError) throw error;
           if (error instanceof CanvasRequestError && error.status === 409) {
-            target.draft = await repository.markRecovery(operation.id, 'conflict', operation.requestId, error.message);
+            if (history) {
+              const remote = await readRemote(operation.id);
+              try {
+                const merged = await mergeIncoming(editor, remote, operation.requestId);
+                if (merged?.serverVersion === remote.version && !merged.recovery) {
+                  target.draft = merged;
+                  const nextOperation = await repository.pending(operation.id);
+                  operation = nextOperation;
+                  continue;
+                }
+              } catch (mergeError) {
+                if (mergeError instanceof CanvasStorageError) throw mergeError;
+                // Unknown history stays in the existing recovery flow.
+              }
+            }
+            target.draft = await repository.markRecovery(body.id, 'conflict', body.requestId, error.message);
             publishDraft(target.draft);
             throw error;
           }
@@ -262,7 +326,7 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
   function start() {
     if (unsubscribe) return () => {};
     unsubscribe = store.subscribe((state, previous) => {
-      if (!state.persistenceReady) return;
+      if (!state.persistenceReady || publishingRemote) return;
       if (!active || state.canvasSession !== active.key) {
         active = session(state);
         sessions.add(active);
@@ -282,7 +346,12 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
       status(active, 'saving');
       schedule();
     });
+    if (history) remoteTimer = setInterval(() => {
+      if (!store.getState().persistenceReady || !active?.id || interactions.size) return;
+      void flush().catch(onError);
+    }, 1500);
     return () => {
+      clearInterval(remoteTimer);
       unsubscribe?.(); unsubscribe = undefined; clearTimers();
       clearTimeout(retryTimer); retryAt = Infinity;
       void commitLocal().catch(onError);

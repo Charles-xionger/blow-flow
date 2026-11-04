@@ -82,6 +82,18 @@ export class AgentService {
         return this.request(projectId, input.requestId, { type: 'answer', ...input }, () => { const task = this.snapshot(projectId).tasks.find(t => t.status === 'waiting' && t.question?.id === input.questionId); if (!task?.question)
             throw new Error('Question is no longer pending'); task.question.answer = input.text; task.status = 'queued'; this.message(task, 'user', input.text); this.save(task); return task; });
     }
+    consumeQuestion(taskId: string, questionId: string) {
+        const task = this.task(taskId);
+        if (task.question?.id === questionId) { task.question.cancelled = true; this.save(task); }
+    }
+    requestQuestion(taskId: string, id: string, text: string, options: string[], scope?: import('./types').AgentQuestion['scope']) {
+        const task = this.task(taskId);
+        if (task.status !== 'running') throw new Error('Task is not running');
+        task.question = { id, text, options, scope };
+        task.status = 'waiting';
+        this.save(task);
+        return { waiting: true, questionId: id };
+    }
     async executeTool(taskId: string, callId: string, name: string, args: Record<string, unknown>): Promise<unknown> {
         let task = this.task(taskId);
         const existing = task.steps.find(s => s.id === callId);
@@ -90,11 +102,12 @@ export class AgentService {
                 throw new Error('Tool identity reused');
             if (existing.status === 'completed')
                 return existing.result;
-            throw new Error('Tool execution requires reconciliation');
+            if (!this.tools.get(name)?.idempotent) throw new Error('Tool execution requires reconciliation');
         }
         if (task.status !== 'running')
             throw new Error('Task is not running');
-        task.steps.push({ id: callId, name, args, status: 'running' });
+        if (existing) existing.status = 'running';
+        else task.steps.push({ id: callId, name, args, status: 'running' });
         this.save(task);
         try {
             let result: unknown;

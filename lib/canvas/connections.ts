@@ -1,6 +1,6 @@
 import type { Connection, Edge } from "@xyflow/react";
-import { NodeType, type CanvasNode } from "@/types";
-import { nodeDefinitions } from "@/lib/canvas/node-definitions";
+import { NodeType, type CanvasNode } from "../../types";
+import { nodeDefinitions } from "./node-definitions";
 
 /** Shared by xyflow's preview and store mutations; null handles support old drafts. */
 export function isCompatibleCanvasConnection(connection: Connection | Edge, from?: CanvasNode, to?: CanvasNode): boolean {
