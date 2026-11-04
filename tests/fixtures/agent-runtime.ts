@@ -25,12 +25,21 @@ assert.equal(service.task(task.id).status,'completed');assert.equal(service.task
 await service.runNext(createPiRuntime(service,{apiKey:'test-only',streamFn:()=>{throw new Error('controlled provider failure');}}));
 assert.equal(service.task(failed.id).status,'failed');
 const streamFailure=service.send('project',{requestId:'stream-failure',text:'流中断',modelId:'gemini-flash'});
+const logged:string[]=[];const consoleError=console.error;console.error=(...args:unknown[])=>{logged.push(args.map(String).join(' '));};
+try{
 await service.runNext(createPiRuntime(service,{apiKey:'test-only',streamFn:model=>{
  const stream=createAssistantMessageEventStream();
- stream.push({type:'error',reason:'error',error:{role:'assistant',api:model.api,provider:model.provider,model:model.id,content:[],stopReason:'error',errorMessage:'controlled stream error',timestamp:Date.now(),usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}}}});
+ stream.push({type:'error',reason:'error',error:{role:'assistant',api:model.api,provider:model.provider,model:model.id,content:[],stopReason:'error',errorMessage:'controlled stream error: models/gemini-retired not found for key=AIzaSyFakeKey123 {"apiKey":"sk-proxy-secret"} x-api-key: proxy-header-secret',timestamp:Date.now(),usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}}}});
  return stream;
 }}));
+}finally{console.error=consoleError;}
 assert.equal(service.task(streamFailure.id).status,'failed');
+// Workers must leave the provider's cause in server logs; the UI keeps the generic message.
+assert.equal(service.task(streamFailure.id).error,'助手执行失败，请检查平台配置或稍后重试。');
+const failureLog=logged.find(line=>line.includes(streamFailure.id));
+assert.ok(failureLog,`expected a failure log for the task, got ${JSON.stringify(logged)}`);
+assert.match(failureLog,/models\/gemini-retired not found/);
+assert.doesNotMatch(failureLog,/AIzaSyFakeKey123|sk-proxy-secret|proxy-header-secret/);
 new CanvasAgentService().apply('project','delete-hero',[{kind:'delete',id:'hero'}]);
 const unrelated=service.send('project',{requestId:'unrelated',text:'写一个新的故事',modelId:'gemini-flash'});
 let calls=0;

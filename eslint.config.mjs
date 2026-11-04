@@ -9,7 +9,7 @@ const eslintConfig = defineConfig([
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",
-    ".next-canvas-test/**",
+    ".next-*/**",
     "out/**",
     "build/**",
     "next-env.d.ts",
@@ -21,6 +21,13 @@ const eslintConfig = defineConfig([
       "@typescript-eslint/no-explicit-any": "off",
       // no-unused-vars 规则关闭
       "@typescript-eslint/no-unused-vars": "off",
+    },
+  },
+  {
+    // Tests, test servers and workers are plain Node CommonJS.
+    files: ["**/*.cjs"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
     },
   },
 ]);

@@ -5,24 +5,14 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 First, run the development server:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm dev:all
 ```
+
+同时启动 Web、生成 worker（RunningHub 图片/视频）和助手 worker（规划并写画布），输出带进程前缀；任一进程退出则全部停止。只启动 `pnpm dev` 时，生成与助手任务会停在队列，界面上表现为发送后没有反应。
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-RunningHub 图片生成还需要在另一个终端持续运行后台任务进程：
-
-```bash
-pnpm generation:worker
-```
-
-仅启动 `pnpm dev` 会让任务停在本地队列，不会提交到 RunningHub。Web 和 worker 需从同一项目目录启动，使用相同的 `.env.local` 和数据库。配置 key 后需重启 worker。完整配置与恢复说明见 [Krea2 生成任务与恢复](docs/KREA2_GENERATION.md)。
+也可以在三个终端分别运行 `pnpm dev`、`pnpm generation:worker` 与 `pnpm agent:worker`。Web 和 worker 需从同一项目目录启动，使用相同的 `.env.local` 和数据库。配置 key 后需重启 worker。完整配置与恢复说明见 [Krea2 生成任务与恢复](docs/KREA2_GENERATION.md)。
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
@@ -69,7 +59,7 @@ pnpm test:browser
 可用 `AGENT_CONFIG_PATH` 指向管理员维护的 JSON：
 
 ```json
-{"models":[{"id":"gemini-flash","name":"Gemini Flash","modelId":"gemini-2.5-flash","apiKeyEnv":"GEMINI_API_KEY"}]}
+{"models":[{"id":"gemini-flash","name":"Gemini Flash","modelId":"gemini-flash-latest","apiKeyEnv":"GEMINI_API_KEY"}]}
 ```
 
 `baseUrl` 为可选的平台入口；密钥只通过服务端环境变量读取。客户端目录仅包含模型名称、ID 和是否已配置。用户在画布右侧“创作助手”发送消息、引用选中节点或上传 PNG/JPEG/WebP 参考图。问题可用选项或文本回答/修改，也可停止任务；等待不会超时变成同意。消息、工具身份与结果、问题和状态保存到 SQLite。引用项目图片仅从已有 OSS 源或内嵌图片读取，并转换为模型可理解的图像内容。

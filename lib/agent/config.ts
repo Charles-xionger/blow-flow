@@ -8,7 +8,7 @@ export interface AgentModelConfig {
 }
 /** Administrator-owned config. Public catalog deliberately omits connection details. */
 export function agentModels(): AgentModelConfig[] {
-    const models: AgentModelConfig[] = process.env.AGENT_CONFIG_PATH ? JSON.parse(fs.readFileSync(process.env.AGENT_CONFIG_PATH, 'utf8')).models : [{ id: 'gemini-flash', name: 'Gemini Flash', modelId: 'gemini-2.5-flash', apiKeyEnv: 'GEMINI_API_KEY' }];
+    const models: AgentModelConfig[] = process.env.AGENT_CONFIG_PATH ? JSON.parse(fs.readFileSync(process.env.AGENT_CONFIG_PATH, 'utf8')).models : [{ id: 'gemini-flash', name: 'Gemini Flash', modelId: 'gemini-flash-latest', apiKeyEnv: 'GEMINI_API_KEY' }];
     if (!Array.isArray(models) || models.some(m => !m.id || !m.modelId || !m.apiKeyEnv))
         throw new Error('Invalid administrator Agent configuration');
     return models;

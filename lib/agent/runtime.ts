@@ -44,7 +44,7 @@ export function createPiRuntime(service: AgentService, options: {
         agent.subscribe(async (event) => {
             if (event.type === 'message_end' && event.message.role === 'assistant') {
                 if (event.message.stopReason === 'error')
-                    throw new Error('Provider failed');
+                    throw new Error(event.message.errorMessage ?? 'unknown provider error');
                 const text = event.message.content.filter(c => c.type === 'text').map(c => c.text).join('');
                 if (text)
                     context.reply(text);
@@ -60,7 +60,7 @@ export function createPiRuntime(service: AgentService, options: {
             history.unshift({ role: 'user', content: `已记录执行步骤（不要重复已成功的操作）：${JSON.stringify(context.task.steps)}；待处理事项：${JSON.stringify(context.task.question ?? null)}`, timestamp: Date.now() });
             if (!context.signal.aborted && service.isExecuting(context.task))
                 await agent.prompt(history);
-            if (agent.state.errorMessage) throw new Error('Provider failed');
+            if (agent.state.errorMessage) throw new Error(`Provider failed: ${agent.state.errorMessage}`);
         }
         finally {
             context.signal.removeEventListener('abort', abort);
