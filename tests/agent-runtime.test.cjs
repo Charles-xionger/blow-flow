@@ -1,0 +1,6 @@
+const {test}=require('node:test');
+const {execFileSync}=require('node:child_process');
+const path=require('node:path');
+test('real Pi agent executes project tools through real internal MCP with controlled provider output',()=>{
+ execFileSync(process.execPath,['--import','tsx',path.join(__dirname,'fixtures/agent-runtime.ts')],{cwd:path.join(__dirname,'..'),stdio:'pipe'});
+});

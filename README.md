@@ -61,3 +61,19 @@ pnpm test:browser
 ```
 
 浏览器测试使用独立浏览器上下文、3217 端口、`.next-canvas-test` 构建目录及临时 SQLite，拒绝复用已运行的服务，不写入 `data/canvas.db`。覆盖真实编辑、IndexedDB、HTTP API、服务端读回和本地事务失败；快速测试另外覆盖版本冲突、幂等、SQL 回滚和合并时机。
+
+## 创作助手后台服务
+
+管理员配置 `GEMINI_API_KEY`，并在运行 Web 服务之外启动 `pnpm agent:worker`。两者必须使用同一个 `DATABASE_PATH`；关闭浏览器不会停止 worker。每项目同时一个任务，worker 最多并行处理八个项目。不要将 worker 放在请求结束即销毁的 serverless 生命周期内。
+
+可用 `AGENT_CONFIG_PATH` 指向管理员维护的 JSON：
+
+```json
+{"models":[{"id":"gemini-flash","name":"Gemini Flash","modelId":"gemini-2.5-flash","apiKeyEnv":"GEMINI_API_KEY"}]}
+```
+
+`baseUrl` 为可选的平台入口；密钥只通过服务端环境变量读取。客户端目录仅包含模型名称、ID 和是否已配置。用户在画布右侧“创作助手”发送消息、引用选中节点或上传 PNG/JPEG/WebP 参考图。问题可用选项或文本回答/修改，也可停止任务；等待不会超时变成同意。消息、工具身份与结果、问题和状态保存到 SQLite。引用项目图片仅从已有 OSS 源或内嵌图片读取，并转换为模型可理解的图像内容。
+
+当前集成固定使用 `@mariozechner/pi-agent-core` / `@mariozechner/pi-ai` 0.73.1、MCP SDK 1.32.2 和 TypeBox 0.34.52。Pi 上游已迁移到 [earendil-works/pi](https://github.com/earendil-works/pi/tree/main/packages/agent)，因此旧 scope 被标记 deprecated；此版本按实际安装的 README、类型和真实 Agent 循环验证，未来升级需重新验证 API。MCP 使用 SDK 的 `InMemoryTransport` 连接应用内 Client/Server，没有公开 MCP 网络端点。
+
+快速测试通过可控供应商输出运行真实 Pi 与 MCP，另以真实 SQLite 验证任务行为；浏览器测试运行独立的受控模型 worker，不使用管理员 Gemini 或素材生成凭据。这些测试不代表 Gemini 线上理解参考图、技能选择和创作效果已验收。真实 Gemini 调用与付费图片/视频生成仍需人工验收。后续票补充画布写入、生成批准和服务重启后主动继续；当前正常关页重开已读取持久对话及等待事项。
