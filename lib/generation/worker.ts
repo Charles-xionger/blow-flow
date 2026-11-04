@@ -1,3 +1,5 @@
+import { generateExistingGeminiImage } from './gemini-image';
+import type { GenerationInput } from './types';
 import { RunningHubSockets } from './runninghub-sockets';
 import { uploadReferences, ReferencePreparationError, referencePreparationLeaseMs } from './reference-upload';
 import { ArtifactSaveError, artifactTransferTiming } from './storage';
@@ -7,6 +9,7 @@ import { platformCall, submissionRejections, transientPlatformErrors, PlatformEr
 
 export interface WorkerIO {
   fetch: PlatformFetch;
+  generateImage?: (snapshot: TaskSnapshot, input: GenerationInput, beforeSubmit: () => void) => Promise<string>;
   save: (url: string, taskId: string, index: number, mediaType?: 'image' | 'video') => Promise<string>;
   inspectReference?: Parameters<typeof uploadReferences>[4];
   now?: () => number;
@@ -64,6 +67,7 @@ export class GenerationWorker {
       if (!task) {
         const queued = db.prepare(`SELECT * FROM generation_tasks WHERE status='queued' ORDER BY created_at, rowid`).all() as TaskRecord[];
         task = queued.find(candidate => {
+          if (this.service.submissionPaused(candidate)) return false;
           const snapshot: TaskSnapshot = JSON.parse(candidate.snapshot);
           const active = db.prepare(`SELECT COUNT(*) AS count FROM generation_tasks WHERE connection_id=?
             AND status IN ('submitting','running','uncertain','timed_out')`).get(candidate.connection_id) as { count: number };
@@ -98,18 +102,42 @@ export class GenerationWorker {
     this.service.db.prepare('INSERT INTO generation_diagnostics(task_id,created_at,response) VALUES (?,?,?)')
       .run(task.id, this.now(), redact(response, secrets));
   }
+  private startSubmission(task: TaskRecord, snapshot: TaskSnapshot): boolean {
+    return this.service.db.transaction(() => {
+      if (this.service.submissionPaused(task)) {
+        this.update(task, {status:'queued', submission_started:0, lease_until:0, lease_token:null});
+        return false;
+      }
+      if (!this.service.authorizeSubmission(task)) {
+        this.update(task, { status: 'cancelled', error: '批准已失效或任务已停止；请重新确认', lease_until: 0, lease_token: null });
+        return false;
+      }
+      return this.update(task, { submission_started: 1, lease_until: this.now() + snapshot.connection.requestTimeoutMs + 30_000,
+        deadline: this.now() + snapshot.connection.queryTimeoutMs });
+    }).immediate();
+  }
   private async submit(task: TaskRecord, snapshot: TaskSnapshot) {
-    let started = snapshot.model.category !== 'VIDEO';
+    let started = false;
     try {
       const input = JSON.parse(task.input);
+      if (snapshot.model.adapter === 'gemini-image') {
+        const result = await (this.io.generateImage ?? generateExistingGeminiImage)(snapshot, input, () => {
+          if (!this.startSubmission(task, snapshot)) throw new Error('Submission cancelled');
+          started = true;
+        });
+        if (!started) throw new Error('Adapter did not authorize submission');
+        if (!this.update(task, {status:'succeeded',results:JSON.stringify([result]),save_status:'pending',lease_until:0,error:null})) return;
+        task.status = 'succeeded'; task.results = JSON.stringify([result]);
+        await this.saveArtifacts(task);
+        return;
+      }
       const references = snapshot.model.category === 'VIDEO'
         ? await uploadReferences(snapshot, input.references || [], this.io.fetch,
           () => this.update(task, { lease_until: this.now() + referencePreparationLeaseMs(snapshot.connection.requestTimeoutMs) }), this.io.inspectReference)
         : [];
       const body = submission(snapshot, input, references);
       // Fence before the paid boundary. An expired owner never submits after takeover.
-      if (!this.update(task, { submission_started: 1, lease_until: this.now() + snapshot.connection.requestTimeoutMs + 30_000,
-        deadline: this.now() + snapshot.connection.queryTimeoutMs })) return;
+      if (!this.startSubmission(task, snapshot)) return;
       started = true;
       const result = await platformCall(snapshot, 'create', body, this.io.fetch,
         r => this.diagnostic(task, snapshot, r));
@@ -126,6 +154,7 @@ export class GenerationWorker {
         error: data?.taskStatus === 'FAILED' ? '平台生成失败' : null, lease_until: 0, next_poll: this.now() });
       if (accepted && data?.taskStatus !== 'FAILED') this.track(task, snapshot, data);
     } catch (error) {
+      if (task.status === 'succeeded') throw error;
       if (error instanceof ReferencePreparationError && error.diagnostic) this.diagnostic(task, snapshot, error.diagnostic);
       this.update(task, started
         ? { status: 'uncertain', error: '提交结果待核实，请勿重复生成', lease_until: 0 }

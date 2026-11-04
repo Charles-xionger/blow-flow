@@ -1,6 +1,6 @@
 # 创作助手首版：自由编排画布与生成工具
 
-Status: ready-for-agent
+Status: resolved
 
 ## Problem Statement
 
@@ -120,3 +120,7 @@ Status: ready-for-agent
 - [平台调研](../agent-discovery/platform-research.md)与[ComfyArt 源码调查](../agent-discovery/comfyart-research.md)保留事实依据。调研未替代真实产品或供应商验收。
 - Pi 包组合、版本、MCP 传输方式、持久化表结构、消息同步机制及布局库最终选型由后续技术集成确定；它们不得改变本规格已确认的用户行为。若实现发现必须改变这些行为，应显式提出差异，不能静默缩减。
 - 本规格描述实现目标，不代表功能已开发、模型已接通或人工验收已完成。
+
+## Implementation outcome
+
+首版实现已完成于 `integration/creative-agent`，4 张实施 tickets 已解决。最终自动化结果、审查及人工验收边界见 [实现与验证记录](implementation-results.md)；真实供应商与创作效果尚待人工验收。

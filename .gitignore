@@ -57,3 +57,6 @@ next-env.d.ts
 
 .next-canvas-perf/
 .scratch/canvas-drag-performance/measurements/
+
+# Local Langfuse (scripts/setup-langfuse.sh): compose files and generated secrets
+.langfuse/

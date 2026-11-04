@@ -70,6 +70,7 @@ export async function generateGeminiImage(
   prompt: string,
   aspectRatio: string = "1:1",
   resolution: string = "1K",
+  beforeSubmit?: () => void,
 ): Promise<string> {
   const apiKey = getApiKey();
 
@@ -88,6 +89,7 @@ export async function generateGeminiImage(
     );
 
     // 构建请求内容
+    beforeSubmit?.();
     const response = await ai.models.generateContent({
       model: model,
       contents: prompt,
@@ -138,6 +140,7 @@ export async function generateGeminiImageToImage(
   inputImages: string | string[],
   aspectRatio: string = "1:1",
   resolution: string = "1024x1024",
+  beforeSubmit?: () => void,
 ): Promise<string> {
   const apiKey = getApiKey();
 
@@ -172,9 +175,9 @@ export async function generateGeminiImageToImage(
     // 构建 contents 数组：先文本，然后所有图片
     const contents: any[] = [
       { text: prompt },
-      ...base64DataArray.map((data) => ({
+      ...base64DataArray.map((data, index) => ({
         inlineData: {
-          mimeType: "image/jpeg",
+          mimeType: imageArray[index]?.match(/^data:([^;]+);/)?.[1] || "image/jpeg",
           data: data,
         },
       })),
@@ -187,6 +190,7 @@ export async function generateGeminiImageToImage(
       `[Gemini] Image-to-image 配置: aspectRatio=${aspectRatio}, imageSize=${imageSize}`,
     );
 
+    beforeSubmit?.();
     const response = await ai.models.generateContent({
       model: model,
       contents: contents,

@@ -1,3 +1,4 @@
+import { mergeRemoteCanvas } from './remote-merge';
 import { restoredHistory } from './history';
 import { canonicalJSON, type CanvasSnapshot, type SaveAcknowledgement, type SaveOperation } from './save-protocol';
 import { recoverySnapshot } from './recovery-copy';
@@ -7,6 +8,7 @@ import { CanvasStorageError, canvasStorageError } from './storage-error';
 export interface CanvasDraft {
   id: string;
   snapshot: CanvasSnapshot;
+  confirmedSnapshot?: CanvasSnapshot;
   localVersion: number;
   confirmedLocalVersion: number;
   serverVersion: number;
@@ -153,6 +155,26 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
         metadata.put({ id }, 'legacyMigration');
       });
     },
+    mergeRemote(id: string, snapshot: CanvasSnapshot, serverVersion: number, rejectedRequestId?: string): Promise<CanvasDraft> {
+      return transaction('readwrite', async tx => {
+        const drafts = tx.objectStore('drafts'), operations = tx.objectStore('operations');
+        const draft = await result<CanvasDraft>(drafts.get(id));
+        const pending = await result<PendingSave | undefined>(operations.get(id));
+        if (draft.recovery || serverVersion <= draft.serverVersion) return draft;
+        // Never retire an uncertain request. Only a definitive 409 permits rebase.
+        if (pending && pending.requestId !== rejectedRequestId) return draft;
+        const base = draft.confirmedSnapshot ?? (draft.localVersion === draft.confirmedLocalVersion ? draft.snapshot : undefined);
+        if (!base) throw new Error('Missing confirmed baseline');
+        draft.snapshot = mergeRemoteCanvas(base, draft.snapshot, snapshot);
+        draft.confirmedSnapshot = snapshot;
+        draft.serverVersion = serverVersion;
+        draft.localVersion++;
+        draft.updatedAt = Date.now();
+        drafts.put(draft);
+        operations.put(operation(draft));
+        return draft;
+      });
+    },
     reconcile(id: string, snapshot: CanvasSnapshot, serverVersion: number): Promise<CanvasDraft> {
       return transaction('readwrite', async tx => {
         const drafts = tx.objectStore('drafts');
@@ -160,6 +182,7 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
         if (draft.recovery?.kind !== 'unverified' && draft.recovery?.kind !== 'conflict') return draft;
         if (canonicalJSON(draft.snapshot) === canonicalJSON(snapshot)) {
           draft.serverVersion = serverVersion;
+          draft.confirmedSnapshot = snapshot;
           draft.confirmedLocalVersion = draft.localVersion;
           delete draft.recovery;
         } else draft.recovery = { kind: 'conflict' };
@@ -183,7 +206,7 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
           return draft;
         }
         const version = draft.localVersion + 1;
-        const restored: CanvasDraft = { ...draft, snapshot, serverVersion, restorationVersion: serverVersion, localVersion: version,
+        const restored: CanvasDraft = { ...draft, snapshot, confirmedSnapshot: snapshot, serverVersion, restorationVersion: serverVersion, localVersion: version,
           confirmedLocalVersion: version, updatedAt: Date.now() };
         delete restored.recovery;
         drafts.put(restored);
@@ -201,7 +224,7 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
         // Backup and replacement commit together; a failed transaction changes neither.
         drafts.put(recoveryCopy(id, previous.snapshot));
         const version = previous.localVersion + 1;
-        const draft: CanvasDraft = { id, snapshot, serverVersion, localVersion: version,
+        const draft: CanvasDraft = { id, snapshot, confirmedSnapshot: snapshot, serverVersion, localVersion: version,
           confirmedLocalVersion: version, updatedAt: Date.now(),
           restorationVersion: previous.restorationVersion,
           generationRecoveryReadOnly: [...new Set([...(previous.generationRecoveryReadOnly ?? []), ...snapshot.nodes.map(node => node.id)])] };
@@ -245,7 +268,7 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
         }
         const draft: CanvasDraft = { id, snapshot, localVersion: (previous?.localVersion ?? 0) + 1,
           confirmedLocalVersion: previous?.confirmedLocalVersion ?? 0,
-          serverVersion: previous?.serverVersion ?? serverVersion, restorationVersion: previous?.restorationVersion,
+          serverVersion: previous?.serverVersion ?? serverVersion, confirmedSnapshot: previous?.confirmedSnapshot, restorationVersion: previous?.restorationVersion,
           updatedAt: Date.now(), recovery: previous?.recovery, generationRecoveryReadOnly: previous?.generationRecoveryReadOnly };
         drafts.put(draft);
         const operations = tx.objectStore('operations');
@@ -272,7 +295,7 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
           snapshot = { ...snapshot, history: previous.snapshot.history };
         }
         const version = previous ? previous.localVersion + (canonicalJSON(previous.snapshot) === canonicalJSON(snapshot) ? 0 : 1) : 0;
-        const draft = { id, snapshot, serverVersion, restorationVersion: previous?.restorationVersion,
+        const draft = { id, snapshot, serverVersion, confirmedSnapshot: snapshot, restorationVersion: previous?.restorationVersion,
           localVersion: version, confirmedLocalVersion: version, updatedAt: Date.now(), generationRecoveryReadOnly: previous?.generationRecoveryReadOnly };
         drafts.put(draft);
         return draft;
@@ -328,6 +351,7 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
         if (draft.recovery || !pending || pending.requestId !== sent.requestId) return draft;
         draft.confirmedLocalVersion = sent.localVersion;
         draft.serverVersion = ack.version;
+        draft.confirmedSnapshot = sent.snapshot;
         drafts.put(draft);
         operations.delete(sent.id);
         if (draft.localVersion > sent.localVersion) operations.put(operation(draft));

@@ -67,7 +67,8 @@ function initializeTables(db: Database.Database) {
       id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_workflows_folder ON workflows(folder_id, deleted_at);`);
-    db.exec(`CREATE TABLE IF NOT EXISTS canvas_save_receipts (
+    db.exec(`CREATE TABLE IF NOT EXISTS canvas_deleted_nodes (canvas_id TEXT NOT NULL, node_id TEXT NOT NULL, PRIMARY KEY(canvas_id,node_id));
+    CREATE TABLE IF NOT EXISTS canvas_save_receipts (
       canvas_id TEXT NOT NULL,
       request_id TEXT NOT NULL,
       digest TEXT NOT NULL,

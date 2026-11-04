@@ -1,7 +1,7 @@
-import { isCompatibleCanvasConnection } from '@/lib/canvas/connections';
+import { isCompatibleCanvasConnection } from './connections';
 import type { Edge } from '@xyflow/react';
-import type { CanvasNode } from '@/types';
-import { NodeType } from '@/types';
+import type { CanvasNode } from '../../types';
+import { NodeType } from '../../types';
 
 /** Top-level selected roots carry their descendants; never reparent a subtree twice. */
 export function selectedRoots(nodes: CanvasNode[], ids: string[]): CanvasNode[] {

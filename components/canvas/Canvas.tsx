@@ -26,6 +26,7 @@ import { canvasAutosave, useCanvasStore } from "@/store/useCanvasStore";
 import { isValidCanvasConnection } from "@/lib/canvas/connections";
 import { canvasRenderNodes } from "@/lib/canvas/render-nodes";
 import { NodeType } from "@/types";
+import { AgentSidebar } from "./AgentSidebar";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { useCanvasInteractions } from "@/hooks/useCanvasInteractions";
@@ -352,6 +353,7 @@ function CanvasInner() {
 
       {/* 侧边栏 */}
       <Sidebar />
+      <AgentSidebar />
 
       {/* 顶部栏（项目名称 + 工具栏） */}
       <TopBar />

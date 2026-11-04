@@ -84,6 +84,9 @@ export function saveWorkflow(operation: SaveOperation): SaveAcknowledgement {
     const now = Date.now();
     let history = snapshot.history;
     const previous = existing ? JSON.parse(existing.data) : undefined;
+    const present = new Set(snapshot.nodes.map(node => node.id));
+    const deletedNode = db.prepare('INSERT OR IGNORE INTO canvas_deleted_nodes VALUES (?,?)');
+    for (const node of previous?.nodes ?? []) if (!present.has(node.id)) deletedNode.run(id, node.id);
     // Older writers still use version checks, but cannot silently discard the operation log.
     if (!history && previous?.history) {
       let state = { ...previous, projectName: existing!.name, canvasSession: 0 };
