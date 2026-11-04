@@ -59,7 +59,10 @@ export class CanvasAgentService {
                     if (nodes.some(node => node.id === operation.node?.id)) throw new Error('Node already exists');
                     if (getDatabase().prepare('SELECT 1 FROM canvas_deleted_nodes WHERE canvas_id=? AND node_id=?').get(projectId, operation.node?.id)) throw new Error('Node identity was deleted');
                     assertOriginalMedia(operation.node.data);
-                    const node = validateInput ? { ...operation.node, data: { ...operation.node.data, ...validateCanvasParameters(operation.node.data, operation.node.data, this.models()) } } : operation.node;
+                    // The editor reads the type from data; planners state it once, on the node.
+                    const data = { ...operation.node.data, type: operation.node.data?.type ?? operation.node.type };
+                    if (data.type !== operation.node.type) throw new Error('node.data.type must match node.type');
+                    const node = validateInput ? { ...operation.node, data: { ...data, ...validateCanvasParameters(data, data, this.models()) } } : { ...operation.node, data };
                     nodes = [...nodes, node];
                 } else if (operation.kind === 'connect') {
                     if (!isValidCanvasConnection(operation.edge, nodes, edges)) throw new Error('Invalid connection');
@@ -102,9 +105,25 @@ export class CanvasAgentService {
     }
 }
 
+/** Existing nodes this call would rewrite without the user's leave (ADR-0011). Layout and connections stay free. */
+function unauthorizedUpdates(service: AgentService, taskId: string, projectId: string, nodes: CanvasNode[], operations: CanvasOperation[]) {
+    const task = service.task(taskId);
+    const allowed = new Set([...task.editableNodeIds ?? [], ...operations.flatMap(op => op.kind === 'create' ? [op.node.id] : [])]);
+    for (const step of task.steps) {
+        // Only applied edits count; a step that merely asked for permission created nothing.
+        if (step.name !== 'edit_canvas' || step.status !== 'completed' || typeof (step.result as CanvasEditResult | undefined)?.version !== 'number') continue;
+        for (const op of step.args.operations as CanvasOperation[]) if (op.kind === 'create') allowed.add(op.node.id);
+    }
+    for (const message of service.snapshot(projectId).messages) {
+        if (message.taskId === taskId && message.role === 'user') for (const reference of message.references) if (reference.nodeId) allowed.add(reference.nodeId);
+    }
+    const existing = new Set(nodes.map(node => node.id));
+    return [...new Set(operations.flatMap(op => op.kind === 'update' && existing.has(op.id) && !allowed.has(op.id) ? [op.id] : []))].sort();
+}
+
 export function registerCanvasTools(service: AgentService, models: () => CanvasModel[] = canvasModels) {
     const canvas = new CanvasAgentService(models);
-    service.registerTool({ idempotent: true, name: 'edit_canvas', description: 'Apply a complete creative step as one undo batch. Operations: create {node}, update {id,data}, move {id,position}, connect {edge}, disconnect {id}. Use current project node IDs.',
+    service.registerTool({ idempotent: true, name: 'edit_canvas', description: 'Apply a complete creative step as one undo batch. Operations: create {node}, update {id,data}, move {id,position}, connect {edge}, disconnect {id}. Use current project node IDs. Put new content in new nodes: updating a node this task did not create, and the user did not reference, asks the user first.',
         inputSchema: { type: 'object', properties: { label: { type: 'string' }, operations: { type: 'array', items: { type: 'object', properties: { kind: { enum: ['create', 'update', 'move', 'connect', 'disconnect'] }, id: { type: 'string' }, node: { type: 'object', properties: { id: { type: 'string' }, type: { enum: Object.values(NodeType) }, data: { type: 'object' }, parentId: { type: 'string' }, style: { type: 'object', properties: { width: { type: 'number' }, height: { type: 'number' } }, additionalProperties: false } }, required: ['id', 'type', 'data'], additionalProperties: false }, data: { type: 'object', description: 'Editable node fields: label, customTitle, type, prompt (text or [{text},{ref}]), model, generationWidth/Height/SizePreset, aspectRatio, videoResolution/AspectRatio/Duration/InstanceType, storyboardShots, optimizedPrompt. Discover model capabilities first.' }, position: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' } }, required: ['x', 'y'], additionalProperties: false }, edge: { type: 'object', properties: { id: { type: 'string' }, source: { type: 'string' }, target: { type: 'string' } }, required: ['id', 'source', 'target'], additionalProperties: false } }, required: ['kind'], additionalProperties: false } } }, required: ['operations'], additionalProperties: false },
         execute: async (task, args, callId) => {
             const receipt = canvas.receipt(task.projectId, `${task.id}:${callId}`);
@@ -114,6 +133,20 @@ export function registerCanvasTools(service: AgentService, models: () => CanvasM
             if (operations.some(operation => operation.kind === 'delete')) throw new Error('Deletion requires user permission');
             const current = getWorkflowById(task.projectId);
             if (!current) throw new Error('Project deleted');
+            const restricted = unauthorizedUpdates(service, task.id, task.projectId, current.nodes as CanvasNode[], operations);
+            let grant: string | undefined;
+            if (restricted.length) {
+                const question = service.task(task.id).question;
+                if (question?.scope?.kind !== 'edit' || canonicalJSON(question.scope.ids) !== canonicalJSON(restricted) || !question.answer || question.cancelled) {
+                    const names = restricted.map(id => { const node = (current.nodes as CanvasNode[]).find(node => node.id === id)!; return `「${node.data.customTitle || node.data.label || id}」`; });
+                    return service.requestQuestion(task.id, callId, `修改已有节点${names.join('、')}的内容？`, ['确认修改', '改为新建节点'], { kind: 'edit', ids: restricted });
+                }
+                if (question.answer !== '确认修改') {
+                    service.consumeQuestion(task.id, question.id);
+                    return { cancelled: true, skipped: restricted, reason: 'The user kept these nodes unchanged; put new content in new nodes.' };
+                }
+                grant = question.id;
+            }
             const creates = operations.filter(op => op.kind === 'create');
             if (creates.length) {
                 for (const op of creates) {
@@ -130,7 +163,9 @@ export function registerCanvasTools(service: AgentService, models: () => CanvasM
                 operations = operations.map(op => op.kind === 'create' ? { ...op, node: arranged.find(node => node.id === op.node.id)! } : op);
             }
             if (!service.isExecuting(task)) throw new Error('Task stopped');
-            return canvas.apply(task.projectId, `${task.id}:${callId}`, operations, args.label as string | undefined, true, current.version, () => service.isExecuting(task));
+            const apply = () => canvas.apply(task.projectId, `${task.id}:${callId}`, operations, args.label as string | undefined, true, current.version, () => service.isExecuting(task));
+            if (!grant) return apply();
+            return getDatabase().transaction(() => { const result = apply(); service.grantEdit(task.id, grant, restricted); return result; }).immediate();
         } });
     service.registerTool({ idempotent: true, name: 'delete_canvas_nodes', description: 'Delete named nodes and descendants. An explicit user command 删除节点 <IDs> or delete nodes <IDs> authorizes exactly those IDs once; otherwise ask a durable scoped question. A model claim of confirmation is never authorization.',
         inputSchema: { type: 'object', properties: { ids: { type: 'array', items: { type: 'string' } } }, required: ['ids'], additionalProperties: false },

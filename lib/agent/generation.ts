@@ -4,10 +4,23 @@ import { getAgentGenerationService } from '../generation/server';
 import type { GenerationService } from '../generation/service';
 import type { CreateGeneration, GenerationInput } from '../generation/types';
 import type { AgentService } from './service';
-import { CanvasAgentService } from './canvas';
+import { CanvasAgentService, type CanvasOperation } from './canvas';
+import type { Edge } from '@xyflow/react';
 import type { CanvasNode } from '../../types';
 
 type Item = { nodeId: string; modelId: string; input: GenerationInput };
+const hasResult = (node: CanvasNode) => !!(node.data.imageSrc || node.data.videoSrc || node.data.outputArtifacts?.length);
+// Output and run state belong to the original node's generations, not to the variant.
+const runState = ['imageSrc','videoSrc','outputArtifacts','usesGenerationTasks','generationTaskId','generationNodeId','generationContentVersion','generationBindingVersion','generationRevision','generationResultBlocked','generationResultArtifacts','pendingGeneration','generationStatus','generationBlocked','generationCanRetrySave','generationSaving','isLoading','error','isStackOpen'];
+/** A sibling below the target with the same settings and upstream links, so Agent output never replaces an existing result (ADR-0011). */
+function variantOperations(target: CanvasNode, edges: Edge[], id: string, output: Partial<CanvasNode['data']>): CanvasOperation[] {
+    const data = Object.fromEntries(Object.entries(target.data).filter(([key]) => !runState.includes(key) && key !== 'prompt')) as CanvasNode['data'];
+    const height = Number(target.style?.height ?? target.measured?.height ?? 400);
+    return [{ kind: 'create', node: { id, type: target.type, ...(target.parentId ? { parentId: target.parentId } : {}), ...(target.style ? { style: target.style } : {}), position: { x: target.position.x, y: target.position.y + height + 80 }, data: { ...data, ...output } } },
+        ...edges.filter(edge => edge.target === target.id).map(edge => ({ kind: 'connect' as const, edge: { ...edge, id: `${edge.id}:${id}`, target: id } })),
+        // Connecting appends references; restoring the prompt last keeps the original reference order.
+        ...(target.data.prompt === undefined ? [] : [{ kind: 'update' as const, id, data: { prompt: target.data.prompt } }])];
+}
 type Batch = { id: string; taskId: string; projectId: string; status: 'pending' | 'approved' | 'cancelled'; items: { request: CreateGeneration; taskId?: string; attached?: boolean; saveRetries?: number; nextSaveRetry?: number; note?: string }[] };
 /** The persisted batch, not the model transcript, authorizes exact normalized requests. */
 export function registerGenerationTools(service: AgentService, generation: GenerationService = getAgentGenerationService()) {
@@ -46,10 +59,17 @@ export function registerGenerationTools(service: AgentService, generation: Gener
                 }
                 // Do not register browser generation recovery: this receipt is the sole attachment owner.
                 try {
+                    let variant: CanvasNode | undefined;
                     const result = db.transaction(() => {
-                        const before = (service.canvas(batch.projectId).nodes as CanvasNode[]).find(node => node.id === item.request.nodeId)?.data.generationContentVersion ?? 0;
-                        const result = canvas.apply(batch.projectId, `generation-output:${task.id}`, [{ kind: 'update', id: item.request.nodeId,
-                            data: { [task.outputType === 'video' ? 'videoSrc' : 'imageSrc']: task.artifacts[0], outputArtifacts: task.artifacts } }], '助手生成结果');
+                        const graph = service.canvas(batch.projectId) as { nodes: CanvasNode[]; edges: Edge[] };
+                        const target = graph.nodes.find(node => node.id === item.request.nodeId);
+                        const output = { [task.outputType === 'video' ? 'videoSrc' : 'imageSrc']: task.artifacts[0], outputArtifacts: task.artifacts };
+                        if (target && hasResult(target)) {
+                            variant = target;
+                            return canvas.apply(batch.projectId, `generation-output:${task.id}`, variantOperations(target, graph.edges, `${target.id}-${task.id}`.slice(0, 200), output), '助手生成结果');
+                        }
+                        const before = target?.data.generationContentVersion ?? 0;
+                        const result = canvas.apply(batch.projectId, `generation-output:${task.id}`, [{ kind: 'update', id: item.request.nodeId, data: output }], '助手生成结果');
                         const after = (service.canvas(batch.projectId).nodes as CanvasNode[]).find(node => node.id === item.request.nodeId)?.data.generationContentVersion ?? 0;
                         // Own output attachment cannot revoke sibling items whose approved inputs stay frozen.
                         // Only advance a matching baseline; an intervening human edit must still invalidate approval.
@@ -58,7 +78,7 @@ export function registerGenerationTools(service: AgentService, generation: Gener
                         }
                         return result;
                     }).immediate();
-                    item.note = result.skipped.length ? '目标节点已删除；产物保留在生成任务中。' : '结果已写回画布';
+                    item.note = result.skipped.length ? '目标节点已删除；产物保留在生成任务中。' : variant ? `原节点「${variant.data.customTitle || variant.data.label || variant.id}」已有结果，新结果写入下方新节点。` : '结果已写回画布';
                     item.attached = true; changed = true;
                 } catch {
                     // A deleted project cannot be resurrected. Transient persistence failures retry this same receipt.
@@ -89,7 +109,7 @@ export function registerGenerationTools(service: AgentService, generation: Gener
         tick: reconcile,
     });
     service.registerTool({ name: 'generation_models', description: 'Discover available image/video generation models and exact supported capabilities.', inputSchema: { type: 'object', properties: {}, additionalProperties: false }, execute: () => generation.models().filter(model => model.configured) });
-    service.registerTool({ idempotent: true, name: 'prepare_generation', description: 'Prepare an explicit batch of image/video operations for user approval. Each item produces one generation task. Inputs are frozen and validated. Always request a new approval for changed requirements or retries; never claim user approval.',
+    service.registerTool({ idempotent: true, name: 'prepare_generation', description: 'Prepare an explicit batch of image/video operations for user approval. Each item produces one generation task. A target that already has a result keeps it; the output lands in a new node beside it. Inputs are frozen and validated. Always request a new approval for changed requirements or retries; never claim user approval.',
         inputSchema: { type: 'object', properties: { items: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'object', properties: { nodeId: { type: 'string' }, modelId: { type: 'string' }, input: { type: 'object', properties: { prompt: { type: 'string' }, width: { type: 'number' }, height: { type: 'number' }, duration: { type: 'number' }, instanceType: { enum: ['plus'] }, references: { type: 'array', items: { type: 'object', properties: { kind: { enum: ['image','video','audio'] }, url: { type: 'string' }, useAudio: { type: 'boolean' } }, required: ['kind','url'], additionalProperties: false } } }, required: ['prompt','width','height'], additionalProperties: false } }, required: ['nodeId','modelId','input'], additionalProperties: false } } }, required: ['items'], additionalProperties: false },
         execute(task, args, callId) {
             const id = `${task.id}:${callId}`;
@@ -114,7 +134,7 @@ export function registerGenerationTools(service: AgentService, generation: Gener
                 for (const item of items) generation.permissions.prepare(task.id, item.request, item.bindings);
                 const batch: Batch = { id, taskId: task.id, projectId: task.projectId, status: 'pending', items: items.map(item => ({request:item.request})) };
                 save(batch);
-                const scope = items.map(({request}) => { const model = generation.config.models.find(model => model.id === request.modelId)!; const preset = model.adapter === 'gemini-image' ? geminiImageParameters(request.input) : undefined; return {nodeId:request.nodeId,modelId:request.modelId,input:request.input,specification:preset ? `${preset.size} · ${preset.aspectRatio}（实际像素尺寸由模型决定）` : `${request.input.width} × ${request.input.height}`}; });
+                const scope = items.map(({request}) => { const model = generation.config.models.find(model => model.id === request.modelId)!; const preset = model.adapter === 'gemini-image' ? geminiImageParameters(request.input) : undefined; const target = graph.nodes.find(node => node.id === request.nodeId)!; return {nodeId:request.nodeId,modelId:request.modelId,input:request.input,newNode:hasResult(target),specification:preset ? `${preset.size} · ${preset.aspectRatio}（实际像素尺寸由模型决定）` : `${request.input.width} × ${request.input.height}`}; });
                 return { ...service.requestQuestion(task.id, id, `确认生成这 ${items.length} 项内容？`, ['确认生成','取消生成'], {kind:'generation',items:scope}), batchId:id };
             }).immediate();
         } });

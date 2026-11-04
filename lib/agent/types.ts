@@ -19,7 +19,7 @@ export interface AgentQuestion {
     id: string;
     text: string;
     options: string[];
-    scope?: { kind: 'delete'; ids: string[] } | { kind: 'generation'; items: { nodeId: string; modelId: string; specification?: string; input: import('../generation/types').GenerationInput }[] };
+    scope?: { kind: 'delete' | 'edit'; ids: string[] } | { kind: 'generation'; items: { nodeId: string; modelId: string; specification?: string; newNode?: boolean; input: import('../generation/types').GenerationInput }[] };
     answer?: string;
     cancelled?: boolean;
 }
@@ -37,6 +37,8 @@ export interface AgentTask {
     status: AgentStatus;
     question?: AgentQuestion;
     awaitingGeneration?: boolean;
+    /** Existing nodes the user let this task rewrite; never carried into another task. */
+    editableNodeIds?: string[];
     workerId?: string;
     runId?: string;
     steps: AgentStep[];

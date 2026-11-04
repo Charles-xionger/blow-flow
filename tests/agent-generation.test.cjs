@@ -83,3 +83,17 @@ test('late Agent saves retain artifacts without replacing the latest generation 
   }finally{oldWorker.close();newWorker.close();service.stop(id,'stop');}
  }
 });
+test('Agent generation into a node that already has a result lands in a new node and keeps the original',async()=>{
+ const {CanvasAgentService}=require('../lib/agent/canvas');const {service,generation,task}=setup('keep-original');
+ new CanvasAgentService().apply('keep-original','existing',[{kind:'create',node:{id:'up',type:'text',position:{x:-500,y:0},data:{type:'text',label:'Up',prompt:'雨夜'}}},{kind:'connect',edge:{id:'up-image',source:'up',target:'image'}},{kind:'update',id:'image',data:{imageSrc:'https://assets.invalid/original.png',outputArtifacts:['https://assets.invalid/original.png']}}]);
+ await service.runNext(c=>c.tool('prepare','prepare_generation',{items}));const q=service.task(task.id).question;assert.equal(q.scope.items[0].newNode,true);
+ service.answer('keep-original',{requestId:'yes',questionId:q.id,text:'确认生成'});
+ const worker=new GenerationWorker(generation,{fetch:async(url)=>String(url).endsWith('/create')?Response.json({code:0,data:{taskId:'567'}}):Response.json({code:0,data:[{nodeId:'103',fileUrl:'https://fake.invalid/new.png'}]}),save:async()=>'https://assets.invalid/new.png'});
+ try{await worker.tick();await worker.tick();await service.runNext(async()=>{});
+  const {nodes,edges}=service.canvas('keep-original');const original=nodes.find(n=>n.id==='image');const created=nodes.find(n=>n.id!=='image'&&n.id!=='up');
+  assert.equal(original.data.imageSrc,'https://assets.invalid/original.png');
+  assert.equal(created.type,'textToImage');assert.equal(created.data.type,'textToImage');assert.equal(created.data.imageSrc,'https://assets.invalid/new.png');assert.deepEqual(created.data.prompt,original.data.prompt);
+  assert.ok(edges.some(e=>e.source==='up'&&e.target===created.id));assert.ok(edges.some(e=>e.source==='up'&&e.target==='image'));
+  assert.match(service.snapshot('keep-original').generations[0].items[0].note,/新节点/);
+ }finally{worker.close();service.stop('keep-original','stop');}
+});

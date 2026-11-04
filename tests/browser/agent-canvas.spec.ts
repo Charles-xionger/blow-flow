@@ -11,7 +11,7 @@ test('Agent edits update an open parameter console, undo across reload, and fini
   await page.getByRole('button', { name: '图像设置', exact: true }).click();
   await expect(page.getByLabel('生成宽度')).toHaveValue('1920');
   // Send through the public task API while keeping the console open.
-  await request.post(`/api/agent/${id}`, { data: { action: 'send', requestId: crypto.randomUUID(), modelId: 'browser-fixture', text: '测试画布编辑' } });
+  await request.post(`/api/agent/${id}`, { data: { action: 'send', requestId: crypto.randomUUID(), modelId: 'browser-fixture', text: '测试画布编辑', references: [{ nodeId: 'image', name: '图像' }] } });
   await expect(page.getByLabel('生成宽度')).toHaveValue('1024');
   await expect(page.getByLabel('生成高度')).toHaveValue('1024');
   await page.getByRole('button', { name: '图像设置', exact: true }).click();

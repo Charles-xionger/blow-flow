@@ -154,6 +154,14 @@ export class AgentService {
         if (task.question?.id === questionId) { task.question.cancelled = true; this.save(task); }
         }).immediate();
     }
+    grantEdit(taskId: string, questionId: string, ids: string[]) {
+        this.db.transaction(() => {
+        const task = this.task(taskId);
+        if (task.question?.id === questionId) task.question.cancelled = true;
+        task.editableNodeIds = [...new Set([...(task.editableNodeIds ?? []), ...ids])];
+        this.save(task);
+        }).immediate();
+    }
     requestQuestion(taskId: string, id: string, text: string, options: string[], scope?: import('./types').AgentQuestion['scope']) {
         return this.db.transaction(() => {
         const task = this.task(taskId);
@@ -203,9 +211,11 @@ export class AgentService {
             }
             finish('completed', result);
             return result;
-        } catch {
-            finish('failed', {error:'Tool failed; inspect parameters and project state'});
-            throw new Error('Tool failed; inspect parameters and project state');
+        } catch (error) {
+            // The planner needs the cause to correct its call; a bare failure pushed it into rewriting existing nodes.
+            const message = `Tool failed: ${redactedFailure(error)}. Fix the parameters and retry; do not repurpose existing nodes.`;
+            finish('failed', {error: message});
+            throw new Error(message);
         }
     }
     async runNext(runtime: AgentRuntime): Promise<boolean> {
