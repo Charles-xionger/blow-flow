@@ -1,4 +1,4 @@
-import { NodeType } from "@/types";
+import { NodeType } from "../../types";
 
 type ValueType = "text" | "image" | "video" | "character";
 interface NodeDefinition {

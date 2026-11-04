@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports -- Node performance integration tests. */
 require('../scripts/register-typescript.cjs');
 require('fake-indexeddb/auto');
 const { test } = require('node:test');
@@ -223,6 +224,7 @@ test('adding a node automatically persists the canvas to SQLite without manual s
   const { NodeType } = load('types/index.ts');
   const previousFetch = global.fetch;
   global.fetch = async (url, options) => {
+    if (options?.method !== 'PUT') return Response.json({ success: true, data: db.getWorkflowById(decodeURIComponent(url.split('/').at(-1))) });
     const data = JSON.parse(options.body);
     return Response.json({ success: true, data: db.saveWorkflow(data) });
   };

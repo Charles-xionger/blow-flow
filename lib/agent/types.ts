@@ -17,6 +17,7 @@ export interface AgentQuestion {
     id: string;
     text: string;
     options: string[];
+    scope?: { kind: 'delete'; ids: string[] };
     answer?: string;
     cancelled?: boolean;
 }
@@ -51,6 +52,7 @@ export interface AgentRuntimeContext {
 }
 export type AgentRuntime = (context: AgentRuntimeContext) => Promise<void>;
 export interface AgentTool {
+    idempotent?: boolean;
     name: string;
     description: string;
     inputSchema: Record<string, unknown>;
