@@ -35,6 +35,8 @@ export interface AgentTask {
     status: AgentStatus;
     question?: AgentQuestion;
     awaitingGeneration?: boolean;
+    workerId?: string;
+    runId?: string;
     steps: AgentStep[];
     error?: string;
     createdAt: number;

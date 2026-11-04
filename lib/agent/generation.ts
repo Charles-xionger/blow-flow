@@ -8,7 +8,7 @@ import { CanvasAgentService } from './canvas';
 import type { CanvasNode } from '../../types';
 
 type Item = { nodeId: string; modelId: string; input: GenerationInput };
-type Batch = { id: string; taskId: string; projectId: string; status: 'pending' | 'approved' | 'cancelled'; items: { request: CreateGeneration; taskId?: string; attached?: boolean; note?: string }[] };
+type Batch = { id: string; taskId: string; projectId: string; status: 'pending' | 'approved' | 'cancelled'; items: { request: CreateGeneration; taskId?: string; attached?: boolean; saveRetries?: number; nextSaveRetry?: number; note?: string }[] };
 /** The persisted batch, not the model transcript, authorizes exact normalized requests. */
 export function registerGenerationTools(service: AgentService, generation: GenerationService = getAgentGenerationService()) {
     const db = generation.db;
@@ -20,7 +20,7 @@ export function registerGenerationTools(service: AgentService, generation: Gener
     service.generationPending = taskId => batches(taskId).some(batch => batch.items.some(item => {
         if (!item.taskId) return false;
         const task = generation.get(item.taskId);
-        return ['queued','submitting','running'].includes(task.status) || task.status === 'succeeded' && ['pending','saving'].includes(task.saveStatus);
+        return !!item.nextSaveRetry || ['queued','submitting','running'].includes(task.status) || task.status === 'succeeded' && ['pending','saving'].includes(task.saveStatus);
     }));
     function revoke(taskId: string) {
         for (const batch of batches(taskId)) {
@@ -35,6 +35,11 @@ export function registerGenerationTools(service: AgentService, generation: Gener
             for (const item of batch.items) {
                 if (!item.taskId || item.attached) continue;
                 const task = generation.get(item.taskId);
+                if (task.status === 'succeeded' && task.saveStatus === 'failed' && (item.saveRetries ?? 0) < 3) {
+                    if (!item.nextSaveRetry) { item.nextSaveRetry = Date.now() + 5000 * 2 ** (item.saveRetries ?? 0); changed = true; }
+                    else if (item.nextSaveRetry <= Date.now()) { generation.retrySave(task.id); item.saveRetries = (item.saveRetries ?? 0) + 1; delete item.nextSaveRetry; changed = true; }
+                }
+                if (task.saveStatus === 'saved' && item.nextSaveRetry) { delete item.nextSaveRetry; changed = true; }
                 if (task.saveStatus !== 'saved' || !task.artifacts.length) continue;
                 // Do not register browser generation recovery: this receipt is the sole attachment owner.
                 try {
@@ -104,6 +109,7 @@ export function registerGenerationTools(service: AgentService, generation: Gener
                 return { request, bindings: graph.nodes.filter(node => related.has(node.id)).map(node => ({id:node.id,version:node.data.generationContentVersion ?? 0})) };
             });
             return db.transaction(() => {
+                if (!service.isExecuting(task)) throw new Error('Task ownership changed');
                 revoke(task.id);
                 for (const item of items) db.prepare('INSERT INTO generation_permissions VALUES(?,?,0,?,?)').run(item.request.requestId, task.id, JSON.stringify(item.bindings), JSON.stringify(item.request));
                 const batch: Batch = { id, taskId: task.id, projectId: task.projectId, status: 'pending', items: items.map(item => ({request:item.request})) };
@@ -122,7 +128,7 @@ export function registerGenerationTools(service: AgentService, generation: Gener
                 const items = batch.items.map(item => ({nodeId:item.request.nodeId,note:item.note,task:item.taskId ? generation.get(item.taskId) : undefined}));
                 if (args.retrySave) for (const item of items) if (item.task?.status === 'succeeded' && item.task.saveStatus === 'failed') generation.retrySave(item.task.id);
                 if (!args.wait || batch.status !== 'approved' || items.every(item => item.task && (['failed','uncertain','timed_out','cancelled'].includes(item.task.status) || item.task.status === 'succeeded' && ['saved','failed'].includes(item.task.saveStatus)))) return {batchId:batch.id,status:batch.status,items};
-                if (service.task(task.id).status !== 'running') return {stopped:true,items};
+                if (!service.isExecuting(task)) return {stopped:true,items};
                 await new Promise(resolve => setTimeout(resolve,250));
             }
         } });

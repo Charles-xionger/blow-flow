@@ -18,6 +18,16 @@ await service.runNext(createPiRuntime(service,{apiKey:'test-only',streamFn:(mode
   const message:AssistantMessage={role:'assistant',api:model.api,provider:model.provider,model:model.id,content:turn===1?[{type:'toolCall',id:'read-1',name:'read_canvas',arguments:{}}]:[{type:'text',text:'主角是阿青。'}],stopReason:turn===1?'toolUse':'stop',timestamp:Date.now(),usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}}};
   stream.push({type:'done',reason:turn===1?'toolUse':'stop',message});return stream;
 }}));
-assert.equal(service.task(task.id).status,'completed');assert.equal(service.task(task.id).steps[0].status,'completed');assert.equal(service.snapshot('project').messages.at(-1)?.text,'主角是阿青。');db.close();
+assert.equal(service.task(task.id).status,'completed');assert.equal(service.task(task.id).steps[0].status,'completed');assert.equal(service.snapshot('project').messages.at(-1)?.text,'主角是阿青。');const failed = service.send('project',{requestId:'failure',text:'再次创作',modelId:'gemini-flash'});
+await service.runNext(createPiRuntime(service,{apiKey:'test-only',streamFn:()=>{throw new Error('controlled provider failure');}}));
+assert.equal(service.task(failed.id).status,'failed');
+const streamFailure=service.send('project',{requestId:'stream-failure',text:'流中断',modelId:'gemini-flash'});
+await service.runNext(createPiRuntime(service,{apiKey:'test-only',streamFn:model=>{
+ const stream=createAssistantMessageEventStream();
+ stream.push({type:'error',reason:'error',error:{role:'assistant',api:model.api,provider:model.provider,model:model.id,content:[],stopReason:'error',errorMessage:'controlled stream error',timestamp:Date.now(),usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}}}});
+ return stream;
+}}));
+assert.equal(service.task(streamFailure.id).status,'failed');
+db.close();
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

@@ -76,6 +76,18 @@ export class GenerationService {
       this.db.prepare("UPDATE generation_tasks SET status='cancelled', lease_token=NULL, lease_until=0, updated_at=? WHERE request_id=? AND (status='queued' OR (status='submitting' AND submission_started=0))").run(Date.now(), id);
     }
   }
+  /** Restart recovery pauses unpaid work without revoking its exact approval. */
+  submissionPaused(task: TaskRecord): boolean {
+    const permission = this.db.prepare('SELECT owner_task_id FROM generation_permissions WHERE request_id=?').get(task.request_id) as {owner_task_id:string}|undefined;
+    if (!permission) return false;
+    const owner = this.db.prepare('SELECT data FROM agent_tasks WHERE id=?').get(permission.owner_task_id) as {data:string}|undefined;
+    if (!owner) return false;
+    const state = JSON.parse(owner.data);
+    if (state.status === 'interrupted') return true;
+    if (!state.workerId || ['stopped','failed','completed'].includes(state.status)) return false;
+    const lease = this.db.prepare('SELECT lease_until FROM agent_workers WHERE id=?').get(state.workerId) as {lease_until:number}|undefined;
+    return !lease || lease.lease_until <= Date.now();
+  }
   /** Runs in the same immediate transaction as recording the paid boundary. */
   authorizeSubmission(task: TaskRecord): boolean {
     const permission = this.db.prepare('SELECT * FROM generation_permissions WHERE request_id=?').get(task.request_id) as { approved: number; owner_task_id: string; bindings: string; request_json: string } | undefined;

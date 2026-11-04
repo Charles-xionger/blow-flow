@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports -- Node CommonJS test fixture. */
 require('../scripts/register-typescript.cjs');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
@@ -13,4 +14,12 @@ test('reopening the database preserves a pending question and idempotent request
 });
 test('supplements during a running task are durable and projects execute independently',async()=>{
  const service=setup();const a=service.send('a',{requestId:'1',text:'开始',modelId:'gemini'});let finish;const wait=new Promise(r=>finish=r);const running=service.runNext(async()=>wait);service.send('a',{requestId:'2',text:'补充要求',modelId:'gemini'});service.send('b',{requestId:'1',text:'另一项目',modelId:'gemini'});await service.runNext(async c=>c.reply('独立完成'));assert.equal(service.snapshot('b').tasks[0].status,'completed');finish();await running;assert.equal(service.task(a.id).status,'queued');await service.runNext(async c=>{assert.equal(c.messages.at(-1).text,'补充要求');c.reply('调整完成');});assert.equal(service.task(a.id).status,'completed');assert.equal(service.snapshot('a').tasks.length,1);
+});
+test('new requirements replace a pending question instead of leaving the task waiting forever',async()=>{
+ const service=setup();const task=service.send('a',{requestId:'send',text:'故事',modelId:'gemini'});await service.runNext(c=>c.tool('question','ask_question',{text:'面向谁？'}));service.send('a',{requestId:'change',text:'不用故事了，整理画布',modelId:'gemini'});await service.runNext(async c=>c.reply('按新要求整理'));assert.equal(service.task(task.id).status,'completed');assert.equal(service.task(task.id).question.cancelled,true);assert.equal(service.snapshot('a').messages.at(-1).text,'按新要求整理');
+});
+test('the public tool boundary rejects malformed and unknown reference parameters',async()=>{
+ const service=setup();require('../lib/agent/mcp').registerReadTools(service);const task=service.send('a',{requestId:'send',text:'读取参考',modelId:'gemini'});await service.runNext(async c=>{
+ await assert.rejects(c.tool('bad','read_reference',{nodeId:123}));await assert.rejects(c.tool('unknown','read_canvas',{projectId:'b'}));c.reply('无效参数没有执行');
+ });assert.equal(service.task(task.id).status,'completed');assert.equal(service.task(task.id).steps[1].status,'failed');
 });

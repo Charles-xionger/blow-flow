@@ -35,10 +35,11 @@ export class CanvasAgentService {
         const row = getDatabase().prepare('SELECT result FROM agent_canvas_receipts WHERE project_id=? AND identity=?').get(projectId, identity) as { result: string } | undefined;
         return row ? JSON.parse(row.result) : undefined;
     }
-    apply(projectId: string, identity: string, operations: CanvasOperation[], label = '助手编辑', validateInput = false, expectedVersion?: number): CanvasEditResult {
+    apply(projectId: string, identity: string, operations: CanvasOperation[], label = '助手编辑', validateInput = false, expectedVersion?: number, authorize?: () => boolean): CanvasEditResult {
         if (!identity || !Array.isArray(operations) || operations.length > 100 || typeof label !== 'string') throw new Error('Invalid canvas step');
         const digest = createHash('sha256').update(canonicalJSON({ operations, label })).digest('hex');
         return getDatabase().transaction(() => {
+            if (authorize && !authorize()) throw new Error('Task ownership changed');
             const current = getWorkflowById(projectId);
             if (!current) throw new Error('Project not found or deleted');
             if (expectedVersion !== undefined && current.version !== expectedVersion) throw new Error('Canvas changed during layout; retry with current content');
@@ -128,8 +129,8 @@ export function registerCanvasTools(service: AgentService, models: () => CanvasM
                 const arranged = await layoutCanvas(nodes, edges, [...addedIds], true, nearId);
                 operations = operations.map(op => op.kind === 'create' ? { ...op, node: arranged.find(node => node.id === op.node.id)! } : op);
             }
-            if (service.task(task.id).status !== 'running') throw new Error('Task stopped');
-            return canvas.apply(task.projectId, `${task.id}:${callId}`, operations, args.label as string | undefined, true, current.version);
+            if (!service.isExecuting(task)) throw new Error('Task stopped');
+            return canvas.apply(task.projectId, `${task.id}:${callId}`, operations, args.label as string | undefined, true, current.version, () => service.isExecuting(task));
         } });
     service.registerTool({ idempotent: true, name: 'delete_canvas_nodes', description: 'Delete named nodes and descendants. An explicit user command 删除节点 <IDs> or delete nodes <IDs> authorizes exactly those IDs once; otherwise ask a durable scoped question. A model claim of confirmation is never authorization.',
         inputSchema: { type: 'object', properties: { ids: { type: 'array', items: { type: 'string' } } }, required: ['ids'], additionalProperties: false },
@@ -143,7 +144,7 @@ export function registerCanvasTools(service: AgentService, models: () => CanvasM
             const named = explicit ? (explicit[1] ?? explicit[2]).split(/[、，,\s]+/).filter(Boolean).sort() : [];
             if (userMessage && canonicalJSON(named) === canonicalJSON(ids) && !getDatabase().prepare('SELECT 1 FROM agent_delete_permissions WHERE message_id=?').get(userMessage.id)) {
                 return getDatabase().transaction(() => {
-                    const result = canvas.apply(task.projectId, `${task.id}:${callId}`, ids.map(id => ({ kind: 'delete', id })), '助手删除节点');
+                    const result = canvas.apply(task.projectId, `${task.id}:${callId}`, ids.map(id => ({ kind: 'delete', id })), '助手删除节点', false, undefined, () => service.isExecuting(task));
                     getDatabase().prepare('INSERT INTO agent_delete_permissions VALUES (?)').run(userMessage.id);
                     return result;
                 }).immediate();
@@ -152,7 +153,7 @@ export function registerCanvasTools(service: AgentService, models: () => CanvasM
             if (question?.scope?.kind === 'delete' && canonicalJSON(question.scope.ids) === canonicalJSON(ids) && question.answer && question.answer !== '确认删除') return { cancelled: true, skipped: ids };
             if (question?.scope?.kind === 'delete' && canonicalJSON(question.scope.ids) === canonicalJSON(ids) && question.answer === '确认删除' && !question.cancelled) {
                 return getDatabase().transaction(() => {
-                    const result = canvas.apply(task.projectId, `${task.id}:${callId}`, ids.map(id => ({ kind: 'delete', id })), '助手删除节点');
+                    const result = canvas.apply(task.projectId, `${task.id}:${callId}`, ids.map(id => ({ kind: 'delete', id })), '助手删除节点', false, undefined, () => service.isExecuting(task));
                     service.consumeQuestion(task.id, question.id);
                     return result;
                 }).immediate();
@@ -168,8 +169,8 @@ export function registerCanvasTools(service: AgentService, models: () => CanvasM
             const current = getWorkflowById(task.projectId);
             if (!current) throw new Error('Project deleted');
             const arranged = await layoutCanvas(current.nodes as CanvasNode[], current.edges, args.ids, false, undefined, args.direction as 'RIGHT' | 'DOWN' | undefined);
-            if (service.task(task.id).status !== 'running') throw new Error('Task stopped');
-            return canvas.apply(task.projectId, `${task.id}:${callId}`, arranged.flatMap((node, i) => node === current.nodes[i] ? [] : [{ kind: 'move' as const, id: node.id, position: node.position }]), '助手整理布局', false, current.version);
+            if (!service.isExecuting(task)) throw new Error('Task stopped');
+            return canvas.apply(task.projectId, `${task.id}:${callId}`, arranged.flatMap((node, i) => node === current.nodes[i] ? [] : [{ kind: 'move' as const, id: node.id, position: node.position }]), '助手整理布局', false, current.version, () => service.isExecuting(task));
         } });
     service.registerTool({ name: 'canvas_models', description: 'Discover configured generation models and their actual supported parameters. Editing parameters does not authorize generation.', inputSchema: { type: 'object', properties: {}, additionalProperties: false }, execute: () => models().filter(model => model.configured).map(model => { if (!model.legacy) return model; const { capabilities, ...legacy } = model; void capabilities; return { ...legacy, parameters: 'Existing editor presets (resolution, aspectRatio, duration); not available for Agent generation submission' }; }) });
     return canvas;

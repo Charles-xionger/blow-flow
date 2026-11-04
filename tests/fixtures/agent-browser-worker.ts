@@ -3,11 +3,14 @@ import { GenerationWorker } from '../../lib/generation/worker';
 import { getAgentService } from '../../lib/agent/server';
 import { registerCanvasTools } from '../../lib/agent/canvas';
 import { getGenerationService } from '../../lib/generation/server';
-const service=getAgentService();
+const service=getAgentService({leaseMs:1000});
 const generationWorker=new GenerationWorker(getGenerationService(),{fetch:async()=>{throw new Error('Browser fixture cannot call providers');},generateImage:async(_snapshot,_input,beforeSubmit)=>{beforeSubmit();return 'data:image/png;base64,AAAA';},save:async()=> 'http://127.0.0.1:3217/favicon.ico'});
 registerCanvasTools(service, () => getGenerationService().models().map(model => ({ ...model, configured: true })));
 async function main(){for(;;){const worked=await service.runNext(async c=>{
   const input=c.messages.filter(m=>m.taskId===c.task.id && m.role==='user').at(-1)!;
+  if(input.text==='测试服务重启' && !c.task.steps.some(step=>step.id==='restart-marker')) {
+    await c.tool('restart-marker','read_canvas',{});c.reply('进度已保存，等待测试重启');await new Promise(()=>{});return;
+  }
   if(input.text.includes('提问') && !c.task.question?.answer){await c.tool('question','ask_question',{text:'故事面向谁？',options:['儿童','成人']});return;}
   if(input.text.startsWith('测试生成方案') || input.text.startsWith('测试修改生成')) {
     const graph=service.canvas(c.task.projectId) as {nodes:{id:string}[]};

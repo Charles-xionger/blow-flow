@@ -11,6 +11,7 @@ export async function POST(request:NextRequest,context:Context){
   try {
     const {projectId}=await context.params;const body=await request.json();const service=getAgentService();
     if(typeof body.requestId!=='string')throw new Error('Request identity required');
+    if(body.action==='continue')return NextResponse.json(service.continue(projectId,body.requestId));
     if(body.action==='stop')return NextResponse.json(service.stop(projectId,body.requestId));
     if(body.action==='answer')return NextResponse.json(service.answer(projectId,body));
     if(body.action!=='send' || !publicAgentModels().some(m=>m.id===body.modelId && m.available))throw new Error('Model unavailable');
