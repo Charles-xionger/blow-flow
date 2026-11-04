@@ -54,7 +54,7 @@ const ImageToImageNode = (props: NodeProps<Node<NodeData>>) => {
     const inputImages = referenceImages(id, canvas);
     if (promptIsEmpty(prompt) || !inputImages.length) return;
 
-    updateNodeData(id, { isLoading: true, error: undefined });
+    const complete = useCanvasStore.getState().beginMediaOperation(id);
 
     try {
       const response = await fetch("/api/generate/image-to-image", {
@@ -75,7 +75,7 @@ const ImageToImageNode = (props: NodeProps<Node<NodeData>>) => {
       const result = await response.json();
 
       if (result.success && result.data) {
-        updateNodeData(id, {
+        complete({
           isLoading: false,
           imageSrc: result.data,
           inputImages: [inputImages[0]],
@@ -84,12 +84,12 @@ const ImageToImageNode = (props: NodeProps<Node<NodeData>>) => {
         throw new Error(result.error || "生成失败");
       }
     } catch (error) {
-      updateNodeData(id, {
+      complete({
         isLoading: false,
         error: error instanceof Error ? error.message : "生成失败",
       });
     }
-  }, [id, data.model, data.aspectRatio, data.resolution, data.promptOptimize, updateNodeData]);
+  }, [id, data.model, data.aspectRatio, data.resolution, data.promptOptimize]);
 
   const hasResult = !!data.imageSrc && !data.isLoading;
 

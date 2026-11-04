@@ -110,9 +110,9 @@ const ImageToVideoNode = (props: NodeProps<Node<NodeData>>) => {
     const [inputImage] = referenceImages(id, canvas);
     if (promptIsEmpty(prompt) || !inputImage) return;
 
+    const complete = useCanvasStore.getState().beginMediaOperation(id);
     try {
       await task.detach();
-      updateNodeData(id, { isLoading: true, error: undefined });
       const response = await fetch("/api/generate/image-to-video", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -131,7 +131,7 @@ const ImageToVideoNode = (props: NodeProps<Node<NodeData>>) => {
       const result = await response.json();
 
       if (result.success && result.data) {
-        updateNodeData(id, {
+        complete({
           isLoading: false,
           videoSrc: result.data,
           inputImages: [inputImage],
@@ -140,12 +140,12 @@ const ImageToVideoNode = (props: NodeProps<Node<NodeData>>) => {
         throw new Error(result.error || "生成失败");
       }
     } catch (error) {
-      updateNodeData(id, {
+      complete({
         isLoading: false,
         error: error instanceof Error ? error.message : "生成失败",
       });
     }
-  }, [id, data.model, data.duration, data.resolution, data.aspectRatio, data.promptOptimize, updateNodeData, task]);
+  }, [id, data.model, data.duration, data.resolution, data.aspectRatio, data.promptOptimize, task]);
 
   const modelOptions = [
     ...taskModels.map(m => ({ id: m.id, label: m.name + (m.configured ? '' : '（未配置）'), task: true })),

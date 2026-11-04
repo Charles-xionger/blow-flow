@@ -10,6 +10,7 @@ export function ImagePreview({ src, alt = "图片", onClose }: {
   onClose: () => void;
 }) {
   const [scale, setScale] = useState(1);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -72,8 +73,10 @@ export function ImagePreview({ src, alt = "图片", onClose }: {
         onClick={(e) => e.stopPropagation()}
       >
         {/* Full viewing deliberately loads the original material. */}
+        {failed && <p role="alert" className="p-6 text-sm text-white">原始素材已丢失或无法访问，节点的其他内容仍已保留。</p>}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
+          onError={() => setFailed(true)}
           src={src}
           alt={alt}
           className="w-full h-full object-contain transition-transform duration-200"

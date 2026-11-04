@@ -1,8 +1,10 @@
+import { assertOriginalMedia } from '@/lib/canvas/original-media';
+import { canonicalJSON } from '@/lib/canvas/save-protocol';
 import { assertCanvasGraph, descendants, groupGraphNodes, parentFirst, ungroupGraphNodes } from '@/lib/canvas/graph';
 import { createCanvasHistory, type CanvasHistory } from '@/lib/canvas/history';
 import { createCanvasAutosave, type SaveStatus } from "@/lib/canvas/autosave";
 import { CanvasStorageError } from "@/lib/canvas/storage-error";
-import { clearedGenerationAssociation, deleteNodeGeneration, generationAssociation } from "@/lib/generation/recovery";
+import { copiedGenerationData, deleteNodeGeneration, generationAssociation, restoreDeletedGeneration } from "@/lib/generation/recovery";
 import { isValidCanvasConnection } from "@/lib/canvas/connections";
 import { detachReferences, remapPromptReferences, syncReferences } from "@/lib/canvas/prompt";
 import { remapReferenceIds } from '@/lib/generation/video';
@@ -80,6 +82,8 @@ interface CanvasState {
   ) => string[];
   deleteElements: (nodeIds: string[], edgeIds?: string[]) => void;
   deleteNode: (nodeId: string) => void;
+  removeVideoReference: (nodeId: string, referenceId: string) => void;
+  beginMediaOperation: (nodeId: string) => (data: Partial<NodeData>) => boolean;
   updateNodeData: (nodeId: string, data: Partial<NodeData>) => void;
   duplicateNode: (nodeId: string) => void;
   deleteSelectedNodes: () => void;
@@ -111,12 +115,7 @@ interface CanvasState {
 }
 
 function withoutTaskAssociation(data: NodeData): NodeData {
-  return { ...data, ...clearedGenerationAssociation, isLoading: false, error: undefined };
-}
-
-function hasGeneration(node: CanvasNode): boolean {
-  return !!(node.data.generationTaskId || node.data.pendingGeneration || node.data.isLoading ||
-    (typeof localStorage !== 'undefined' && generationAssociation(node.id)));
+  return { ...data, ...copiedGenerationData };
 }
 
 function cancelDeletedNodes(nodes: CanvasNode[], canvasId: string | null) {
@@ -232,7 +231,45 @@ function createCanvasNode(type: NodeType, position: { x: number; y: number }, da
 
 const editableData = new Set(['label', 'customTitle', 'prompt', 'model', 'aspectRatio', 'resolution', 'duration', 'count',
   'promptOptimize', 'generationWidth', 'generationHeight', 'generationSizePreset', 'usesGenerationTasks',
-  'videoResolution', 'videoAspectRatio', 'videoDuration', 'videoInstanceType', 'shotCount']);
+  'videoResolution', 'videoAspectRatio', 'videoDuration', 'videoInstanceType', 'shotCount',
+  'imageSrc', 'videoSrc', 'inputImages', 'outputArtifacts', 'videoReferences', 'videoReferenceOrder', 'videoReferenceAudio', 'characterId', 'characterData']);
+const runtimeData = new Set(['isLoading', 'error', 'generationTaskId', 'pendingGeneration', 'generationStatus',
+  'generationBlocked', 'generationCanRetrySave', 'generationSaving', 'generationNodeId', 'generationContentVersion', 'generationBindingVersion', 'generationRevision', 'generationResultBlocked', 'generationResultArtifacts', 'activeToolbarItem', 'isStackOpen']);
+
+// Content revisions are execution facts, not undoable values. Changing an input
+// also protects downstream nodes whose generation consumed that input.
+function versionContent(before: CanvasNode[], after: CanvasNode[], edges: Edge[], resultNode?: string, previousEdges: Edge[] = edges): CanvasNode[] {
+  const previous = new Map(before.map(node => [node.id, node]));
+  const affected = new Set(after.filter(node => {
+    const old = previous.get(node.id);
+    return old && old !== node && [...editableData].some(key => old.data[key] !== node.data[key] && canonicalJSON(old.data[key]) !== canonicalJSON(node.data[key]));
+  }).map(node => node.id));
+  if (previousEdges !== edges) {
+    const incoming = (items: Edge[]) => {
+      const byTarget = new Map<string, Edge[]>();
+      for (const edge of items) {
+        const list = byTarget.get(edge.target) ?? [];
+        list.push(edge); byTarget.set(edge.target, list);
+      }
+      return byTarget;
+    };
+    const beforeInputs = incoming(previousEdges);
+    const afterInputs = incoming(edges);
+    for (const target of new Set([...beforeInputs.keys(), ...afterInputs.keys()])) {
+      const old = beforeInputs.get(target) ?? [];
+      const next = afterInputs.get(target) ?? [];
+      if (old.length !== next.length || old.some((edge, i) => edge.source !== next[i].source ||
+          edge.sourceHandle !== next[i].sourceHandle || edge.targetHandle !== next[i].targetHandle)) affected.add(target);
+    }
+  }
+  const pending = [...affected];
+  while (pending.length) {
+    const source = pending.pop()!;
+    for (const edge of edges) if (edge.source === source && !affected.has(edge.target)) { affected.add(edge.target); pending.push(edge.target); }
+  }
+  return after.map(node => affected.has(node.id) && node.id !== resultNode ? { ...node,
+    data: { ...node.data, generationContentVersion: (previous.get(node.id)?.data.generationContentVersion ?? 0) + 1 } } : node);
+}
 
 const DEFAULT_NODE_POSITION = { x: 250, y: 150 };
 // 节点默认尺寸
@@ -253,29 +290,34 @@ const getInitialTheme = (): boolean => {
 export const useCanvasStore = create<CanvasState>()(
   devtools(
       (rawSet, get) => {
+        const mediaOperations = new Map<string, symbol>();
         const edits = createCanvasHistory(get, update => rawSet(update as Partial<CanvasState>), next => {
           try {
             assertCanvasGraph(next.nodes as CanvasNode[], next.edges);
             const current = get().nodes;
             const beforeIds = new Set(current.map(node => node.id));
             const afterIds = new Set(next.nodes.map(node => node.id));
-            return ![...current.filter(node => !afterIds.has(node.id)),
-              ...(next.nodes as CanvasNode[]).filter(node => !beforeIds.has(node.id))].some(hasGeneration);
+            const removed = current.filter(node => !afterIds.has(node.id));
+            cancelDeletedNodes(removed, get().currentWorkflowId);
+            removed.forEach(node => mediaOperations.delete(node.id));
+            return { ...next, nodes: versionContent(current, next.nodes as CanvasNode[], next.edges, undefined, get().edges).map(node => {
+              if (!beforeIds.has(node.id) && typeof localStorage !== 'undefined') return { ...node, data: { ...node.data, ...restoreDeletedGeneration(node.id, node.data) } };
+              return node;
+            }) };
           } catch { return false; }
         });
         const set = (update: Partial<CanvasState>) => edits.change(update);
         const commitGraph = (update: Partial<CanvasState>, label: string) => {
           const before = get();
-          const nodes = update.nodes ?? before.nodes;
+          const nodes = versionContent(before.nodes, update.nodes ?? before.nodes, update.edges ?? before.edges, undefined, before.edges);
           assertCanvasGraph(nodes, update.edges ?? before.edges);
-          const beforeIds = new Set(before.nodes.map(node => node.id));
           const afterIds = new Set(nodes.map(node => node.id));
           const removed = before.nodes.filter(node => !afterIds.has(node.id));
-          const added = nodes.filter(node => !beforeIds.has(node.id));
-          const record = ![...removed, ...added].some(hasGeneration);
+          const record = true;
           cancelDeletedNodes(removed, before.currentWorkflowId);
+          removed.forEach(node => mediaOperations.delete(node.id));
           edits.end();
-          edits.change({ ...update, selectedNodeIds: (update.selectedNodeIds ?? before.selectedNodeIds).filter(id => afterIds.has(id)) } as Partial<CanvasState>, { record, label });
+          edits.change({ ...update, nodes, selectedNodeIds: (update.selectedNodeIds ?? before.selectedNodeIds).filter(id => afterIds.has(id)) } as Partial<CanvasState>, { record, label });
         };
         return ({
         beginEdit: edits.begin,
@@ -305,6 +347,7 @@ export const useCanvasStore = create<CanvasState>()(
           const sourceIds = new Set(nodes.map(node => node?.id));
           edges = edges.filter(edge => !edge || sourceIds.has(edge.source) && sourceIds.has(edge.target));
           assertCanvasGraph(nodes, edges);
+          nodes.forEach(node => assertOriginalMedia(node.data));
           if (options.name !== undefined && (typeof options.name !== 'string' || !options.name.trim())) throw new Error('项目名称无效');
           if (options.viewport && (![options.viewport.x, options.viewport.y, options.viewport.zoom].every(Number.isFinite) || options.viewport.zoom <= 0)) throw new Error('画布视口无效');
           const ids = new Map(nodes.map(node => [node.id, nanoid()]));
@@ -434,15 +477,45 @@ export const useCanvasStore = create<CanvasState>()(
         },
         deleteNode: (nodeId: string) => get().deleteElements([nodeId]),
 
+        removeVideoReference: (nodeId, referenceId) => {
+          const source = referenceId.startsWith('node:') ? referenceId.slice(5) : undefined;
+          const edges = get().edges.filter(edge => !(source && edge.source === source && edge.target === nodeId));
+          const nodes = syncReferences(get().nodes, get().edges, edges).map(node => node.id === nodeId ? { ...node,
+            data: { ...node.data, videoReferences: node.data.videoReferences?.filter(ref => ref.id !== referenceId),
+              videoReferenceOrder: node.data.videoReferenceOrder?.filter(id => id !== referenceId),
+              videoReferenceAudio: node.data.videoReferenceAudio ? Object.fromEntries(Object.entries(node.data.videoReferenceAudio).filter(([id]) => id !== referenceId)) : undefined } } : node);
+          commitGraph({ nodes, edges }, '移除参考素材');
+        },
+        beginMediaOperation: nodeId => {
+          const token = Symbol();
+          const session = get().canvasSession;
+          const version = get().nodes.find(node => node.id === nodeId)?.data.generationContentVersion ?? 0;
+          mediaOperations.set(nodeId, token);
+          get().updateNodeData(nodeId, { isLoading: true, error: undefined });
+          return data => {
+            const node = get().nodes.find(node => node.id === nodeId);
+            if (!node || get().canvasSession !== session || mediaOperations.get(nodeId) !== token) return false;
+            mediaOperations.delete(nodeId);
+            if ((node.data.generationContentVersion ?? 0) !== version) {
+              get().updateNodeData(nodeId, { isLoading: false }); return false;
+            }
+            get().updateNodeData(nodeId, { ...data, isLoading: false });
+            return true;
+          };
+        },
+
         // 更新节点数据
         updateNodeData: (nodeId: string, data: Partial<NodeData>) => {
+          assertOriginalMedia(data);
+          if (['imageSrc', 'videoSrc', 'outputArtifacts', 'videoReferences'].some(key => key in data)) edits.end();
           let nodes = get().nodes.map(node => node.id === nodeId ? { ...node, data: { ...node.data, ...data } } : node);
           const beforeEdges = get().edges;
           const edges = data.model === undefined && data.type === undefined ? beforeEdges : beforeEdges.filter(edge =>
             edge.source !== nodeId && edge.target !== nodeId ||
             isValidCanvasConnection(edge, nodes, beforeEdges.filter(other => other.id !== edge.id)));
           if (edges.length !== beforeEdges.length) nodes = syncReferences(nodes, beforeEdges, edges);
-          edits.change({ nodes, edges }, { record: Object.keys(data).every(key => editableData.has(key)), label: '编辑节点内容或参数' });
+          nodes = versionContent(get().nodes, nodes, edges, 'generationStatus' in data ? nodeId : undefined, beforeEdges);
+          edits.change({ nodes, edges }, { record: Object.keys(data).every(key => editableData.has(key) || runtimeData.has(key)), label: '编辑节点内容或参数' });
         },
 
         // 复制节点

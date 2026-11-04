@@ -255,11 +255,10 @@ export async function POST(request: NextRequest) {
         console.log("[API] Video uploaded to OSS successfully:", videoUrl);
       } catch (ossError) {
         console.error(
-          "[API] Failed to upload to OSS, using temporary URL:",
+          "[API] Failed to upload to OSS:",
           ossError,
         );
-        // 如果 OSS 上传失败，降级使用临时 URL
-        videoUrl = tempVideoUrl;
+        throw new Error("生成已完成，但原始素材保存失败；未将平台临时链接写入画布");
       }
     } else {
       // 使用通用视频生成服务
@@ -292,10 +291,10 @@ export async function POST(request: NextRequest) {
         console.log("[API] Video uploaded to OSS successfully:", videoUrl);
       } catch (ossError) {
         console.error(
-          "[API] Failed to upload to OSS, using temporary URL:",
+          "[API] Failed to upload to OSS:",
           ossError,
         );
-        videoUrl = tempVideoUrl;
+        throw new Error("生成已完成，但原始素材保存失败；未将平台临时链接写入画布");
       }
     }
 

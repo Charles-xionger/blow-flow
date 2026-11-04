@@ -150,3 +150,74 @@ test('import replays saved identities after reload without reopening the file', 
   await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
   expect((await read()).nodes[0].id).toBe(savedId);
 });
+
+test('uploaded media replacement survives undo, redo and reload without uploading again', async ({ page, request }) => {
+  const id = crypto.randomUUID();
+  await request.put(`/api/workflow/${id}`, { data: { id, requestId: crypto.randomUUID(), baseVersion: 0,
+    snapshot: { name: 'Media history', nodes: [{ id: 'original', type: 'originalImage', position: { x: 350, y: 120 },
+      data: { type: 'originalImage', label: 'Original', imageSrc: 'https://oss.test/before.png' } }], edges: [], viewport: { x: 0, y: 0, zoom: 1 } } } });
+  await page.route('**/api/canvas-preview?**', route => route.fulfill({ path: 'tests/fixtures/h3/reference.png', contentType: 'image/png' }));
+  let uploads = 0;
+  await page.route('**/api/upload/image', route => { uploads++; return route.fulfill({ json: { success: true, data: { url: 'https://oss.test/after.png' } } }); });
+  await page.goto(`/canvas?project=${id}`);
+  const node = page.locator('.react-flow__node[data-id="original"]');
+  await node.click();
+  await node.locator('input[type=file]').setInputFiles('tests/fixtures/h3/reference.png');
+  await expect(page.getByRole('button', { name: '撤销', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: '撤销', exact: true }).click();
+  const read = async () => (await (await request.get(`/api/workflow/${id}`)).json()).data.nodes[0].data.imageSrc;
+  await expect.poll(async () => {
+    const saved = (await (await request.get(`/api/workflow/${id}`)).json()).data;
+    return { image: saved.nodes[0].data.imageSrc, redo: saved.history?.redo.length };
+  }).toEqual({ image: 'https://oss.test/before.png', redo: 1 });
+  await page.reload();
+  await page.getByRole('button', { name: '重做', exact: true }).click();
+  await expect.poll(read).toBe('https://oss.test/after.png');
+  expect(uploads).toBe(1);
+  await page.route('**/api/canvas-preview?**', route => route.fulfill({ status: 422 }));
+  await page.route('https://oss.test/after.png', route => route.abort());
+  await page.reload();
+  await page.getByRole('button', { name: '查看原图 Uploaded image', exact: true }).click();
+  await expect(page.getByRole('alert').filter({ hasText: '原始素材已丢失或无法访问' })).toBeVisible();
+  expect(await read()).toBe('https://oss.test/after.png');
+});
+
+test('undoing queued-task deletion restores existing media and task status without submitting generation', async ({ page, request }) => {
+  const id = crypto.randomUUID();
+  let status = 'queued';
+  let submissions = 0;
+  await request.put(`/api/workflow/${id}`, { data: { id, requestId: crypto.randomUUID(), baseVersion: 0,
+    snapshot: { name: 'Task history', nodes: [{ id: 'image', type: 'textToImage', position: { x: 350, y: 120 },
+      data: { type: 'textToImage', label: 'Image', model: 'runninghub-krea2', usesGenerationTasks: true,
+        prompt: 'garden', imageSrc: 'https://oss.test/previous.png', generationTaskId: 'queued-history-task' } }], edges: [], viewport: { x: 0, y: 0, zoom: 1 } } } });
+  await page.route('**/api/canvas-preview?**', route => route.fulfill({ path: 'tests/fixtures/h3/reference.png', contentType: 'image/png' }));
+  const taskSnapshot = () => ({
+    id: 'queued-history-task', requestId: 'queued-history-request', canvasId: id, nodeId: 'image', modelId: 'runninghub-krea2', modelVersion: '1',
+    input: { prompt: 'garden', width: 1920, height: 1080 }, status, saveStatus: 'pending', artifacts: [], revision: status === 'queued' ? 0 : 1,
+    createdAt: 1, updatedAt: 2, deadline: null, error: null,
+  });
+  await page.route('**/api/generation/tasks/queued-history-task', route => route.fulfill({ json: taskSnapshot() }));
+  await page.route('**/api/generation/events', route => route.fulfill({ contentType: 'text/event-stream', body: `event: snapshot\ndata: ${JSON.stringify([taskSnapshot()])}\n\n` }));
+  await page.route('**/api/generation/tasks', route => {
+    if (route.request().method() === 'POST') submissions++;
+    if (route.request().method() === 'DELETE') status = 'cancelled';
+    return route.fulfill({ json: { deleted: true } });
+  });
+  await page.goto(`/canvas?project=${id}`);
+  const node = page.locator('.react-flow__node[data-id="image"]');
+  await node.click({ position: { x: 15, y: 15 } });
+  await page.keyboard.press('Backspace');
+  await expect(node).toHaveCount(0);
+  await expect.poll(() => status).toBe('cancelled');
+  await page.getByRole('button', { name: '撤销', exact: true }).click();
+  await node.click({ position: { x: 15, y: 15 } });
+  await expect(page.getByRole('region', { name: '节点控制台' })).toContainText('已取消');
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
+  await page.reload();
+  await page.getByRole('button', { name: '重做', exact: true }).click();
+  await expect(node).toHaveCount(0);
+  await page.getByRole('button', { name: '撤销', exact: true }).click();
+  await expect(node).toHaveCount(1);
+  expect(submissions).toBe(0);
+  await expect.poll(async () => (await (await request.get(`/api/workflow/${id}`)).json()).data.nodes[0]?.data.imageSrc).toBe('https://oss.test/previous.png');
+});

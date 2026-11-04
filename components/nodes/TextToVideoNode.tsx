@@ -50,7 +50,7 @@ const TextToVideoNode = (props: NodeProps<Node<NodeData>>) => {
     const prompt = expandPrompt(id, useCanvasStore.getState());
     if (promptIsEmpty(prompt)) return;
 
-    updateNodeData(id, { isLoading: true, error: undefined });
+    const complete = useCanvasStore.getState().beginMediaOperation(id);
 
     try {
       const response = await fetch("/api/generate/video", {
@@ -69,17 +69,17 @@ const TextToVideoNode = (props: NodeProps<Node<NodeData>>) => {
       const result = await response.json();
 
       if (result.success && result.data) {
-        updateNodeData(id, { isLoading: false, videoSrc: result.data });
+        complete({ isLoading: false, videoSrc: result.data });
       } else {
         throw new Error(result.error || "生成失败");
       }
     } catch (error) {
-      updateNodeData(id, {
+      complete({
         isLoading: false,
         error: error instanceof Error ? error.message : "生成失败",
       });
     }
-  }, [id, data.model, data.aspectRatio, data.duration, data.promptOptimize, updateNodeData]);
+  }, [id, data.model, data.aspectRatio, data.duration, data.promptOptimize]);
 
   return (
     <NodeShell {...props} stageTestId="video-preview"

@@ -38,6 +38,12 @@ export interface NodeData extends Record<string, unknown> {
 
   usesGenerationTasks?: boolean;
   generationTaskId?: string;
+  generationNodeId?: string;
+  generationContentVersion?: number;
+  generationBindingVersion?: number;
+  generationRevision?: number;
+  generationResultBlocked?: boolean;
+  generationResultArtifacts?: string[];
   pendingGeneration?: CreateGeneration;
   generationStatus?: string;
   generationBlocked?: boolean;

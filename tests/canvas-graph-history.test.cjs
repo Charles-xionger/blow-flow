@@ -179,20 +179,20 @@ test('structural callbacks delete a subtree in one step and reject invalid impor
   assert.equal(store.getState().nodes.length, 0);
 });
 
-test('replay cannot resurrect a node with a deletion tombstone', () => {
+test('failed restoration of a deletion tombstone leaves the graph and history intact', () => {
   const edit = start();
   const id = edit.addNode(T.TEXT);
   edit.deleteNode(id);
+  const before = canvasSnapshot(store.getState());
   global.localStorage = { getItem: key => key === 'generation-node-v1:' + id ? JSON.stringify({ deleted: true }) : null };
   try {
     edit.undo();
     assert.equal(node(id), undefined);
-    assert.equal(store.getState().history.undo.length, 0);
-    assert.equal(store.getState().history.redo.length, 0);
+    assert.deepEqual(canvasSnapshot(store.getState()), before);
   } finally { delete global.localStorage; }
 });
 
-test('task deletion failure leaves the graph intact; success is a boundary and replay never repeats cancellation', async () => {
+test('task deletion failure leaves the graph intact; redo reapplies cancellation without new generation', async () => {
   const edit = start();
   const id = edit.addNode(T.TEXT_TO_IMAGE);
   const pendingGeneration = { requestId: 'pending', canvasId: 'draft', nodeId: id, modelId: 'runninghub-krea2', input: { prompt: 'test', width: 1920, height: 1080 } };
@@ -219,9 +219,11 @@ test('task deletion failure leaves the graph intact; success is a boundary and r
     edit.deleteNode(id);
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(calls, 1);
-    edit.undo(); edit.redo();
+    edit.undo();
+    assert.ok(node(id));
+    edit.redo();
     assert.equal(node(id), undefined);
-    assert.equal(calls, 1);
+    assert.equal(calls, 2);
   } finally { delete global.localStorage; global.fetch = previousFetch; }
 });
 

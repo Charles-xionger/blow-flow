@@ -102,7 +102,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
       updateNodeData(id, { error: "无法保存任务关联变更，请稍后重试" });
       return;
     }
-    updateNodeData(id, { isLoading: true, error: undefined });
+    const complete = useCanvasStore.getState().beginMediaOperation(id);
 
     try {
       const response = await fetch("/api/generate/image", {
@@ -122,7 +122,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
       const result = await response.json();
 
       if (result.success && result.data && result.data.length > 0) {
-        updateNodeData(id, {
+        complete({
           isLoading: false,
           imageSrc: result.data[0],
           outputArtifacts: result.data,
@@ -131,7 +131,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
         throw new Error(result.error || "生成失败");
       }
     } catch (error) {
-      updateNodeData(id, {
+      complete({
         isLoading: false,
         error: error instanceof Error ? error.message : "生成失败",
       });

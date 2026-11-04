@@ -49,6 +49,9 @@ export function NodeConsole({ data, connections, editor, config, onRun, runDisab
         </button>
       )}
       {data.generationStatus && <div role="status" className="text-xs text-blue-300">{data.generationStatus}</div>}
+      {data.generationResultArtifacts?.filter(url => url !== data.imageSrc && url !== data.videoSrc).map((url, index) => (
+        <a key={url} href={url} target="_blank" rel="noreferrer" className="text-xs text-blue-300">查看原任务结果 {index + 1}（未覆盖当前素材）</a>
+      ))}
       {data.error && (
         <div role="alert" className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">{data.error}</div>
       )}

@@ -145,7 +145,7 @@ const StartEndToVideoNode = (props: NodeProps<Node<NodeData>>) => {
     const [startImage, endImage] = frames;
     if (promptIsEmpty(prompt) || !endImage) return;
 
-    updateNodeData(id, { isLoading: true, error: undefined });
+    const complete = useCanvasStore.getState().beginMediaOperation(id);
     try {
       const response = await fetch("/api/generate/start-end-to-video", {
         method: "POST",
@@ -164,15 +164,15 @@ const StartEndToVideoNode = (props: NodeProps<Node<NodeData>>) => {
 
       const result = await response.json();
       if (result.success && result.data) {
-        updateNodeData(id, { isLoading: false, videoSrc: result.data, inputImages: frames });
+        complete({ isLoading: false, videoSrc: result.data, inputImages: frames });
       } else {
         throw new Error(result.error || "生成失败");
       }
     } catch (error) {
       console.error("[StartEndToVideoNode] Generation error:", error);
-      updateNodeData(id, { isLoading: false, error: error instanceof Error ? error.message : "生成失败" });
+      complete({ isLoading: false, error: error instanceof Error ? error.message : "生成失败" });
     }
-  }, [id, data.model, data.duration, data.resolution, data.aspectRatio, data.promptOptimize, updateNodeData, videoModels]);
+  }, [id, data.model, data.duration, data.resolution, data.aspectRatio, data.promptOptimize, videoModels]);
 
   const promptAction = hasPrompt ? "优化提示词" : "AI 生成提示词";
 

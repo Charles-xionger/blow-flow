@@ -144,20 +144,7 @@ export function TaskVideoNode({ node, model, models, task }: Props) {
     change({ videoReferenceOrder: next });
   }
   function remove(reference: VideoReference) {
-    if (reference.sourceNodeId) {
-      const state = useCanvasStore.getState();
-      state.onEdgesChange(
-        state.edges
-          .filter((e) => e.source === reference.sourceNodeId && e.target === id)
-          .map((e) => ({ type: "remove", id: e.id })),
-      );
-    } else
-      change({ videoReferences: uploads.filter((r) => r.id !== reference.id) });
-    change({
-      videoReferenceOrder: references
-        .filter((r) => r.id !== reference.id)
-        .map((r) => r.id),
-    });
+    useCanvasStore.getState().removeVideoReference(id, reference.id);
   }
   function toggleAudio(reference: VideoReference, useAudio: boolean) {
     if (reference.sourceNodeId)
@@ -179,7 +166,8 @@ export function TaskVideoNode({ node, model, models, task }: Props) {
     uploadingRef.current = true;
     setUploading(true);
     change({ error: undefined });
-    const canvasId = useCanvasStore.getState().currentWorkflowId;
+    const complete = useCanvasStore.getState().beginMediaOperation(id);
+    const added: VideoReference[] = [];
     const batch = Array.from(files);
     const nextCounts = { ...counts };
     try {
@@ -212,9 +200,6 @@ export function TaskVideoNode({ node, model, models, task }: Props) {
         });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || "素材上传失败");
-        const state = useCanvasStore.getState();
-        const current = state.nodes.find((n) => n.id === id);
-        if (!current || state.currentWorkflowId !== canvasId) return;
         const reference: VideoReference = {
           id: crypto.randomUUID(),
           name: file.name,
@@ -224,20 +209,11 @@ export function TaskVideoNode({ node, model, models, task }: Props) {
             ? { hasAudio: result.hasAudio, useAudio: result.hasAudio }
             : {}),
         };
-        update(id, {
-          videoReferences: [...(current.data.videoReferences || []), reference],
-          videoReferenceOrder: [
-            ...(current.data.videoReferenceOrder ||
-              references.map((r) => r.id)),
-            reference.id,
-          ],
-        });
+        added.push(reference);
       }
+      complete({ videoReferences: [...uploads, ...added], videoReferenceOrder: [...references.map(ref => ref.id), ...added.map(ref => ref.id)] });
     } catch (error) {
-      if (useCanvasStore.getState().currentWorkflowId === canvasId)
-        change({
-          error: error instanceof Error ? error.message : "素材上传失败",
-        });
+      complete({ error: error instanceof Error ? error.message : "素材上传失败" });
     } finally {
       uploadingRef.current = false;
       setUploading(false);

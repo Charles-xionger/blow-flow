@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Loader2, Video } from "lucide-react";
 import type { NodeData } from "@/types";
 
@@ -7,7 +8,7 @@ import type { NodeData } from "@/types";
 export function VideoStage({ data, emptyLabel }: { data: NodeData; emptyLabel: string }) {
   return <>
     {data.videoSrc && !data.isLoading ? (
-      <video src={data.videoSrc} controls loop preload="metadata" className="h-full w-full object-contain" />
+      <OriginalVideo key={data.videoSrc} src={data.videoSrc} />
     ) : (
       <div className="flex h-full w-full flex-col items-center justify-center gap-3 text-zinc-500">
         <Video size={28} className="opacity-60" aria-hidden />
@@ -21,4 +22,10 @@ export function VideoStage({ data, emptyLabel }: { data: NodeData; emptyLabel: s
       </div>
     )}
   </>;
+}
+
+function OriginalVideo({ src }: { src: string }) {
+  const [failed, setFailed] = useState(false);
+  return failed ? <p role="alert" className="p-4 text-sm text-zinc-400">原始视频已丢失或无法访问，节点的其他内容仍已保留。</p>
+    : <video src={src} onError={() => setFailed(true)} controls loop preload="metadata" className="h-full w-full object-contain" />;
 }

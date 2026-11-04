@@ -1,3 +1,4 @@
+import { packHistoryMedia, resolveHistoryMedia } from './history-media';
 import { Immer, enablePatches, type Patch } from 'immer';
 import type { Node, Edge } from '@xyflow/react';
 import { canonicalJSON } from './save-protocol';
@@ -15,6 +16,8 @@ interface HistoryOperation {
 }
 export interface CanvasHistory {
   schema: 1;
+  assets?: Record<string, string>;
+  generations?: Record<string, Record<string, unknown>>;
   checkpoint: Content;
   baseline?: Content;
   operations: HistoryOperation[];
@@ -25,8 +28,9 @@ export interface CanvasHistory {
   notice?: string;
 }
 type State = { nodes: Node[]; edges: Edge[]; projectName: string; canvasSession: number; history?: CanvasHistory; selectedNodeIds?: string[] };
+const generationFields = new Set(['generationTaskId', 'pendingGeneration', 'generationNodeId', 'generationContentVersion', 'generationBindingVersion', 'generationRevision', 'generationResultBlocked', 'generationResultArtifacts']);
 const transientNode = new Set(['selected', 'dragging', 'measured', 'resizing', 'width', 'height']);
-const transientData = new Set(['activeToolbarItem', 'isStackOpen', 'isLoading', 'error', 'generationStatus', 'generationBlocked', 'generationCanRetrySave', 'generationSaving']);
+const transientData = new Set(['activeToolbarItem', 'isStackOpen', 'isLoading', 'error', 'generationStatus', 'generationBlocked', 'generationCanRetrySave', 'generationSaving', 'generationTaskId', 'pendingGeneration', 'generationNodeId', 'generationContentVersion', 'generationBindingVersion', 'generationRevision', 'generationResultBlocked', 'generationResultArtifacts']);
 const omit = (value: Record<string, unknown>, keys: Set<string>) => Object.fromEntries(Object.entries(value).filter(([key, v]) => !keys.has(key) && v !== undefined));
 const projectedNodes = new WeakMap<Node, Node>();
 function content(state: Pick<State, 'nodes' | 'edges' | 'projectName'>): Content {
@@ -40,7 +44,7 @@ function content(state: Pick<State, 'nodes' | 'edges' | 'projectName'>): Content
   }), edges: state.edges.map(({ selected, ...edge }) => { void selected; return edge; }) };
 }
 export function initialHistory(state: Pick<State, 'nodes' | 'edges' | 'projectName'>): CanvasHistory {
-  return { schema: 1, checkpoint: content(state), operations: [], records: [], undo: [], redo: [], receipts: [] };
+  return packHistoryMedia({ schema: 1, checkpoint: content(state), operations: [], records: [], undo: [], redo: [], receipts: [] });
 }
 function difference(before: Content, after: Content) {
   return immer.produceWithPatches(before, draft => {
@@ -73,11 +77,12 @@ function restore(state: State, next: Content) {
   const liveEdges = new Map(state.edges.map(edge => [edge.id, edge]));
   return { nodes: next.nodes.map(node => {
     const previous = live.get(node.id);
+    const facts = !previous && state.history?.generations?.[node.id] ? resolveHistoryMedia(state.history.generations[node.id], state.history.assets) : {};
     if (previous && projectedNodes.get(previous) === node) return previous;
     const resized = previous?.style?.width !== node.style?.width || previous?.style?.height !== node.style?.height;
     return { ...node, ...Object.fromEntries(Object.entries(previous ?? {}).filter(([key]) => transientNode.has(key))),
       ...(resized ? { width: undefined, height: undefined, measured: undefined } : {}),
-      data: { ...node.data, ...Object.fromEntries(Object.entries(previous?.data ?? {}).filter(([key]) => transientData.has(key))) } };
+      data: { ...omit(node.data, transientData), ...facts, ...Object.fromEntries(Object.entries(previous?.data ?? {}).filter(([key]) => transientData.has(key))) } };
   }), edges: next.edges.map(edge => ({ ...edge, selected: liveEdges.get(edge.id)?.selected })), projectName: next.name, ...(state.selectedNodeIds ? { selectedNodeIds: state.selectedNodeIds.filter(id => next.nodes.some(node => node.id === id)) } : {}) };
 }
 
@@ -86,7 +91,8 @@ function expectedContent(history: CanvasHistory): Content {
   let expected = expectedContents.get(history);
   if (!expected) {
     const entries = new Map(history.records.map(entry => [entry.id, entry]));
-    expected = history.undo.reduce((value, id) => immer.applyPatches(value, entries.get(id)!.patches), history.baseline ?? history.checkpoint);
+    expected = history.undo.reduce((value, id) => immer.applyPatches(value, resolveHistoryMedia(entries.get(id)!.patches, history.assets)), resolveHistoryMedia(history.baseline ?? history.checkpoint, history.assets));
+    expected = content({ nodes: expected.nodes, edges: expected.edges, projectName: expected.name });
     expectedContents.set(history, expected);
   }
   return expected;
@@ -103,7 +109,35 @@ export function restoredHistory(state: Pick<State, 'nodes' | 'edges' | 'projectN
 }
 
 /** Single content mutation boundary. The caller supplies already computed changes; replay has no business side effects. */
-export function createCanvasHistory(get: () => State, set: (state: Partial<State>) => void, canRestore?: (next: Content) => boolean) {
+export function createCanvasHistory(get: () => State, publish: (state: Partial<State>) => void, canRestore?: (next: Content) => Content | false) {
+  const set = (update: Partial<State>) => {
+    const state = get();
+    let history = update.history ?? state.history;
+    const expected = history ? expectedContents.get(history) : undefined;
+    if (update.nodes && history && update.canvasSession === undefined) {
+      const generations = { ...history.generations };
+      const live = new Map(state.nodes.map(node => [node.id, node]));
+      const candidates = [...state.nodes.filter(node => !generations[node.id]),
+        ...update.nodes.filter(node => node.data !== live.get(node.id)?.data)];
+      let changed = false;
+      for (const node of candidates) {
+        const facts = Object.fromEntries(Object.entries(node.data).filter(([key, value]) => generationFields.has(key) && value !== undefined));
+        if (!Object.keys(facts).length && !generations[node.id]) continue;
+        const prior = resolveHistoryMedia(generations[node.id] ?? {}, history.assets);
+        const keys = Object.keys(facts);
+        if (keys.length !== Object.keys(prior).length || keys.some(key => prior[key] !== facts[key] && canonicalJSON(prior[key]) !== canonicalJSON(facts[key]))) {
+          generations[node.id] = facts; changed = true;
+        }
+      }
+      if (changed) history = { ...history, generations };
+    }
+    if (history && (update.history || history !== state.history)) {
+      const packed = packHistoryMedia(history);
+      if (expected) expectedContents.set(packed, expected);
+      update = { ...update, history: packed };
+    }
+    publish(update);
+  };
   let batch: { key: string; session: number; before: Content; history: CanvasHistory; id: string } | undefined;
   function change(update: Partial<State>, options: { record?: boolean; id?: string; label?: string } = {}) {
     const state = get();
@@ -137,13 +171,13 @@ export function createCanvasHistory(get: () => State, set: (state: Partial<State
     }
     const [, patches, inverse] = difference(batch?.before ?? before, after);
     if (!patches.length) {
-      set({ ...update, history: { ...(batch?.history ?? history), operations,
+      set({ ...update, history: { ...(batch?.history ?? history), assets: history.assets, operations,
         receipts: [...history.receipts, operationId] } }); return;
     }
     const base = batch?.history ?? history;
     const id = batch?.id ?? operationId;
     const entry = { id, label: options.label ?? '编辑', patches, inverse };
-    const nextHistory: CanvasHistory = { ...base, operations, records: [...base.records, entry],
+    const nextHistory: CanvasHistory = { ...base, assets: history.assets, operations, records: [...base.records, entry],
       undo: [...base.undo, id], redo: [], receipts: [...new Set([...history.receipts, operationId])] };
     expectedContents.set(nextHistory, after);
     set({ ...update, history: nextHistory });
@@ -159,12 +193,16 @@ export function createCanvasHistory(get: () => State, set: (state: Partial<State
     const target = history[direction].at(-1);
     const entry = history.records.find(entry => entry.id === target);
     if (!entry) return;
-    const next = immer.applyPatches(content(state), direction === 'undo' ? entry.inverse : entry.patches);
-    if (canRestore && !canRestore(next)) {
-      set({ history: boundary(history, content(state)) }); return;
+    let next = immer.applyPatches(content(state), resolveHistoryMedia(direction === 'undo' ? entry.inverse : entry.patches, history.assets));
+    const restored = restore(state, next);
+    next = { ...next, nodes: restored.nodes, edges: restored.edges };
+    if (canRestore) {
+      const prepared = canRestore(next);
+      if (!prepared) return;
+      next = prepared;
     }
     const opposite = direction === 'undo' ? 'redo' : 'undo';
-    set({ ...restore(state, next), history: { ...history,
+    set({ ...restored, nodes: next.nodes, edges: next.edges, history: { ...history,
       operations: [...(history.operations ?? []), { id, batchId: entry.id, kind: direction,
         patches: direction === 'undo' ? entry.inverse : entry.patches,
         inverse: direction === 'undo' ? entry.patches : entry.inverse }],
@@ -189,6 +227,7 @@ export function validateHistory(value: unknown, state: Pick<State, 'nodes' | 'ed
   const patches = (items: Patch[]) => Array.isArray(items) && items.every(patch => patch && ['add', 'remove', 'replace'].includes(patch.op) &&
     Array.isArray(patch.path) && ['nodes', 'edges', 'name'].includes(String(patch.path[0])) &&
     patch.path.every(part => (typeof part === 'string' || Number.isSafeInteger(part)) && !['__proto__', 'constructor', 'prototype'].includes(String(part))));
+  if (history?.assets && (!Object.values(history.assets).every(value => typeof value === 'string' && /^data:(image|video|audio)\//.test(value)))) throw new Error('Invalid history media');
   if (!history || history.schema !== 1 || !validContent(history.checkpoint) || (history.baseline && !validContent(history.baseline)) ||
       !Array.isArray(history.records) || !history.records.every(entry => entry && typeof entry.id === 'string' && typeof entry.label === 'string' && patches(entry.patches) && patches(entry.inverse)) ||
       !strings(history.undo) || !strings(history.redo) || !strings(history.receipts)) throw new Error('Invalid canvas history');

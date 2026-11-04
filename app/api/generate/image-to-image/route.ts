@@ -131,7 +131,7 @@ export async function POST(request: NextRequest) {
           "[API] Failed to upload image-to-image to OSS:",
           ossError,
         );
-        // 降级使用临时 URL
+        throw new Error("生成已完成，但原始素材保存失败；未将平台临时链接写入画布");
       }
 
       // 保存到缓存
@@ -236,7 +236,7 @@ export async function POST(request: NextRequest) {
       console.log("[API] Image-to-image uploaded to OSS:", imageUrl);
     } catch (ossError) {
       console.error("[API] Failed to upload image-to-image to OSS:", ossError);
-      // 降级使用临时 URL
+      throw new Error("生成已完成，但原始素材保存失败；未将平台临时链接写入画布");
     }
 
     // 保存到缓存（图生图使用较短的缓存时间，因为用户通常期望每次生成都是新的）

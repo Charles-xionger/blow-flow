@@ -24,7 +24,7 @@ const OriginalImageNode = (props: NodeProps<Node<NodeData>>) => {
       return;
     }
 
-    updateNodeData(id, { isLoading: true, error: undefined });
+    const complete = useCanvasStore.getState().beginMediaOperation(id);
     try {
       const formData = new FormData();
       formData.append("file", file);
@@ -32,10 +32,10 @@ const OriginalImageNode = (props: NodeProps<Node<NodeData>>) => {
       const result = await response.json();
       if (!result.success) throw new Error(result.error);
       // 使用永久 URL
-      updateNodeData(id, { imageSrc: result.data.url, isLoading: false, error: undefined });
+      complete({ imageSrc: result.data.url, isLoading: false, error: undefined });
     } catch (error) {
       console.error("Upload failed:", error);
-      updateNodeData(id, { error: error instanceof Error ? error.message : "上传失败", isLoading: false });
+      complete({ error: error instanceof Error ? error.message : "上传失败", isLoading: false });
     }
   }, [id, updateNodeData]);
 

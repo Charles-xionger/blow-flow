@@ -299,8 +299,8 @@ export async function POST(request: NextRequest) {
         },
       );
     } catch (ossError) {
-      // OSS 保存失败不影响返回原始 URL
       console.error("[API] Failed to persist video to OSS:", ossError);
+      throw new Error("生成已完成，但原始素材保存失败；未将平台临时链接写入画布");
     }
 
     return NextResponse.json({

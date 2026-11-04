@@ -261,7 +261,7 @@ export async function POST(request: NextRequest) {
           `[API] Failed to upload video ${i + 1} to OSS:`,
           ossError,
         );
-        // 降级使用临时 URL
+        throw new Error("生成已完成，但原始素材保存失败；未将平台临时链接写入画布");
       }
 
       results.push(videoUrl);
