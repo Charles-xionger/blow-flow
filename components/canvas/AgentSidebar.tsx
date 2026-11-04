@@ -24,11 +24,51 @@ function AgentConversation({projectId,close}:{projectId:string;close:()=>void}){
   const task=snapshot.tasks.at(-1);const waiting=task?.status==='waiting' && task.question && !task.question.answer && !task.question.cancelled;
   const pendingRequest=useRef<{signature:string;requestId:string}|null>(null);
   const endpoint=`/api/agent/${encodeURIComponent(projectId)}`;
-  useEffect(()=>{let active=true;const controller=new AbortController();async function refresh(){try{const response=await fetch(endpoint,{signal:controller.signal,cache:'no-store'});if(!response.ok)throw new Error('加载失败');const data:Snapshot=await response.json();if(active)setSnapshot(data);}catch{if(active)setError('无法同步助手，请检查连接。');}}
-    void refresh();const interval=setInterval(()=>void refresh(),1000);return()=>{active=false;controller.abort();clearInterval(interval);};},[endpoint]);
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  useEffect(() => {
+    let active = true;
+    let inFlight = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const controller = new AbortController();
+    async function refresh() {
+      if (!active || inFlight || document.visibilityState === 'hidden') return;
+      clearTimeout(timer);
+      inFlight = true;
+      let delay = 5000;
+      try {
+        const response = await fetch(endpoint, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]), cache: 'no-store' });
+        if (!response.ok) throw new Error('加载失败');
+        const data: Snapshot = await response.json();
+        if (!active) return;
+        setSnapshot(data);
+        const running = data.tasks.some(task => task.status === 'queued' || task.status === 'running' || task.status === 'waiting' && task.awaitingGeneration) ||
+          data.generations?.some(batch => batch.items.some(({ task }) => task &&
+            (['queued', 'submitting', 'running'].includes(task.status) ||
+              task.status === 'succeeded' && ['pending', 'saving'].includes(task.saveStatus))));
+        delay = running ? 1000 : 30_000;
+      } catch {
+        if (active) setError('无法同步助手，请检查连接。');
+      } finally {
+        inFlight = false;
+        // Schedule after completion so slow responses cannot pile up.
+        if (active) timer = setTimeout(() => void refresh(), delay);
+      }
+    }
+    const wake = () => { void refresh(); };
+    void refresh();
+    document.addEventListener('visibilitychange', wake);
+    window.addEventListener('online', wake);
+    return () => {
+      active = false;
+      controller.abort();
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', wake);
+      window.removeEventListener('online', wake);
+    };
+  }, [endpoint, refreshVersion]);
   async function send(action:string,value=text){
     setBusy(true);setError('');
-    try {await canvasAutosave.flush();const signature=JSON.stringify({action,value,model,references,questionId:task?.question?.id});if(pendingRequest.current?.signature!==signature)pendingRequest.current={signature,requestId:crypto.randomUUID()};const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,requestId:pendingRequest.current.requestId,text:value,modelId:model||snapshot.models.find(m=>m.available)?.id,references,questionId:task?.question?.id})});if(!response.ok)throw new Error((await response.json()).error);pendingRequest.current=null;setText('');setReferences([]);const updated=await fetch(endpoint,{cache:'no-store'});if(updated.ok)setSnapshot(await updated.json());}
+    try {await canvasAutosave.flush();const signature=JSON.stringify({action,value,model,references,questionId:task?.question?.id});if(pendingRequest.current?.signature!==signature)pendingRequest.current={signature,requestId:crypto.randomUUID()};const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,requestId:pendingRequest.current.requestId,text:value,modelId:model||snapshot.models.find(m=>m.available)?.id,references,questionId:task?.question?.id})});if(!response.ok)throw new Error((await response.json()).error);pendingRequest.current=null;setText('');setReferences([]);setRefreshVersion(version=>version+1);}
     catch(e){setError(e instanceof Error?e.message:'发送失败');}finally{setBusy(false);}
   }
   function referenceSelection(){const nodes=useCanvasStore.getState().nodes.filter(n=>n.selected);setReferences(old=>[...old,...nodes.filter(n=>!old.some(r=>r.nodeId===n.id)).map(n=>({nodeId:n.id,name:String(n.data.label??n.type)}))].slice(0,8));}

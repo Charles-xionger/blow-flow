@@ -351,7 +351,7 @@ for (const status of [401, 403, 404, 409, 410]) {
     store.setState({ nodes: [node('original')] });
     await assert.rejects(saver.save(), /blocked/);
     store.setState({ nodes: [node('preserved edit')] });
-    await assert.rejects(saver.flush(), /blocked/);
+    await saver.flush();
     stop();
     const restoredStore = createStore(() => ({ ...store.getState(), persistenceReady: false }));
     const restored = createCanvasAutosave(restoredStore, () => {}, 10, repository);
@@ -361,8 +361,8 @@ for (const status of [401, 403, 404, 409, 410]) {
       await restored.open(); await drain();
       t.mock.timers.tick(60_000); await drain();
       assert.equal(sent.length, 1);
-      assert.equal(restoredStore.getState().saveStatus, 'sync-error');
-      assert.match(restoredStore.getState().saveError, /blocked/);
+      assert.equal(restoredStore.getState().saveStatus, status === 409 || status === 410 ? 'recovery' : 'sync-error');
+      if (status !== 409 && status !== 410) assert.match(restoredStore.getState().saveError, /blocked/);
       assert.equal(restoredStore.getState().nodes[0].id, 'preserved edit');
       assert.equal((await repository.pending(sent[0].id)).requestId, sent[0].requestId);
     } finally { stopRestored(); t.mock.timers.reset(); }
@@ -456,7 +456,7 @@ test('manual saving after permission is restored retries the original operation 
   store.setState({ nodes: [node('before permission repair')] });
   await assert.rejects(saver.save(), /Permission denied/);
   store.setState({ nodes: [node('after permission repair')] });
-  await assert.rejects(saver.flush(), /Permission denied/);
+  await saver.flush();
   assert.equal(sent.length, 1);
   authorized = true;
   await saver.save();
@@ -609,4 +609,44 @@ test('undo before the first save persists an empty canvas with a redo branch', a
   store.setState({ history: saved.snapshot.history });
   edit.redo();
   assert.equal(store.getState().nodes[0].id, 'created');
+});
+
+test('paused old drafts do not repeatedly report autosave failure on a healthy canvas', async t => {
+  const { store, saver, repository, errors, calls } = await setup(t);
+  const snapshot = { name: 'Old draft', nodes: [node('old')], edges: [], viewport: { x: 0, y: 0, zoom: 1 } };
+  await repository.commit('old-conflict', snapshot, 0, 0);
+  await repository.markRecovery('old-conflict', 'conflict');
+  for (let i = 0; i < 3; i++) {
+    store.setState({ nodes: [node(`healthy-${i}`)] });
+    await saver.flush().catch(error => errors.push(error));
+  }
+  assert.deepEqual(errors.map(error => error.message), []);
+  assert.equal(store.getState().saveStatus, 'synced');
+  assert.equal(calls.length, 3);
+  assert.equal((await repository.read('old-conflict')).snapshot.name, 'Old draft');
+  assert.equal((await repository.all()).length, 2);
+  await saver.open('old-conflict');
+  await saver.flush();
+  assert.equal(store.getState().saveStatus, 'recovery');
+  await assert.rejects(saver.save(), /同步已暂停/);
+});
+
+test('remote refresh reads only the open canvas while still uploading other pending drafts', async t => {
+  const { store, saver, repository } = await setup(t, 10, 50, { history: true });
+  const snapshot = { name: 'Cached', nodes: [node('cached')], edges: [], viewport: { x: 0, y: 0, zoom: 1 } };
+  for (const id of ['previous', 'current', 'unopened']) await repository.adopt(id, snapshot, 1);
+  const reads = [], writes = [];
+  global.fetch = async (url, options) => {
+    if (options?.method === 'PUT') { const body = JSON.parse(options.body); writes.push(body.id); return ack(body); }
+    const id = url.split('/').at(-1); reads.push(id);
+    return Response.json({ success: true, data: { id, ...snapshot, version: 1 } });
+  };
+  await saver.open('previous'); await saver.flush();
+  await saver.open('current'); await saver.flush();
+  await repository.commit('pending', snapshot, 0, 0);
+  reads.length = 0; writes.length = 0;
+  await saver.flush(); await saver.flush();
+  assert.deepEqual(reads, ['current', 'current']);
+  assert.deepEqual(writes, ['pending']);
+  assert.equal(store.getState().currentWorkflowId, 'current');
 });

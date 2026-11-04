@@ -201,7 +201,7 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
       if (target.draft?.recovery) {
         if (target.draft.recovery.kind !== 'unverified') {
           publishDraft(target.draft);
-          if (target.draft.recovery.kind !== 'copy') throw new Error((await repository.pending(target.id))?.retry?.error || '同步已暂停，本地内容已保留');
+          if (force && target.draft.recovery.kind !== 'copy') throw new Error((await repository.pending(target.id))?.retry?.error || '同步已暂停，本地内容已保留');
           return;
         }
         const remote = await readRemote(target.id);
@@ -210,7 +210,8 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
         if (target.draft.recovery) return;
       }
       let operation = await repository.pending(target.id);
-      if (history && !operation && target.draft && !target.draft.recovery) {
+      if (history && target.id === active?.id && store.getState().persistenceReady &&
+          !operation && target.draft && !target.draft.recovery) {
         const remote = await readRemote(target.id);
         if (remote.version > target.draft.serverVersion) {
           try { target.draft = await mergeIncoming(editor, remote); }
@@ -219,7 +220,11 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
         }
       }
       while (operation) {
-        if (operation.retry?.blocked && !force) throw new Error(operation.retry.error || '同步已暂停，本地内容已保留');
+        if (operation.retry?.blocked && !force) {
+          // A persisted pause is state, not a new failed save on every poll.
+          status(target, 'sync-error', operation.retry.error || '同步已暂停，本地内容已保留');
+          return;
+        }
         if (!online()) { settledStatus(target); break; }
         if (operation.retry && ((!force && operation.retry.nextAttemptAt > Date.now()) ||
             (operation.retry.retryAfter ?? 0) > Date.now())) {
@@ -348,7 +353,8 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
       schedule();
     });
     if (history) remoteTimer = setInterval(() => {
-      if (!store.getState().persistenceReady || !active?.id || interactions.size) return;
+      if (!store.getState().persistenceReady || !active?.id || interactions.size ||
+          typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       void flush().catch(onError);
     }, 1500);
     return () => {

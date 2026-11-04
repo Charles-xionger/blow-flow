@@ -62,3 +62,42 @@ test('a real worker restart shows saved progress and resumes only after clicking
  await page.getByRole('button',{name:'继续创作',exact:true}).click();
  await expect(page.getByLabel('助手消息')).toContainText('收到：测试服务重启');
 });
+
+test('idle assistant avoids per-second polling and sending wakes live updates', async ({ page, request }) => {
+ const id=crypto.randomUUID();await request.post('/api/workspace',{data:{action:'create-project',id,folderId:null}});
+ let reads=0;
+ page.on('request',req=>{if(req.method()==='GET'&&new URL(req.url()).pathname===`/api/agent/${id}`)reads++;});
+ await page.goto(`/canvas?project=${id}&assistant=1`);
+ await expect(page.getByRole('combobox',{name:'助手模型'})).toContainText('测试助手');
+ const initial=reads;
+ await page.waitForTimeout(3200);
+ expect(reads).toBe(initial);
+ await page.getByLabel('创作要求').fill('请提问');
+ await page.getByRole('button',{name:'发送',exact:true}).click();
+ await expect(page.getByText('故事面向谁？')).toBeVisible();
+});
+
+test('a slow assistant refresh has no overlapping polls and closing stops requests', async ({ page, request }) => {
+ const id=crypto.randomUUID();await request.post('/api/workspace',{data:{action:'create-project',id,folderId:null}});
+ let reads=0, hold=false;
+ let release!:()=>void;
+ const held=new Promise<void>(resolve=>{release=resolve;});
+ await page.route(`**/api/agent/${id}`,async route=>{
+  reads++;
+  if(hold)await held;
+  await route.fulfill({json:{tasks:[],messages:[],models:[{id:'test',name:'Slow test',available:true}]}});
+ });
+ await page.goto(`/canvas?project=${id}&assistant=1`);
+ await expect(page.getByRole('combobox',{name:'助手模型'})).toContainText('Slow test');
+ const initial=reads;
+ hold=true;
+ await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));
+ try {
+  await expect.poll(()=>reads).toBe(initial+1);
+  await page.waitForTimeout(2200);
+  expect(reads).toBe(initial+1);
+ } finally { release(); }
+ await page.getByRole('button',{name:'关闭创作助手',exact:true}).click();
+ await page.waitForTimeout(1200);
+ expect(reads).toBe(initial+1);
+});
