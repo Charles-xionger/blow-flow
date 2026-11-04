@@ -69,6 +69,7 @@ const ImageToVideoNode = (props: NodeProps<Node<NodeData>>) => {
     if (!inputImage) return;
 
     setIsGeneratingPrompt(true);
+    const complete = useCanvasStore.getState().beginMediaOperation(id);
 
     try {
       const response = await fetch("/api/generate-prompt", {
@@ -88,19 +89,19 @@ const ImageToVideoNode = (props: NodeProps<Node<NodeData>>) => {
       const result = await response.json();
 
       if (result.success && result.data) {
-        updateNodeData(id, { prompt: promptSegments(result.data) });
+        complete({ prompt: promptSegments(result.data) });
       } else {
         throw new Error(result.error || "生成提示词失败");
       }
     } catch (error) {
       console.error("Generate prompt error:", error);
-      updateNodeData(id, {
+      complete({
         error: error instanceof Error ? error.message : "生成提示词失败",
       });
     } finally {
       setIsGeneratingPrompt(false);
     }
-  }, [id, data.duration, data.model, updateNodeData]);
+  }, [id, data.duration, data.model]);
 
   const handleGenerate = useCallback(async () => {
     // Upstream content is read now, so a run always uses its current value.

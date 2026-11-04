@@ -35,7 +35,7 @@ const CreativeDescNode = (props: NodeProps<Node<NodeData>>) => {
     const prompt = promptText(data.prompt);
     if (promptIsEmpty(prompt)) return;
 
-    updateNodeData(id, { isLoading: true, error: undefined });
+    const complete = useCanvasStore.getState().beginMediaOperation(id);
 
     try {
       const nodePosition = useCanvasStore.getState().nodes.find((node) => node.id === id)?.position ?? { x: 0, y: 0 };
@@ -48,7 +48,7 @@ const CreativeDescNode = (props: NodeProps<Node<NodeData>>) => {
       const result = await response.json();
 
       if (result.success && result.data) {
-        updateNodeData(id, { isLoading: false, storyboardShots: result.data, shotCount });
+        if (!complete({ storyboardShots: result.data, shotCount })) return;
 
         // 自动创建文本节点
         const nodesToCreate = result.data.map((shot: { title: string; description: string }) => ({
@@ -65,12 +65,12 @@ const CreativeDescNode = (props: NodeProps<Node<NodeData>>) => {
         );
       }
     } catch (error) {
-      updateNodeData(id, {
+      complete({
         isLoading: false,
         error: error instanceof Error ? error.message : "分镜生成失败",
       });
     }
-  }, [id, data.prompt, data.model, shotCount, updateNodeData, addMultipleConnectedNodes]);
+  }, [id, data.prompt, data.model, shotCount, addMultipleConnectedNodes]);
 
   const successCount = data.storyboardShots?.length || 0;
   const hasResult = !!data.storyboardShots && !data.isLoading;

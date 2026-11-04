@@ -221,3 +221,109 @@ test('undoing queued-task deletion restores existing media and task status witho
   expect(submissions).toBe(0);
   await expect.poll(async () => (await (await request.get(`/api/workflow/${id}`)).json()).data.nodes[0]?.data.imageSrc).toBe('https://oss.test/previous.png');
 });
+
+test('history view paginates dated batches, traces abandoned redo and stays consistent after reopening', async ({ page, request }) => {
+  const id = crypto.randomUUID();
+  await request.put(`/api/workflow/${id}`, { data: { id, requestId: crypto.randomUUID(), baseVersion: 0,
+    snapshot: { name: 'History view', nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } } } });
+  await page.goto(`/canvas?project=${id}`);
+  const rename = async (name: string) => {
+    await page.getByTitle('修改项目名称').click();
+    const input = page.getByPlaceholder('项目名称...');
+    await input.fill(name);
+    await input.press('Enter');
+  };
+  await rename('Abandoned name');
+  await page.getByRole('button', { name: '撤销', exact: true }).click();
+  await rename('Current name');
+  await page.getByRole('button', { name: '操作历史', exact: true }).click();
+  const panel = page.getByRole('dialog', { name: '操作历史' });
+  await expect(panel.getByText('已撤销 · 重做分支已失效', { exact: true })).toBeVisible();
+  const abandoned = panel.getByTestId('history-batch').filter({ hasText: '重做分支已失效' });
+  await abandoned.getByRole('button', { name: '查看批次详情' }).click();
+  await expect(abandoned.getByText('项目名称：History view → Abandoned name', { exact: true })).toBeVisible();
+  await expect(abandoned.locator('time').first()).toHaveAttribute('datetime', /T/);
+  await expect(panel.getByRole('button', { name: /重放|恢复此版本/ })).toHaveCount(0);
+  await panel.getByRole('button', { name: '关闭历史' }).click();
+  for (let i = 0; i < 21; i++) await rename(`Page name ${i}`);
+  await expect.poll(async () => (await (await request.get(`/api/workflow/${id}`)).json()).data?.name).toBe('Page name 20');
+  await page.reload();
+  await page.getByRole('button', { name: '操作历史', exact: true }).click();
+  await expect(panel.getByTestId('history-batch')).toHaveCount(20);
+  await panel.getByRole('button', { name: '下一页批次' }).click();
+  await expect(panel.getByTestId('history-batch')).toHaveCount(3);
+  await expect(panel.getByText('已撤销 · 重做分支已失效', { exact: true })).toBeVisible();
+  await expect(panel.getByTestId('history-save-status')).toHaveText('已同步');
+  await page.keyboard.press('Escape');
+  await expect(panel).not.toBeVisible();
+});
+
+test('history internal edits paginate and offline records survive a closed page without claiming synced', async ({ page, context, request }) => {
+  const id = crypto.randomUUID();
+  await request.put(`/api/workflow/${id}`, { data: { id, requestId: crypto.randomUUID(), baseVersion: 0,
+    snapshot: { name: 'Offline history', nodes: [{ id: 'text', type: 'text', position: { x: 350, y: 120 },
+      data: { type: 'text', label: 'Text', prompt: [{ text: 'before' }] } }], edges: [], viewport: { x: 0, y: 0, zoom: 1 } } } });
+  await context.route(`**/api/workflow/${id}`, route => route.request().method() === 'PUT' ? route.abort() : route.continue());
+  await page.goto(`/canvas?project=${id}`);
+  await page.getByTestId('text-content').click();
+  const editor = page.getByRole('textbox', { name: '提示词' });
+  await editor.click();
+  await editor.press('ControlOrMeta+End');
+  await editor.pressSequentially(' twenty five internal edits');
+  await page.getByRole('button', { name: '操作历史', exact: true }).click();
+  const panel = page.getByRole('dialog', { name: '操作历史' });
+  await expect(panel.getByTestId('history-save-status')).toHaveText('同步失败/冲突');
+  await expect(panel.getByTestId('history-batch')).toHaveCount(1);
+  await panel.getByRole('button', { name: '查看批次详情' }).click();
+  await panel.getByRole('button', { name: '下一页内部操作' }).click();
+  await expect(panel.getByText(/before twenty five internal edits/, { exact: false })).toBeVisible();
+  await page.close();
+  const reopened = await context.newPage();
+  await reopened.goto(`/canvas?project=${id}`);
+  await reopened.getByRole('button', { name: '操作历史', exact: true }).click();
+  await expect(reopened.getByTestId('history-batch')).toHaveCount(1);
+  await expect(reopened.getByTestId('history-save-status')).not.toHaveText('已同步');
+  await context.unroute(`**/api/workflow/${id}`);
+  await reopened.getByRole('button', { name: '关闭历史' }).click();
+  await reopened.getByRole('button', { name: '保存', exact: true }).click();
+  await expect(reopened.getByTestId('canvas-save-status')).toHaveText('已同步');
+  await reopened.getByRole('button', { name: '撤销', exact: true }).click();
+  await expect(reopened.getByTestId('text-content')).toHaveText('before');
+  await reopened.getByRole('button', { name: '重做', exact: true }).click();
+  await reopened.getByRole('button', { name: '操作历史', exact: true }).click();
+  await expect(reopened.getByText('已重做 · 在撤销序列中', { exact: true })).toBeVisible();
+});
+
+test('workspace history loads metadata pages without downloading a canvas or historical originals', async ({ page, request }) => {
+  const id = crypto.randomUUID();
+  // A legacy envelope with a large retained original: the viewer must never request it.
+  const records = Array.from({ length: 25 }, (_, i) => ({ id: `old-${i}`, label: `旧批次 ${i}`, patches: [], inverse: [] }));
+  await request.put(`/api/workflow/${id}`, { data: { id, requestId: crypto.randomUUID(), baseVersion: 0,
+    snapshot: { name: `Paged ${id}`, nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 }, history: {
+      schema: 1, checkpoint: { name: `Paged ${id}`, nodes: [], edges: [] }, records, undo: [], redo: [], receipts: [],
+      assets: { retained: 'data:image/png;base64,' + 'A'.repeat(100_000) },
+      operations: records.map(record => ({ id: record.id, kind: 'edit', patches: [], inverse: [], details: ['标题变更'] })),
+    } } } });
+  const canvasRequests: string[] = [];
+  await page.route(`**/api/workflow/${id}`, route => { canvasRequests.push(route.request().url()); return route.abort(); });
+  await page.goto('/workspace');
+  await page.getByLabel('搜索项目和文件夹').fill(`Paged ${id}`);
+  await page.getByRole('button', { name: `Paged ${id}的更多操作` }).click();
+  await page.getByRole('menuitem', { name: '操作历史', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '服务端操作历史' })).toBeVisible();
+  await expect(page.getByTestId('remote-history-batch')).toHaveCount(20);
+  await page.getByRole('button', { name: '下一页批次' }).click();
+  await expect(page.getByTestId('remote-history-batch')).toHaveCount(5);
+  await page.getByRole('button', { name: '查看批次 旧批次 0' }).click();
+  await page.getByRole('button', { name: '查看受影响内容' }).click();
+  await expect(page.getByText('标题变更', { exact: true })).toBeVisible();
+  expect(canvasRequests).toEqual([]);
+  const response = await request.get(`/api/workflow/${id}/history`);
+  const body = await response.text();
+  expect(body).not.toMatch(/data:image|patches|checkpoint|assets/);
+  expect(body.length).toBeLessThan(10_000);
+  expect((await request.get(`/api/workflow/${id}/history?version=0`)).status()).toBe(409);
+  expect((await request.get(`/api/workflow/${id}/history?page=-1`)).status()).toBe(400);
+  await request.delete(`/api/workflow/${id}`);
+  expect((await request.get(`/api/workflow/${id}/history`)).status()).toBe(410);
+});

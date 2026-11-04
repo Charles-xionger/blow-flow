@@ -249,3 +249,84 @@ test('switching models detaches incompatible inputs atomically and undo restores
   edit.undo();
   assert.equal(node(added), undefined);
 });
+
+test('project rename and remaining node content undo without migration boundaries and retain dated batch details after reopen', async () => {
+  const edit = start();
+  const id = edit.addNode(T.CREATIVE_DESC);
+  edit.setProjectName('Storyboard project');
+  edit.updateNodeData(id, { storyboardShots: [{ shotNumber: 1, title: 'Opening', description: 'Forest' }], optimizedPrompt: 'A forest' });
+  const repoName = 'history-view-' + crypto.randomUUID();
+  await createCanvasRepository(repoName).commit('project', canvasSnapshot(store.getState()), 0);
+  const saved = await createCanvasRepository(repoName).read('project');
+  assert.equal(saved.snapshot.history.notice, undefined);
+  assert.ok(saved.snapshot.history.operations.every(op => Number.isFinite(op.time)));
+  assert.ok(saved.snapshot.history.operations.at(-1).details.some(detail => detail.includes('分镜')));
+  edit.undo();
+  assert.equal(node(id).data.storyboardShots, undefined);
+  edit.undo();
+  assert.equal(store.getState().projectName, '未命名项目');
+  edit.redo();
+  assert.equal(store.getState().projectName, 'Storyboard project');
+});
+
+test('mixed edits replay in order after offline reopen, lost acknowledgement and project switching', async () => {
+  process.env.DATABASE_PATH = ':memory:';
+  const { saveWorkflow, getWorkflowById } = require('../lib/db/workflows.ts');
+  const { closeDatabase } = require('../lib/db/index.ts');
+  const edit = start();
+  const text = edit.addNode(T.TEXT);
+  const image = edit.addNode(T.ORIGINAL_IMAGE);
+  const secondText = edit.addNode(T.TEXT);
+  const target = edit.addNode(T.TEXT_TO_IMAGE);
+  const content = () => {
+    const snapshot = canvasSnapshot(store.getState());
+    return JSON.parse(JSON.stringify({ name: snapshot.name, edges: snapshot.edges, nodes: snapshot.nodes.map(n => ({ ...n,
+      data: Object.fromEntries(Object.entries(n.data).filter(([key]) => !/^generation|^pendingGeneration$|^isLoading$|^error$/.test(key))) })) }));
+  };
+  const frames = [content()];
+  edit.beginEdit('text');
+  edit.updateNodeData(text, { prompt: [{ text: 'A forest' }] });
+  edit.updateNodeData(text, { prompt: [{ text: 'A misty forest' }] });
+  edit.endEdit('text'); frames.push(content());
+  connect(text, target); frames.push(content());
+  connect(secondText, target); frames.push(content());
+  edit.reorderUpstream(target, [secondText, text]); frames.push(content());
+  edit.groupNodes([text, image]); frames.push(content());
+  edit.duplicateNode(target); frames.push(content());
+  edit.updateNodeData(image, { imageSrc: '/original-replacement.png' }); frames.push(content());
+  edit.deleteNode(text); frames.push(content());
+  const repoName = 'mixed-history-' + crypto.randomUUID();
+  let repository = createCanvasRepository(repoName);
+  try {
+    await repository.commit('a', canvasSnapshot(store.getState()), 0);
+    const sent = await repository.pending('a');
+    saveWorkflow(sent); // The server commits, but the client loses its response.
+    edit.undo();
+    await repository.commit('a', canvasSnapshot(store.getState()), 0);
+    repository = createCanvasRepository(repoName); // offline close/reopen
+    assert.equal((await repository.pending('a')).requestId, sent.requestId);
+    await repository.acknowledge(sent, saveWorkflow(await repository.pending('a')));
+    assert.equal(getWorkflowById('a').version, 1);
+    const next = await repository.pending('a');
+    await repository.acknowledge(next, saveWorkflow(next));
+    const a = await repository.read('a');
+    assert.equal(new Set(a.snapshot.history.operations.map(op => op.id)).size, a.snapshot.history.operations.length);
+    await repository.adopt('b', { name: 'Other project', nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } }, 0);
+    for (let i = 0; i < 3; i++) {
+      const b = await repository.initializeHistory('b');
+      edit.loadWorkflow({ id: 'b', ...b.snapshot });
+      assert.equal(store.getState().history.undo.length, 0);
+      edit.loadWorkflow({ id: 'a', ...a.snapshot });
+      assert.deepEqual(content(), frames.at(-2));
+    }
+    edit.redo(); assert.deepEqual(content(), frames.at(-1));
+    for (let i = frames.length - 2; i >= 0; i--) { edit.undo(); assert.deepEqual(content(), frames[i]); }
+    for (let i = 1; i < frames.length; i++) { edit.redo(); assert.deepEqual(content(), frames[i]); }
+    const steps = store.getState().history.operations.length;
+    edit.setSelectedNodeIds([target]); edit.setViewport({ x: 30, y: 40, zoom: 1.5 });
+    edit.updateNodeData(target, { isLoading: true, generationStatus: 'running' });
+    assert.equal(store.getState().history.operations.length, steps);
+    assert.throws(() => saveWorkflow({ ...next, requestId: 'stale-writer', baseVersion: 0 }), /version conflict/);
+    assert.deepEqual((await repository.read('a')).snapshot, a.snapshot);
+  } finally { closeDatabase(); }
+});

@@ -229,10 +229,6 @@ function createCanvasNode(type: NodeType, position: { x: number; y: number }, da
 
 }
 
-const editableData = new Set(['label', 'customTitle', 'prompt', 'model', 'aspectRatio', 'resolution', 'duration', 'count',
-  'promptOptimize', 'generationWidth', 'generationHeight', 'generationSizePreset', 'usesGenerationTasks',
-  'videoResolution', 'videoAspectRatio', 'videoDuration', 'videoInstanceType', 'shotCount',
-  'imageSrc', 'videoSrc', 'inputImages', 'outputArtifacts', 'videoReferences', 'videoReferenceOrder', 'videoReferenceAudio', 'characterId', 'characterData']);
 const runtimeData = new Set(['isLoading', 'error', 'generationTaskId', 'pendingGeneration', 'generationStatus',
   'generationBlocked', 'generationCanRetrySave', 'generationSaving', 'generationNodeId', 'generationContentVersion', 'generationBindingVersion', 'generationRevision', 'generationResultBlocked', 'generationResultArtifacts', 'activeToolbarItem', 'isStackOpen']);
 
@@ -242,7 +238,7 @@ function versionContent(before: CanvasNode[], after: CanvasNode[], edges: Edge[]
   const previous = new Map(before.map(node => [node.id, node]));
   const affected = new Set(after.filter(node => {
     const old = previous.get(node.id);
-    return old && old !== node && [...editableData].some(key => old.data[key] !== node.data[key] && canonicalJSON(old.data[key]) !== canonicalJSON(node.data[key]));
+    return old && old !== node && [...new Set([...Object.keys(old.data), ...Object.keys(node.data)])].filter(key => !runtimeData.has(key)).some(key => old.data[key] !== node.data[key] && canonicalJSON(old.data[key]) !== canonicalJSON(node.data[key]));
   }).map(node => node.id));
   if (previousEdges !== edges) {
     const incoming = (items: Edge[]) => {
@@ -340,7 +336,11 @@ export const useCanvasStore = create<CanvasState>()(
         contextMenu: null,
 
         // 节点和边的变化处理
-        setNodes: (nodes) => set({ nodes }),
+        setNodes: (nodes) => {
+          const ids = new Set(nodes.map(node => node.id));
+          const edges = get().edges.filter(edge => ids.has(edge.source) && ids.has(edge.target));
+          commitGraph({ nodes: syncReferences(nodes, get().edges, edges), edges }, '编辑节点');
+        },
         importGraph: (nodes, edges, options = {}) => {
           // Legacy exports may contain edges to omitted nodes; detach those references.
           if (!Array.isArray(nodes) || !Array.isArray(edges)) throw new Error('画布节点与连线格式错误');
@@ -366,7 +366,7 @@ export const useCanvasStore = create<CanvasState>()(
             projectName: options.name?.trim() || '未命名项目',
             ...(options.viewport ? { viewport: options.viewport } : {}) }, '导入画布');
         },
-        setEdges: (edges) => set({ edges }),
+        setEdges: (edges) => commitGraph({ edges, nodes: syncReferences(get().nodes, get().edges, edges) }, '编辑连线'),
         setViewport: (viewport) => set({ viewport }),
 
         onNodesChange: (changes: NodeChange[]) => {
@@ -515,7 +515,7 @@ export const useCanvasStore = create<CanvasState>()(
             isValidCanvasConnection(edge, nodes, beforeEdges.filter(other => other.id !== edge.id)));
           if (edges.length !== beforeEdges.length) nodes = syncReferences(nodes, beforeEdges, edges);
           nodes = versionContent(get().nodes, nodes, edges, 'generationStatus' in data ? nodeId : undefined, beforeEdges);
-          edits.change({ nodes, edges }, { record: Object.keys(data).every(key => editableData.has(key) || runtimeData.has(key)), label: '编辑节点内容或参数' });
+          edits.change({ nodes, edges }, { record: true, label: '编辑节点内容或参数' });
         },
 
         // 复制节点
@@ -591,7 +591,8 @@ export const useCanvasStore = create<CanvasState>()(
 
         // 工作流管理
         setProjectName: (name: string) => {
-          set({ projectName: name });
+          edits.end();
+          edits.change({ projectName: name }, { record: true, label: '修改项目名称' });
         },
 
         setCurrentWorkflowId: (id: string | null) => {

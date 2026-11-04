@@ -115,3 +115,12 @@ export function deleteWorkflow(id: string): boolean {
     return result.changes > 0 || isWorkflowDeleted(id);
   }).immediate();
 }
+
+/** Read-only history projection: don't load current nodes or retained originals. */
+export function getWorkflowHistory(id: string) {
+  const row = getDatabase().prepare(`SELECT name, version,
+    json_extract(json_remove(data, '$.history.assets', '$.history.checkpoint', '$.history.baseline', '$.history.generations'), '$.history') AS history
+    FROM workflows WHERE id = ? AND deleted_at IS NULL`).get(id) as { name: string; version: number; history: string | null } | undefined;
+  return row ? { name: row.name, version: row.version,
+    history: row.history ? JSON.parse(row.history) as import('../canvas/history-view').HistorySource : undefined } : undefined;
+}

@@ -1,3 +1,4 @@
+import { historyDetails } from './history-summary';
 import { packHistoryMedia, resolveHistoryMedia } from './history-media';
 import { Immer, enablePatches, type Patch } from 'immer';
 import type { Node, Edge } from '@xyflow/react';
@@ -7,7 +8,10 @@ enablePatches();
 const immer = new Immer({ autoFreeze: false });
 
 type Content = { nodes: Node[]; edges: Edge[]; name: string };
-interface HistoryOperation {
+export interface HistoryOperation {
+  time?: number;
+  label?: string;
+  details?: string[];
   id: string;
   batchId?: string;
   kind: 'edit' | 'undo' | 'redo' | 'boundary' | 'noop';
@@ -21,7 +25,7 @@ export interface CanvasHistory {
   checkpoint: Content;
   baseline?: Content;
   operations: HistoryOperation[];
-  records: { id: string; label: string; patches: Patch[]; inverse: Patch[] }[];
+  records: { id: string; label: string; patches: Patch[]; inverse: Patch[]; time?: number }[];
   undo: string[];
   redo: string[];
   receipts: string[];
@@ -99,7 +103,7 @@ function expectedContent(history: CanvasHistory): Content {
 }
 function boundary(history: CanvasHistory, current: Content): CanvasHistory {
   return { ...history, baseline: current, undo: [], redo: [],
-    notice: '此操作暂不支持撤销，已保留此前历史并开始新的撤销区间。' };
+    notice: '检测到历史之外的内容变更；此前记录仍保留，当前撤销区间已重新开始。' };
 }
 
 export function restoredHistory(state: Pick<State, 'nodes' | 'edges' | 'projectName' | 'history'>): CanvasHistory {
@@ -156,16 +160,17 @@ export function createCanvasHistory(get: () => State, publish: (state: Partial<S
     const [, currentPatches, currentInverse] = difference(before, after);
     if (!currentPatches.length) {
       set({ ...update, ...(state.history && history !== state.history ? { history } : {}), ...(options.id ? { history: { ...history, receipts: [...history.receipts, options.id],
-        operations: [...(history.operations ?? []), { id: options.id, kind: 'noop', patches: [], inverse: [] }] } } : {}) }); return;
+        operations: [...(history.operations ?? []), { id: options.id, kind: 'noop', time: Date.now(), patches: [], inverse: [] }] } } : {}) }); return;
     }
     const operationId = options.id ?? crypto.randomUUID();
-    const operation: HistoryOperation = { id: operationId, batchId: batch?.id,
+    const operation: HistoryOperation = { id: operationId, batchId: batch?.id ?? operationId,
+      time: Date.now(), label: options.label ?? '编辑', details: historyDetails(before, after),
       kind: options.record ? 'edit' : 'boundary', patches: currentPatches, inverse: currentInverse };
     const operations = [...(history.operations ?? []), operation];
     if (!options.record) {
       batch = undefined;
       const id = operationId;
-      set({ ...update, history: { ...boundary(history, after), operations, records: [...history.records, { id, label: '未迁移操作：历史边界', patches: currentPatches, inverse: [] }],
+      set({ ...update, history: { ...boundary(history, after), operations, records: [...history.records, { id, label: '外部内容变更', patches: currentPatches, inverse: [] }],
         receipts: [...history.receipts, id] } });
       return;
     }
@@ -176,7 +181,8 @@ export function createCanvasHistory(get: () => State, publish: (state: Partial<S
     }
     const base = batch?.history ?? history;
     const id = batch?.id ?? operationId;
-    const entry = { id, label: options.label ?? '编辑', patches, inverse };
+    const entry = { id, label: options.label ?? '编辑', patches, inverse,
+      time: history.records.find(record => record.id === id)?.time ?? operation.time };
     const nextHistory: CanvasHistory = { ...base, assets: history.assets, operations, records: [...base.records, entry],
       undo: [...base.undo, id], redo: [], receipts: [...new Set([...history.receipts, operationId])] };
     expectedContents.set(nextHistory, after);
@@ -203,7 +209,7 @@ export function createCanvasHistory(get: () => State, publish: (state: Partial<S
     }
     const opposite = direction === 'undo' ? 'redo' : 'undo';
     set({ ...restored, nodes: next.nodes, edges: next.edges, history: { ...history,
-      operations: [...(history.operations ?? []), { id, batchId: entry.id, kind: direction,
+      operations: [...(history.operations ?? []), { id, batchId: entry.id, kind: direction, time: Date.now(), label: entry.label, details: historyDetails(content(state), content({ ...state, nodes: next.nodes, edges: next.edges, projectName: next.name })),
         patches: direction === 'undo' ? entry.inverse : entry.patches,
         inverse: direction === 'undo' ? entry.patches : entry.inverse }],
       [direction]: history[direction].slice(0, -1),
@@ -232,7 +238,12 @@ export function validateHistory(value: unknown, state: Pick<State, 'nodes' | 'ed
       !Array.isArray(history.records) || !history.records.every(entry => entry && typeof entry.id === 'string' && typeof entry.label === 'string' && patches(entry.patches) && patches(entry.inverse)) ||
       !strings(history.undo) || !strings(history.redo) || !strings(history.receipts)) throw new Error('Invalid canvas history');
   if (history.operations !== undefined && (!Array.isArray(history.operations) || !history.operations.every(op => op && typeof op.id === 'string' &&
-      ['edit', 'undo', 'redo', 'boundary', 'noop'].includes(op.kind) && patches(op.patches) && patches(op.inverse)))) throw new Error('Invalid canvas history operations');
+      (op.batchId === undefined || typeof op.batchId === 'string') && ['edit', 'undo', 'redo', 'boundary', 'noop'].includes(op.kind) && patches(op.patches) && patches(op.inverse)))) throw new Error('Invalid canvas history operations');
+  const metadata = (entry: { time?: number; label?: string; details?: string[] }) =>
+    (entry.time === undefined || Number.isFinite(entry.time) && entry.time >= 0 && entry.time <= 8.64e15) &&
+    (entry.label === undefined || typeof entry.label === 'string') &&
+    (entry.details === undefined || strings(entry.details));
+  if (!history.records.every(metadata) || !(history.operations ?? []).every(metadata)) throw new Error('Invalid history metadata');
   const ids = new Set(history.records.map(entry => entry.id));
   if (ids.size !== history.records.length || new Set([...history.undo, ...history.redo]).size !== history.undo.length + history.redo.length ||
       [...history.undo, ...history.redo].some(id => !ids.has(id))) throw new Error('Invalid canvas history position');

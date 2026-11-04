@@ -150,6 +150,7 @@ export default function Workspace() {
           <button role="menuitem" className={styles.dangerText} onClick={() => showModal({ kind: "purge", projects: [entry.value] })}>永久删除</button>
         </> : <>
           <Link role="menuitem" href={`/canvas?project=${encodeURIComponent(entry.value.id)}`} prefetch={false}>打开画布</Link>
+          <Link role="menuitem" href={`/canvas/history?project=${encodeURIComponent(entry.value.id)}`} prefetch={false}>操作历史</Link>
           <button role="menuitem" onClick={() => showModal({ kind: "rename-project", projects: [entry.value] })}>重命名</button>
           <button role="menuitem" onClick={() => { toggle(entry.value.id); setMenu(null); }}>选择</button>
           <button role="menuitem" onClick={() => showModal({ kind: "move", projects: [entry.value] })}>移动至文件夹</button>
