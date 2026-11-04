@@ -1,3 +1,4 @@
+import { validReferenceUrl } from '../generation/reference-files';
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv-provider.js';
 import type Database from 'better-sqlite3';
 import { randomUUID, createHash } from 'node:crypto';
@@ -116,10 +117,12 @@ export class AgentService {
         if ((input.references?.length ?? 0) > 8)
             throw new Error('Maximum eight references');
         for (const reference of input.references ?? []) {
-            if (!reference.nodeId && (!/^image\/(png|jpeg|webp)$/.test(reference.mimeType ?? '') || !reference.data || reference.data.length > 14000000 || !/^[a-zA-Z0-9+/=]+$/.test(reference.data)))
+            if (reference.url && (!validReferenceUrl(reference.url) || !/^image\/(png|jpeg|webp)$/.test(reference.mimeType ?? '')))
+                throw new Error('Invalid image reference');
+            if (!reference.nodeId && !reference.url && (!/^image\/(png|jpeg|webp)$/.test(reference.mimeType ?? '') || !reference.data || reference.data.length > 14000000 || !/^[a-zA-Z0-9+/=]+$/.test(reference.data)))
                 throw new Error('Invalid image reference');
         }
-        return this.request(projectId, input.requestId, { type: 'send', ...input }, () => { const prior = this.snapshot(projectId).tasks.find(t => active.has(t.status)); const task = prior ?? { id: randomUUID(), projectId, modelId: input.modelId, status: 'queued' as const, steps: [], createdAt: Date.now() }; const interrupted = task.status === 'interrupted'; if (prior) this.lifecycle.forEach(h => h.send?.(task)); if (task.status === 'waiting' && task.question && !task.question.answer) { task.question.cancelled = true; task.status = 'queued'; delete task.workerId; delete task.runId; } if (interrupted) task.status = 'interrupted'; if (task.awaitingGeneration && task.status !== 'interrupted') { task.status = 'queued'; delete task.awaitingGeneration; } this.save(task); this.message(task, 'user', input.text, input.references); return task; });
+        return this.request(projectId, input.requestId, { type: 'send', ...input }, () => { for (const reference of input.references ?? []) { if (reference.nodeId && !this.canvas(projectId).nodes.some((node: {id:string}) => node.id === reference.nodeId)) throw new Error('Reference node not found'); } const prior = this.snapshot(projectId).tasks.find(t => active.has(t.status)); const task = prior ?? { id: randomUUID(), projectId, modelId: input.modelId, status: 'queued' as const, steps: [], createdAt: Date.now() }; const interrupted = task.status === 'interrupted'; if (prior) this.lifecycle.forEach(h => h.send?.(task)); if (task.status === 'waiting' && task.question && !task.question.answer) { task.question.cancelled = true; task.status = 'queued'; delete task.workerId; delete task.runId; } if (interrupted) task.status = 'interrupted'; if (task.awaitingGeneration && task.status !== 'interrupted') { task.status = 'queued'; delete task.awaitingGeneration; } this.save(task); this.message(task, 'user', input.text, input.references); return task; });
     }
     stop(projectId: string, requestId: string) {
         return this.request(projectId, requestId, { type: 'stop' }, () => { const task = this.snapshot(projectId).tasks.find(t => active.has(t.status)) ?? this.snapshot(projectId).tasks.at(-1); if (!task)

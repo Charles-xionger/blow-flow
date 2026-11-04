@@ -1,6 +1,8 @@
 export type AgentStatus = 'queued' | 'running' | 'waiting' | 'interrupted' | 'completed' | 'stopped' | 'failed';
 export interface AgentReference {
     nodeId?: string;
+    url?: string;
+    assetId?: string;
     data?: string;
     mimeType?: string;
     name?: string;

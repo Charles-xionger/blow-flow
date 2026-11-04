@@ -2,15 +2,17 @@ import sharp from 'sharp';
 import { readReferenceBody, validReferenceUrl } from '../generation/reference-files';
 import type { AgentReference } from './types';
 import type { AgentService } from './service';
-export async function resolveReference(service: AgentService, projectId: string, reference: AgentReference) {
+export async function resolveReference(service: AgentService, projectId: string, reference: AgentReference, options: { historical?: boolean } = {}) {
     let data = reference.data;
     let context = reference.name ?? '用户参考图';
     if (reference.nodeId) {
         const node = service.canvas(projectId).nodes.find((n: {
             id: string;
         }) => n.id === reference.nodeId);
-        if (!node)
+        if (!node) {
+            if (options.historical) return { context: JSON.stringify({ nodeId: reference.nodeId, name: reference.name, unavailable: '此前引用的节点已删除' }) };
             throw new Error('Reference node not found');
+        }
         context = JSON.stringify({ id: node.id, type: node.type, data: node.data });
         const src = node.data.imageSrc;
         if (typeof src !== 'string')
@@ -24,6 +26,12 @@ export async function resolveReference(service: AgentService, projectId: string,
             const response = await fetch(src, { redirect: 'error', signal: AbortSignal.timeout(30000) });
             data = (await readReferenceBody(response)).toString('base64');
         }
+    }
+    if (reference.url) {
+        if (!validReferenceUrl(reference.url)) throw new Error('Reference must use project asset storage');
+        context = JSON.stringify({ name: reference.name, assetId: reference.assetId, kind: 'image', url: reference.url });
+        const response = await fetch(reference.url, { redirect: 'error', signal: AbortSignal.timeout(30000) });
+        data = (await readReferenceBody(response)).toString('base64');
     }
     if (!data)
         return { context };

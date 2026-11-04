@@ -41,6 +41,9 @@ export function registerGenerationTools(service: AgentService, generation: Gener
                 }
                 if (task.saveStatus === 'saved' && item.nextSaveRetry) { delete item.nextSaveRetry; changed = true; }
                 if (task.saveStatus !== 'saved' || !task.artifacts.length) continue;
+                if (!generation.isLatestForTarget(task.id)) {
+                    item.attached = true; item.note = '已有较新的生成任务；产物保留在生成任务中。'; changed = true; continue;
+                }
                 // Do not register browser generation recovery: this receipt is the sole attachment owner.
                 try {
                     const result = db.transaction(() => {
@@ -51,10 +54,7 @@ export function registerGenerationTools(service: AgentService, generation: Gener
                         // Own output attachment cannot revoke sibling items whose approved inputs stay frozen.
                         // Only advance a matching baseline; an intervening human edit must still invalidate approval.
                         if (after !== before) for (const sibling of batch.items) {
-                            const row = db.prepare('SELECT bindings FROM generation_permissions WHERE request_id=?').get(sibling.request.requestId) as {bindings:string};
-                            const bindings = JSON.parse(row.bindings) as {id:string;version:number}[];
-                            for (const binding of bindings) if (binding.id === item.request.nodeId && binding.version === before) binding.version = after;
-                            db.prepare('UPDATE generation_permissions SET bindings=? WHERE request_id=?').run(JSON.stringify(bindings),sibling.request.requestId);
+                            generation.permissions.advanceBinding(sibling.request.requestId, item.request.nodeId, before, after);
                         }
                         return result;
                     }).immediate();
@@ -81,7 +81,7 @@ export function registerGenerationTools(service: AgentService, generation: Gener
             if (text !== '确认生成') { revoke(task.id); return; }
             for (const item of batch.items) {
                 // Queue and grant permission atomically with the user's persisted answer.
-                db.prepare('UPDATE generation_permissions SET approved=1 WHERE request_id=?').run(item.request.requestId);
+                generation.permissions.approve(item.request.requestId);
                 item.taskId = generation.create(item.request).id;
             }
             batch.status = 'approved'; save(batch);
@@ -111,7 +111,7 @@ export function registerGenerationTools(service: AgentService, generation: Gener
             return db.transaction(() => {
                 if (!service.isExecuting(task)) throw new Error('Task ownership changed');
                 revoke(task.id);
-                for (const item of items) db.prepare('INSERT INTO generation_permissions VALUES(?,?,0,?,?)').run(item.request.requestId, task.id, JSON.stringify(item.bindings), JSON.stringify(item.request));
+                for (const item of items) generation.permissions.prepare(task.id, item.request, item.bindings);
                 const batch: Batch = { id, taskId: task.id, projectId: task.projectId, status: 'pending', items: items.map(item => ({request:item.request})) };
                 save(batch);
                 const scope = items.map(({request}) => { const model = generation.config.models.find(model => model.id === request.modelId)!; const preset = model.adapter === 'gemini-image' ? geminiImageParameters(request.input) : undefined; return {nodeId:request.nodeId,modelId:request.modelId,input:request.input,specification:preset ? `${preset.size} · ${preset.aspectRatio}（实际像素尺寸由模型决定）` : `${request.input.width} × ${request.input.height}`}; });

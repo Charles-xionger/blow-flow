@@ -1,3 +1,4 @@
+import { GenerationPermissions } from './permissions';
 import { geminiImageParameters } from './gemini-image';
 import { validGenerationDimensions } from './dimensions';
 import { validReferenceUrl } from './reference-files';
@@ -19,8 +20,10 @@ export interface TaskRecord {
 export interface TaskSnapshot { model: ModelConfig; connection: ConnectionConfig }
 
 export class GenerationService {
+  readonly permissions: GenerationPermissions;
   constructor(readonly db: Database.Database, readonly config: GenerationConfig) {
     validateGenerationConfig(config);
+    this.permissions = new GenerationPermissions(db);
     db.pragma('busy_timeout = 5000');
     db.exec(`CREATE TABLE IF NOT EXISTS generation_tasks (
       id TEXT PRIMARY KEY, request_id TEXT NOT NULL UNIQUE, request_json TEXT NOT NULL,
@@ -33,9 +36,6 @@ export class GenerationService {
       CREATE INDEX IF NOT EXISTS generation_queue ON generation_tasks(connection_id, status, created_at);
       CREATE TABLE IF NOT EXISTS generation_deleted_nodes (
         canvas_id TEXT NOT NULL, node_id TEXT NOT NULL, PRIMARY KEY(canvas_id, node_id));
-      CREATE TABLE IF NOT EXISTS generation_permissions (
-        request_id TEXT PRIMARY KEY, owner_task_id TEXT NOT NULL, approved INTEGER NOT NULL DEFAULT 0,
-        bindings TEXT NOT NULL, request_json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS generation_diagnostics (
         id INTEGER PRIMARY KEY, task_id TEXT NOT NULL, created_at INTEGER NOT NULL, response TEXT NOT NULL);
     `);
@@ -72,38 +72,13 @@ export class GenerationService {
   }
   cancelRequests(requestIds: string[]) {
     for (const id of requestIds) {
-      this.db.prepare('UPDATE generation_permissions SET approved=0 WHERE request_id=?').run(id);
+      this.permissions.revoke(id);
       this.db.prepare("UPDATE generation_tasks SET status='cancelled', lease_token=NULL, lease_until=0, updated_at=? WHERE request_id=? AND (status='queued' OR (status='submitting' AND submission_started=0))").run(Date.now(), id);
     }
   }
-  /** Restart recovery pauses unpaid work without revoking its exact approval. */
-  submissionPaused(task: TaskRecord): boolean {
-    const permission = this.db.prepare('SELECT owner_task_id FROM generation_permissions WHERE request_id=?').get(task.request_id) as {owner_task_id:string}|undefined;
-    if (!permission) return false;
-    const owner = this.db.prepare('SELECT data FROM agent_tasks WHERE id=?').get(permission.owner_task_id) as {data:string}|undefined;
-    if (!owner) return false;
-    const state = JSON.parse(owner.data);
-    if (state.status === 'interrupted') return true;
-    if (!state.workerId || ['stopped','failed','completed'].includes(state.status)) return false;
-    const lease = this.db.prepare('SELECT lease_until FROM agent_workers WHERE id=?').get(state.workerId) as {lease_until:number}|undefined;
-    return !lease || lease.lease_until <= Date.now();
-  }
-  /** Runs in the same immediate transaction as recording the paid boundary. */
-  authorizeSubmission(task: TaskRecord): boolean {
-    const permission = this.db.prepare('SELECT * FROM generation_permissions WHERE request_id=?').get(task.request_id) as { approved: number; owner_task_id: string; bindings: string; request_json: string } | undefined;
-    if (!permission) return true; // Existing manual generation follows its existing rules.
-    if (!permission.approved || permission.request_json !== task.request_json) return false;
-    const owner = this.db.prepare('SELECT status FROM agent_tasks WHERE id=?').get(permission.owner_task_id) as { status: string } | undefined;
-    if (!owner || ['stopped', 'failed', 'interrupted'].includes(owner.status)) return false;
-    const request: CreateGeneration = JSON.parse(task.request_json);
-    const row = this.db.prepare('SELECT data FROM workflows WHERE id=? AND deleted_at IS NULL').get(request.canvasId) as {data:string}|undefined;
-    if (!row) return false;
-    const canvas = JSON.parse(row.data);
-    return (JSON.parse(permission.bindings) as { id: string; version: number }[]).every(binding => {
-      const node = canvas.nodes.find((n: {id:string}) => n.id === binding.id);
-      return node && (node.data.generationContentVersion ?? 0) === binding.version;
-    });
-  }
+  /** Both reads share the worker's immediate paid-boundary transaction. */
+  submissionPaused(task: TaskRecord): boolean { return this.permissions.paused(task.request_id); }
+  authorizeSubmission(task: TaskRecord): boolean { return this.permissions.authorizes(task.request_id, task.request_json); }
   create(value: unknown): GenerationTask {
     const request = validateRequest(value);
     const requestJson = JSON.stringify(request);
@@ -134,6 +109,14 @@ export class GenerationService {
         connection.id, JSON.stringify({ model, connection }), JSON.stringify(input), now, now, 0);
       return this.get(id);
     }).immediate();
+  }
+  /** Creation order is authoritative, including manual requests and equal timestamps. */
+  isLatestForTarget(id: string): boolean {
+    const latest = this.db.prepare(`SELECT id FROM generation_tasks
+      WHERE json_extract(request_json, '$.canvasId')=(SELECT json_extract(request_json, '$.canvasId') FROM generation_tasks WHERE id=?)
+      AND json_extract(request_json, '$.nodeId')=(SELECT json_extract(request_json, '$.nodeId') FROM generation_tasks WHERE id=?)
+      ORDER BY rowid DESC LIMIT 1`).get(id, id) as {id:string}|undefined;
+    return latest?.id === id;
   }
   get(id: string): GenerationTask {
     const task = this.db.prepare('SELECT * FROM generation_tasks WHERE id = ?').get(id) as TaskRecord | undefined;
