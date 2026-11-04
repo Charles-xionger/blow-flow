@@ -85,7 +85,7 @@ export class CanvasAgentService {
                 nodes = syncReferences(nodes, beforeEdges, edges);
                 assertCanvasGraph(nodes, edges);
                 nodes = versionContent(state.nodes, nodes, edges, undefined, state.edges);
-                history.change({ nodes, edges }, { record: true, id: `${identity}:${index}`, label });
+                history.change({ nodes, edges }, { record: true, id: `${identity}:${index}`, source: 'agent', label });
             });
             history.end();
             if (validateInput) for (const node of state.nodes) for (const segment of promptSegments(node.data.prompt)) {

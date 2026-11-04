@@ -39,10 +39,13 @@ function mergeItems<T extends Item>(before: T[], after: T[], local: T[]): T[] {
     for (const item of after) if (!old.has(item.id) && !localIds.has(item.id)) result.push(item);
     return result;
 }
+export class NonAgentRemoteChange extends Error {}
 export function mergeRemoteCanvas(base: CanvasSnapshot, local: CanvasSnapshot, remote: CanvasSnapshot): CanvasSnapshot {
     const prefix = base.history?.operations ?? [];
     const remoteOps = remote.history?.operations ?? [];
     if (!remote.history || !prefix.every((op, index) => remoteOps[index]?.id === op.id)) throw new Error('Remote history has no common baseline');
+    if (remoteOps.slice(prefix.length).some(op => !local.history?.receipts.includes(op.id) && op.source !== 'agent'))
+        throw new NonAgentRemoteChange('Remote changes require conflict recovery');
     let authoritative = { nodes: base.nodes, edges: base.edges, name: base.name };
     let state = { nodes: local.nodes, edges: local.edges, projectName: local.name, history: local.history, canvasSession: 0 };
     const history = createCanvasHistory(() => state, update => { state = { ...state, ...update }; });
@@ -68,7 +71,7 @@ export function mergeRemoteCanvas(base: CanvasSnapshot, local: CanvasSnapshot, r
             });
             assertCanvasGraph(nodes as CanvasNode[], edges);
             history.change({ nodes: versionContent(state.nodes as CanvasNode[], nodes as CanvasNode[], edges, undefined, state.edges), edges, projectName: authoritative.name !== next.name ? next.name : state.projectName },
-                { record: true, id: operation.id, label: operation.label ?? '助手编辑' });
+                { record: true, id: operation.id, source: operation.source, label: operation.label ?? '助手编辑' });
         }
         authoritative = next;
     }

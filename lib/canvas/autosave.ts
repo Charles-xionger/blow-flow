@@ -1,7 +1,7 @@
 import type { CanvasNode } from '@/types';
 import type { Edge, Viewport } from '@xyflow/react';
 import { createCanvasRepository, type CanvasDraft, type CanvasRepository } from './local-repository';
-import { mergeRemoteCanvas } from './remote-merge';
+import { mergeRemoteCanvas, NonAgentRemoteChange } from './remote-merge';
 import { canonicalJSON } from './save-protocol';
 import { canvasSnapshot } from './snapshot';
 import { LEGACY_CANVAS_KEY } from './legacy-draft';
@@ -184,7 +184,7 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
     return merged;
     };
     const incoming = localWork.catch(() => {}).then(work);
-    localWork = incoming.then(() => {});
+    localWork = incoming.then(() => {}, () => {});
     const merged = await incoming;
     await commitLocal();
     return merged;
@@ -213,7 +213,8 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
       if (history && !operation && target.draft && !target.draft.recovery) {
         const remote = await readRemote(target.id);
         if (remote.version > target.draft.serverVersion) {
-          target.draft = await mergeIncoming(editor, remote);
+          try { target.draft = await mergeIncoming(editor, remote); }
+          catch (error) { if (!(error instanceof NonAgentRemoteChange)) throw error; }
           operation = await repository.pending(target.id);
         }
       }

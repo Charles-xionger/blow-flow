@@ -25,3 +25,13 @@ Reviewed baseline: `6de46868a592d000fb8dcaf43f5d9f1705eff434` (`integration/crea
 ## Manual acceptance — pending
 
 No real paid model/image/video calls were made. Real Gemini visual interpretation and freeform skill/tool choices, actual OSS upload, image/video generation quality and reference effects, and continuous creative results remain for user acceptance using the scenarios in ticket 04. These review fixes do not change that status.
+
+## Supplemental integration regression repair
+
+The integration owner's first full browser run on `eff80a7` completed with **123 passed, 2 failed, 6.8 minutes**. Both failures were independent human-client conflict recovery (choose server / choose copy); this was not a full pass. Read-only diagnosis during that run found idle polling had already replaced the local project title with another human client's rename, because automatic Agent reconciliation accepted all logged operations.
+
+- Added optional `source: 'agent'` history provenance at the public Agent canvas writer and preserved it when reconciling operations. Existing histories remain valid; absent provenance is conservatively treated as non-Agent. Human undo/redo does not inherit Agent authority.
+- Automatic reconciliation now requires every unseen operation in the remote delta to be Agent-originated. Human-only and mixed deltas leave the local baseline intact during idle polling and enter the existing conflict/copy recovery path after a rejected save. Common-baseline/content validation remains required. The incoming-work serializer consumes its bookkeeping rejection while callers still receive the actual failure, preventing an unhandled promise rejection during this intentional refusal.
+- Red/green public autosave regression reproduced the unexpected remote rename, then verified idle preservation and durable conflict recovery for both human-only and mixed deltas. Existing Agent merge tests still verify unrelated local edits, exact inverse undo and retained provenance.
+- Completed-source validation: typecheck and scoped lint passed; **187 related Agent/canvas fast tests passed, 4.42 s**; affected browser consistency + Agent canvas files **9 passed, 0 failed, 52.8 s**, including both originally failed cases and live Agent synchronization. Source guard remained enabled; sources were frozen during checks. `git diff --check` passed.
+- The integration owner must rerun full fast and full browser validation after this shared persistence fix. No final full-suite pass is claimed here. Manual provider acceptance remains pending.

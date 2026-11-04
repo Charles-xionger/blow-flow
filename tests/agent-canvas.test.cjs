@@ -26,6 +26,7 @@ test('remote Agent edits merge into unrelated unsaved work and undo restores the
     await service.runNext(async (c) => c.tool('write', 'edit_canvas', { operations: [{ kind: 'update', id: 'a', data: { prompt: '助手改稿' } }] }));
     const remote = getWorkflowById('merge');
     const merged = await repo.mergeRemote('merge', remote, remote.version, (await repo.pending('merge')).requestId);
+    assert.equal(merged.snapshot.history.operations.at(-1).source, 'agent');
     assert.equal(merged.snapshot.nodes[0].data.prompt, '助手改稿');
     assert.equal(merged.snapshot.nodes[1].data.prompt, '保留的本地编辑');
     local = { ...merged.snapshot, projectName: merged.snapshot.name, canvasSession: 1 };
@@ -93,3 +94,22 @@ test('parameter capabilities, compatible connections and references remain atomi
 });
 test('an explicit user deletion command authorizes only its named targets', async () => { const service = setup('explicit-delete'); service.send('explicit-delete', { requestId: 'send', text: '删除节点 a', modelId: 'test' }); await service.runNext(async (c) => c.tool('delete', 'delete_canvas_nodes', { ids: ['a'] })); assert.deepEqual(service.canvas('explicit-delete').nodes.map(n => n.id), ['b']); assert.equal(service.snapshot('explicit-delete').tasks[0].status, 'completed'); });
 test('new grouped content lays out children inside its dimensions without moving existing nodes', async () => { const service = setup('group-layout'); service.send('group-layout', { requestId: 'send', text: '分组分镜', modelId: 'test' }); await service.runNext(async (c) => c.tool('group', 'edit_canvas', { operations: [{ kind: 'create', node: { id: 'g', type: 'group', data: { type: 'group', label: '一幕' } } }, ...['one', 'two'].map(id => ({ kind: 'create', node: { id, type: 'text', parentId: 'g', data: { type: 'text', label: id } } }))] })); const nodes = service.canvas('group-layout').nodes; const group = nodes.find(n => n.id === 'g'), one = nodes.find(n => n.id === 'one'), two = nodes.find(n => n.id === 'two'); assert.ok(group); assert.ok(Math.abs(one.position.x - two.position.x) >= 320 || Math.abs(one.position.y - two.position.y) >= 240); assert.ok(one.position.x + 320 <= group.style.width && two.position.x + 320 <= group.style.width); assert.ok(one.position.y + 240 <= group.style.height && two.position.y + 240 <= group.style.height); });
+test('human and mixed remote edits retain independent-client conflict recovery instead of Agent overwrite', async () => {
+ require('fake-indexeddb/auto');
+ const {createStore}=require('zustand/vanilla');const {createCanvasAutosave}=require('../lib/canvas/autosave');const {createCanvasRepository}=require('../lib/canvas/local-repository');
+ for(const mixed of [false,true]) {
+  const id=`human-conflict-${mixed}`,service=setup(id),nativeFetch=global.fetch;
+  global.fetch=async(_url,options)=>{if(options?.method==='PUT'){try{return Response.json({success:true,data:saveWorkflow(JSON.parse(options.body))});}catch(error){return Response.json({error:error.message},{status:error.status??500});}}return Response.json({success:true,data:getWorkflowById(id)});};
+  const store=createStore(()=>({nodes:[],edges:[],viewport:{x:0,y:0,zoom:1},projectName:'',currentWorkflowId:null,canvasSession:0,serverVersion:0,persistenceReady:false,saveStatus:'idle',saveError:null}));
+  const saver=createCanvasAutosave(store,()=>{},60000,createCanvasRepository(id),60000,{history:true}),stop=saver.start();
+  try {
+   await saver.open(id);
+   if(mixed){service.send(id,{requestId:'agent',text:'编辑',modelId:'test'});await service.runNext(c=>c.tool('edit','edit_canvas',{operations:[{kind:'update',id:'a',data:{prompt:'Agent remote'}}]}));}
+   const remote=getWorkflowById(id);let remoteState={...remote,projectName:remote.name,canvasSession:1};createCanvasHistory(()=>remoteState,u=>remoteState={...remoteState,...u}).change({projectName:'Remote human'},{record:true});
+   saveWorkflow({id,requestId:'human',baseVersion:remote.version,snapshot:{...remoteState,name:remoteState.projectName}});
+   await saver.flush();assert.equal(store.getState().projectName,'故事');assert.equal(store.getState().nodes[0].data.prompt,'原稿');
+   createCanvasHistory(store.getState,store.setState).change({projectName:'Local human'},{record:true});
+   await saver.flush().catch(()=>{});assert.equal(store.getState().recovery?.kind,'conflict');assert.equal(store.getState().projectName,'Local human');assert.equal(getWorkflowById(id).name,'Remote human');
+  }finally{stop();await saver.flush().catch(()=>{});global.fetch=nativeFetch;}
+ }
+});
