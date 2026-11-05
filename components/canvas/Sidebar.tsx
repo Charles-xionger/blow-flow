@@ -272,9 +272,16 @@ export const Sidebar = memo(function Sidebar() {
         <div
           className={`text-[10px] font-bold uppercase tracking-wider ${textMuted}`}
         >
-          生成节点
+          画布节点
         </div>
         <div className="space-y-2">
+          <NodeButton
+            icon={FileText}
+            label="文本"
+            description="编写剧本、提示词或笔记"
+            type={NodeType.TEXT}
+            color={isDark ? "bg-zinc-500/15 text-zinc-300" : "bg-gray-100 text-gray-600"}
+          />
           <NodeButton
             icon={Image}
             label="文生图"

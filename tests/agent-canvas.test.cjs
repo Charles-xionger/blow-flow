@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-require-imports -- Public Node integration test entry point. */
 require('../scripts/register-typescript.cjs');
 const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
@@ -187,4 +186,19 @@ test('a node the user references in this task may be edited without asking', asy
     await service.runNext(async (c) => c.tool('edit', 'edit_canvas', { operations: [{ kind: 'update', id: 'a', data: { prompt: '改好了' } }] }));
     assert.equal(service.canvas('referenced').nodes.find(n => n.id === 'a').data.prompt, '改好了');
     assert.equal(service.snapshot('referenced').tasks[0].status, 'completed');
+});
+
+test('Agent-created storyboard text keeps its own content when connected to its source', async () => {
+    const service = setup('independent-shots');
+    service.send('independent-shots', { requestId: 'send', text: '拆成两个并列镜头', modelId: 'test' });
+    await service.runNext(c => c.tool('shots', 'edit_canvas', { operations: [
+        { kind: 'create', node: { id: 'shot1', type: 'text', data: { label: '镜头1', prompt: [{ text: '出发' }] } } },
+        { kind: 'create', node: { id: 'shot2', type: 'text', data: { label: '镜头2', prompt: [{ text: '归来' }, { ref: 'a' }] } } },
+        { kind: 'connect', edge: { id: 's1', source: 'a', target: 'shot1' } },
+        { kind: 'connect', edge: { id: 's2', source: 'a', target: 'shot2' } },
+    ] }));
+    const saved = getWorkflowById('independent-shots');
+    assert.deepEqual(saved.nodes.find(n => n.id === 'shot1').data.prompt, [{ text: '出发' }]);
+    assert.deepEqual(saved.nodes.find(n => n.id === 'shot2').data.prompt, [{ text: '归来' }, { ref: 'a' }]);
+    assert.deepEqual(saved.edges.map(e => e.source), ['a', 'a']);
 });

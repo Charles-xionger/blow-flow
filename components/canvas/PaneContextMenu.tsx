@@ -3,7 +3,8 @@
 import { useCanvasStore } from "@/store/useCanvasStore";
 import {
   Plus,
-  Image,
+  Type,
+  Image as ImageIcon,
   Video,
   FileImage,
   Wand2,
@@ -33,8 +34,10 @@ export function PaneContextMenu({ x, y, onClose }: PaneContextMenuProps) {
   // 计算菜单位置，防止超出视口
   const menuStyle: React.CSSProperties = {
     position: "fixed",
-    left: `${x}px`,
-    top: `${y}px`,
+    left: `${Math.max(8, Math.min(x, window.innerWidth - 216))}px`,
+    top: `${Math.max(8, Math.min(y, window.innerHeight - 440))}px`,
+    maxHeight: "calc(100vh - 16px)",
+    overflowY: "auto",
     zIndex: 9999,
   };
 
@@ -61,12 +64,20 @@ export function PaneContextMenu({ x, y, onClose }: PaneContextMenuProps) {
             添加节点
           </div>
 
+          <button
+            onClick={() => handleAddNode(NodeType.TEXT)}
+            className="flex w-full items-center gap-3 px-4 py-2 text-sm text-gray-200 hover:bg-gray-800"
+          >
+            <Type size={16} />
+            <span>文本</span>
+          </button>
+
           {/* 文生图 */}
           <button
             onClick={() => handleAddNode(NodeType.TEXT_TO_IMAGE)}
             className="flex w-full items-center gap-3 px-4 py-2 text-sm text-gray-200 hover:bg-gray-800"
           >
-            <Image size={16} />
+            <ImageIcon size={16} />
             <span>文生图</span>
           </button>
 

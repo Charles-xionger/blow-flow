@@ -7,6 +7,7 @@ import Paragraph from "@tiptap/extension-paragraph";
 import Text from "@tiptap/extension-text";
 import { Placeholder, UndoRedo } from "@tiptap/extensions";
 import { EditorState } from "@tiptap/pm/state";
+import { closeHistory } from "@tiptap/pm/history";
 import { Fragment, Slice } from "@tiptap/pm/model";
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, type ReactNodeViewProps } from "@tiptap/react";
 import type { Segment, UpstreamNode } from "@/lib/canvas/prompt";
@@ -134,7 +135,9 @@ export function PromptEditor({ value, upstream, placeholder, onChange }: {
         const text = event.clipboardData?.getData("text/plain");
         if (!text) return true; // Nothing to paste, such as a copied image; keep the selection.
         const paragraphs = text.split(/\r?\n/).map(line => schema.nodes.paragraph.create(null, line ? schema.text(line) : undefined));
-        view.dispatch(tr.replaceSelection(new Slice(Fragment.from(paragraphs), 1, 1)).scrollIntoView());
+        // Paste is its own undo step, even immediately after IME input or before more typing.
+        view.dispatch(closeHistory(tr).replaceSelection(new Slice(Fragment.from(paragraphs), 1, 1)).setMeta("uiEvent", "paste").scrollIntoView());
+        view.dispatch(closeHistory(view.state.tr));
         return true;
       },
       handleKeyDown(_view, event) {

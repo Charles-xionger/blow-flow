@@ -650,3 +650,15 @@ test('remote refresh reads only the open canvas while still uploading other pend
   assert.deepEqual(writes, ['pending']);
   assert.equal(store.getState().currentWorkflowId, 'current');
 });
+
+test('an idle history-enabled canvas does not repeatedly fetch its full snapshot', async t => {
+  const { saver, repository } = await setup(t, 10, 50, { history: true });
+  const snapshot = { name: 'Idle', nodes: [node('one')], edges: [], viewport: { x: 0, y: 0, zoom: 1 } };
+  await repository.adopt('idle', snapshot, 1);
+  let reads = 0;
+  global.fetch = async () => { reads++; return Response.json({ success: true, data: { id: 'idle', ...snapshot, version: 1 } }); };
+  await saver.open('idle'); await saver.flush();
+  reads = 0;
+  await wait(3200);
+  assert.equal(reads, 0);
+});

@@ -55,7 +55,34 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
   }
   let unsubscribe: (() => void) | undefined;
   let opening = 0;
-  let remoteTimer: ReturnType<typeof setInterval> | undefined;
+  let remoteEvents: EventSource | undefined;
+  let watchedId: string | undefined;
+  let remotePending = false;
+  async function refreshRemote(id: string) {
+    await flights.get(id)?.catch(() => {});
+    if (watchedId !== id) return;
+    if (interactions.size) { remotePending = true; return; }
+    remotePending = false;
+    await flush();
+  }
+  function watchRemote() {
+    const state = store.getState();
+    const id = state.persistenceReady ? state.currentWorkflowId ?? undefined : undefined;
+    if (!history || typeof EventSource === 'undefined' || id === watchedId) return;
+    remoteEvents?.close();
+    watchedId = id;
+    remotePending = false;
+    remoteEvents = undefined;
+    if (!id) return;
+    remoteEvents = new EventSource(`/api/workflow/${encodeURIComponent(id)}/events`);
+    remoteEvents.onmessage = event => {
+      const version: unknown = JSON.parse(event.data);
+      if (typeof version !== 'number' || version > store.getState().serverVersion) {
+        // A notification may race a save; read after that flight has settled.
+        void refreshRemote(id).catch(onError);
+      }
+    };
+  }
   let publishingRemote = false;
   const clearTimers = () => { clearTimeout(timer); clearTimeout(deadline); timer = deadline = undefined; };
   const status = (target: Session, saveStatus: SaveStatus, error?: unknown) => {
@@ -332,6 +359,7 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
   function start() {
     if (unsubscribe) return () => {};
     unsubscribe = store.subscribe((state, previous) => {
+      watchRemote();
       if (!state.persistenceReady || publishingRemote) return;
       if (!active || state.canvasSession !== active.key) {
         active = session(state);
@@ -352,13 +380,9 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
       status(active, 'saving');
       schedule();
     });
-    if (history) remoteTimer = setInterval(() => {
-      if (!store.getState().persistenceReady || !active?.id || interactions.size ||
-          typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
-      void flush().catch(onError);
-    }, 1500);
+    watchRemote();
     return () => {
-      clearInterval(remoteTimer);
+      remoteEvents?.close(); remoteEvents = undefined; watchedId = undefined;
       unsubscribe?.(); unsubscribe = undefined; clearTimers();
       clearTimeout(retryTimer); retryAt = Infinity;
       void commitLocal().catch(onError);
@@ -507,6 +531,7 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
     beginInteraction(key: string) { interactions.add(key); clearTimers(); },
     endInteraction(key: string) {
       interactions.delete(key);
+      if (!interactions.size && remotePending && watchedId) void refreshRemote(watchedId).catch(onError);
       if (!active?.dirty || interactions.size) return;
       status(active, 'saving');
       schedule();

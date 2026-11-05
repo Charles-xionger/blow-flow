@@ -21,6 +21,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
+import { CanvasEdge } from "./CanvasEdge";
 import { CanvasRecovery } from "./CanvasRecovery";
 import { canvasAutosave, useCanvasStore } from "@/store/useCanvasStore";
 import { isValidCanvasConnection } from "@/lib/canvas/connections";
@@ -48,6 +49,8 @@ import { GroupNode } from "@/components/nodes/GroupNode";
 // 导入右键菜单组件
 import { NodeContextMenu } from "./NodeContextMenu";
 import { PaneContextMenu } from "./PaneContextMenu";
+
+const edgeTypes = { default: CanvasEdge };
 
 // 定义节点类型映射
 const nodeTypes = {
@@ -249,7 +252,7 @@ function CanvasInner() {
   );
 
   return (
-    <div ref={reactFlowWrapper} className="w-full h-full"
+    <div ref={reactFlowWrapper} className="relative flex w-full h-full"
       onFocusCapture={event => {
         const target = event.target as HTMLElement;
         if (target.isContentEditable || target.matches('textarea, input:not([type]), input[type="text"], input[type="number"]')) {
@@ -261,10 +264,20 @@ function CanvasInner() {
 
       <CanvasRecovery />
       <ReactFlow
+        style={{ flex: 1, minWidth: 0 }}
         nodes={renderNodes}
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
+        edgeTypes={edgeTypes}
+        deleteKeyCode={['Backspace', 'Delete']}
+        onEdgeContextMenu={(event, edge) => {
+          event.preventDefault();
+          event.stopPropagation();
+          hideContextMenu();
+          onNodesChange(nodes.filter(node => node.selected).map(node => ({ type: 'select', id: node.id, selected: false })));
+          onEdgesChange(edges.map(item => ({ type: 'select', id: item.id, selected: item.id === edge.id })));
+        }}
         onBeforeDelete={onBeforeDelete}
         onConnect={onConnect}
         onPaneClick={onPaneClick}

@@ -51,6 +51,9 @@ export class CanvasAgentService {
             let state = { nodes: current.nodes as CanvasNode[], edges: current.edges, projectName: current.name, canvasSession: 0, history: current.history as CanvasHistory | undefined };
             const history = createCanvasHistory(() => state, update => { state = { ...state, ...update } as typeof state; });
             const skipped: string[] = [];
+            // Finished shot text is independent; source links must not append whole upstream scripts.
+            // Explicit references supplied by the caller remain intact.
+            const authoredText = new Set(operations.flatMap(op => op.kind === 'create' && op.node.type === NodeType.TEXT && op.node.data.prompt !== undefined ? [op.node.id] : []));
             history.begin(identity);
             operations.forEach((operation, index) => {
                 let { nodes, edges } = state;
@@ -85,7 +88,9 @@ export class CanvasAgentService {
                         nodes = syncReferences(nodes, beforeEdges, edges).filter(value => !removed.has(value.id));
                     } else throw new Error('Unknown canvas operation');
                 }
-                nodes = syncReferences(nodes, beforeEdges, edges);
+                const referenceBaseline = operation.kind === 'connect' && authoredText.has(operation.edge.target)
+                    ? [...beforeEdges, operation.edge] : beforeEdges;
+                nodes = syncReferences(nodes, referenceBaseline, edges);
                 assertCanvasGraph(nodes, edges);
                 nodes = versionContent(state.nodes, nodes, edges, undefined, state.edges);
                 history.change({ nodes, edges }, { record: true, id: `${identity}:${index}`, source: 'agent', label });

@@ -40,3 +40,21 @@ test('Agent edits update an open parameter console, undo across reload, and fini
   await expect(reopened.locator('.react-flow__node')).toHaveCount(3);
   await reopened.unroute('**/api/workflow/**');
 });
+
+test('an idle canvas keeps one change stream without repeated snapshot reads', async ({ page, request }) => {
+  const id = crypto.randomUUID();
+  await request.post('/api/workspace', { data: { action: 'create-project', id, folderId: null } });
+  const reads: string[] = [];
+  page.on('request', request => {
+    if (request.method() === 'GET' && new URL(request.url()).pathname === `/api/workflow/${id}`) reads.push(request.url());
+  });
+  await page.goto(`/canvas?project=${id}`);
+  await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
+  await page.waitForTimeout(2000);
+  reads.length = 0;
+  await page.waitForTimeout(3500);
+  expect(reads).toHaveLength(0);
+  // Reconnecting must receive the latest version even if the assistant panel is closed.
+  await request.post(`/api/agent/${id}`, { data: { action: 'send', requestId: crypto.randomUUID(), modelId: 'browser-fixture', text: '测试新建节点 在后台完成' } });
+  await expect(page.locator('.react-flow__node')).toHaveCount(2);
+});
