@@ -6,7 +6,7 @@ import h3Workflow from '../../config/workflows/h3.json';
 import type { GenerationConfig } from './types';
 
 export const defaultConfig: GenerationConfig = {
-  connections: [{ id: 'runninghub-international', baseUrl: '', apiKeyEnv: 'RUNNINGHUB_API_KEY', concurrency: 1,
+  connections: [{ id: 'runninghub-international', baseUrl: '', apiKeyEnv: 'RUNNINGHUB_API_KEY', concurrency: 5,
     requestTimeoutMs: 30_000, pollIntervalMs: 5000, queryTimeoutMs: 30 * 60_000, maxQueryErrors: 3 }],
   models: [{ id: 'runninghub-krea2', name: 'Krea2', category: 'IMAGE', adapter: 'runninghub-workflow', version: '1',
     connectionId: 'runninghub-international', workflowId: '2109340746494357505', workflow, outputNode: '103',

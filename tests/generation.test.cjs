@@ -8,11 +8,12 @@ const Database = require('better-sqlite3');
 const { GenerationService } = require('../lib/generation/service.ts');
 const { defaultConfig } = require('../lib/generation/config.ts');
 
-function setup(t) {
+function setup(t, concurrency = 1) {
   const dir = mkdtempSync(path.join(tmpdir(), 'generation-'));
   const db = new Database(path.join(dir, 'test.db'));
   const config = structuredClone(defaultConfig);
   config.connections[0].baseUrl = 'https://platform.test';
+  config.connections[0].concurrency = concurrency;
   process.env.RUNNINGHUB_API_KEY = 'secret-test-key';
   const service = new GenerationService(db, config);
   t.after(() => { db.close(); rmSync(dir, { recursive: true }); });
@@ -223,6 +224,32 @@ test('a crashed submitter is fenced from resubmission and a new worker resumes a
   assert.equal(service.get(a.id).status, 'running');
   await new GenerationWorker(service, io).tick();
   assert.equal(submits, 1);
+});
+
+test('default RunningHub concurrency starts five tasks and queues the sixth until a slot is released', async (t) => {
+  const { service } = setup(t, defaultConfig.connections[0].concurrency);
+  const { GenerationWorker } = require('../lib/generation/worker.ts');
+  let submissions = 0;
+  let complete = false;
+  let now = Date.now();
+  const worker = new GenerationWorker(service, {
+    now: () => now,
+    fetch: async url => {
+      if (url.endsWith('/create')) return Response.json({ code: 0, data: { taskId: String(++submissions) } });
+      return Response.json(complete ? { code: 805 } : { code: 804 });
+    },
+    save: async () => assert.fail(),
+  });
+  t.after(() => worker.close());
+  const tasks = Array.from({ length: 6 }, (_, i) => service.create(request(`parallel-${i}`)));
+  for (let i = 0; i < 12; i++) await worker.tick();
+  assert.equal(submissions, 5);
+  assert.deepEqual(tasks.map(task => service.get(task.id).status), [...Array(5).fill('running'), 'queued']);
+  complete = true;
+  now += 5001;
+  for (let i = 0; i < 6; i++) await worker.tick();
+  assert.equal(submissions, 6);
+  assert.equal(service.get(tasks[5].id).status, 'running');
 });
 
 test('configured concurrency permits two independent generations with new seeds and no prompt cache', async (t) => {

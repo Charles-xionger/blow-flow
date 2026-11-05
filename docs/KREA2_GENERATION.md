@@ -38,7 +38,7 @@ node -r ./scripts/register-typescript.cjs -e 'console.log(JSON.stringify(require
 
 设置 `GENERATION_CONFIG_PATH` 为该 JSON 的绝对路径。连接字段 `baseUrl` 填明确站点地址，`apiKeyEnv` 只填环境变量名称；多个模型可共用 `connectionId`。模型需要稳定 `id`、显示 `name`、`version`、显式 `adapter`、导出图及映射。修改模型时更新 `version` 并重启 worker。现有任务继续使用创建时的完整快照；更换账号时创建新连接 ID，保留旧任务使用的凭据环境变量。
 
-每个连接默认 `concurrency: 1`。可调整并发、`requestTimeoutMs`（默认 30 秒）、`pollIntervalMs`（5 秒）、`queryTimeoutMs`（30 分钟）和 `maxQueryErrors`（3 次）。并发占位与认领在 SQLite IMMEDIATE 事务内完成；多进程 worker 不会重复提交同一任务。所有未明确结束的任务（包括待核实、等待超时）计入占位。提高并发应在所有进程使用相同配置后进行。
+RunningHub 连接默认 `concurrency: 5`，Krea2 与 H3 共用这 5 个并发名额，超出的任务在本地队列等待。可调整并发、`requestTimeoutMs`（默认 30 秒）、`pollIntervalMs`（5 秒）、`queryTimeoutMs`（30 分钟）和 `maxQueryErrors`（3 次）。并发占位与认领在 SQLite IMMEDIATE 事务内完成；多进程 worker 不会重复提交同一任务。所有未明确结束的任务（包括待核实、等待超时）计入占位。提高并发应在所有进程使用相同配置后进行。
 
 ### 可选的平台网络选路
 
