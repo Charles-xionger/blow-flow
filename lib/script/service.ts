@@ -1,3 +1,5 @@
+import { TextStreamError } from '../ai-services/text/stream-types';
+import { scriptPhaseLabel, type ScriptPhase } from './types';
 import { migrateScriptSnapshot } from '../canvas/script-migration';
 import { scriptPrompt } from './inputs';
 import { prepareScriptImages, ScriptPreflightError } from './preflight';
@@ -10,9 +12,9 @@ import type { CreateScriptTask, ScriptInput, ScriptTask, ScriptStatus } from './
 
 export class ScriptError extends Error { constructor(message: string, public status = 400) { super(message); } }
 type Row = { id: string; request_id: string; canvas_id: string; node_id: string; input: string; status: ScriptStatus;
-  text: string; revision: number; created_at: number; updated_at: number; error: string | null; lease: string | null; lease_until: number | null };
+  text: string; phase: ScriptPhase; revision: number; created_at: number; updated_at: number; error: string | null; lease: string | null; lease_until: number | null };
 const publicTask = (r: Row): ScriptTask => ({ id: r.id, requestId: r.request_id, canvasId: r.canvas_id, nodeId: r.node_id,
-  input: JSON.parse(r.input), status: r.status, text: r.text, revision: r.revision, createdAt: r.created_at, updatedAt: r.updated_at, error: r.error || undefined });
+  input: JSON.parse(r.input), status: r.status, text: r.text, phase: r.phase, revision: r.revision, createdAt: r.created_at, updatedAt: r.updated_at, error: r.error || undefined });
 export type ScriptStream = (input: TextGenerationInput) => AsyncIterable<string>;
 
 /** SQLite is authoritative. All executor writes are fenced by a renewable lease. */
@@ -24,6 +26,10 @@ export class ScriptService {
       created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, error TEXT, lease TEXT, lease_until INTEGER);
       CREATE UNIQUE INDEX IF NOT EXISTS script_one_active ON script_tasks(canvas_id,node_id) WHERE status IN ('queued','running','stopping');
       CREATE INDEX IF NOT EXISTS script_canvas ON script_tasks(canvas_id,created_at);`);
+    db.transaction(() => {
+      const columns = db.prepare('PRAGMA table_info(script_tasks)').all() as { name: string }[];
+      if (!columns.some(column => column.name === 'phase')) db.exec("ALTER TABLE script_tasks ADD COLUMN phase TEXT NOT NULL DEFAULT 'preparing'");
+    }).immediate();
   }
   get(id: string) { this.recoverExpired(); const row = this.row(id); if (!row) throw new ScriptError('脚本任务不存在', 404); return publicTask(row); }
   list(canvasId: string, nodeId?: string): ScriptTask[] {
@@ -100,7 +106,14 @@ export class ScriptService {
     }).immediate();
     if (!claimed) return false;
     const { task, lease } = claimed; const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(new Error('生成超时，已保存正文保留')), 180_000);
+    let timedOut = false;
+    let phase: ScriptPhase = 'preparing';
+    const onPhase = (next: ScriptPhase) => {
+      if (next === phase) return;
+      phase = next;
+      this.db.prepare("UPDATE script_tasks SET phase=?,revision=revision+1,updated_at=? WHERE id=? AND lease=? AND lease_until>? AND status='running'").run(next,Date.now(),task.id,lease,Date.now());
+    };
+    const timeout = setTimeout(() => { timedOut = true; controller.abort(new Error('生成超时')); }, 180_000);
     const cancellation = setInterval(() => {
       try {
         const row = this.row(task.id);
@@ -116,7 +129,7 @@ export class ScriptService {
     try {
       const input = task.input;
       const images = await prepareScriptImages(input, controller.signal);
-      for await (const delta of abortableStream(stream({ model: input.model, prompt: scriptPrompt(input), images, signal: controller.signal }), controller.signal)) {
+      for await (const delta of abortableStream(stream({ model: input.model, prompt: scriptPrompt(input), images, signal: controller.signal, onPhase }), controller.signal)) {
         controller.signal.throwIfAborted();
         if (!delta) continue;
         const changed = this.db.prepare("UPDATE script_tasks SET text=text||?,revision=revision+1,updated_at=? WHERE id=? AND lease=? AND lease_until>? AND status='running'").run(delta, Date.now(), task.id, lease, Date.now());
@@ -124,7 +137,10 @@ export class ScriptService {
       }
       if (!controller.signal.aborted) this.finish(task.id, lease, this.get(task.id).text.trim() ? 'completed' : 'failed', this.get(task.id).text.trim() ? null : '模型未返回正文');
     } catch (error) {
-      this.finish(task.id, lease, 'failed', error instanceof ScriptPreflightError ? error.message : '生成失败或模型连接中断；已保存正文保留，请检查服务端模型配置与配额');
+      const message = timedOut ? `生成超过 180 秒，已停止；最后阶段：${scriptPhaseLabel[phase]}。已保存正文保留，未自动重试。`
+        : error instanceof ScriptPreflightError || error instanceof TextStreamError ? error.message
+        : '模型连接异常；已保存正文保留，未自动重试。';
+      this.finish(task.id, lease, 'failed', message);
     } finally {
       clearInterval(heartbeat); clearInterval(cancellation); clearTimeout(timeout); controller.abort();
       // Stop wins over completion once its persisted transition has happened.

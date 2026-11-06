@@ -1,3 +1,4 @@
+import type { TextStreamPhase } from './stream-types';
 import { GoogleGenAI } from '@google/genai';
 import { getModelDefinition, getModelsByCategory } from '../../model-registry';
 import { getAllModelConfigs } from '../../db/model-configs';
@@ -11,6 +12,7 @@ export interface TextGenerationInput {
   images?: string[];
   webSearch?: boolean;
   signal?: AbortSignal;
+  onPhase?: (phase: TextStreamPhase) => void;
 }
 interface TextConnection {
   modelId: string;
@@ -120,11 +122,13 @@ export async function* streamText(input: TextGenerationInput): AsyncGenerator<st
   if (provider !== 'gemini') throw new Error('当前模型尚未提供流式文本能力');
   const parts = await geminiParts(input, signal);
   const ai = new GoogleGenAI({ apiKey: connection.apiKey });
+  input.onPhase?.('connecting');
   const stream = await ai.models.generateContentStream({ model: connection.modelId, contents: [{ parts }], config: { abortSignal: signal, ...(input.webSearch ? { tools: [{ googleSearch: {} }] } : {}) } });
+  input.onPhase?.('waiting');
   let finished = false;
   for await (const chunk of stream) {
     signal.throwIfAborted();
-    if (chunk.text) yield chunk.text;
+    if (chunk.text) { input.onPhase?.('writing'); yield chunk.text; }
     const reason = chunk.candidates?.[0]?.finishReason;
     if (reason === 'STOP') finished = true;
     else if (reason) throw new Error('模型未完整生成正文');

@@ -1,3 +1,6 @@
+import type { TextStreamPhase } from '../ai-services/text/stream-types';
+export type ScriptPhase = 'preparing' | TextStreamPhase;
+export const scriptPhaseLabel: Record<ScriptPhase, string> = { preparing: '校验参考输入', connecting: '连接模型中', waiting: '模型已连接，等待输出', thinking: '模型思考中，等待正文', writing: '正文输出中' };
 export type ScriptStatus = 'queued' | 'running' | 'stopping' | 'stopped' | 'completed' | 'failed' | 'interrupted';
 export interface ScriptInput {
   model: string;
@@ -10,7 +13,7 @@ export interface CreateScriptTask { requestId: string; canvasId: string; nodeId:
 export interface ScriptTask {
   id: string; requestId: string; canvasId: string; nodeId: string;
   input: ScriptInput; status: ScriptStatus; text: string; revision: number;
-  createdAt: number; updatedAt: number; error?: string;
+  createdAt: number; updatedAt: number; error?: string; phase?: ScriptPhase;
 }
 export const scriptActive = (status?: ScriptStatus) => status === 'queued' || status === 'running' || status === 'stopping';
 export const scriptStatusLabel: Record<ScriptStatus, string> = {

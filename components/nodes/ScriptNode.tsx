@@ -13,7 +13,7 @@ import { ScriptInputs } from './shared/ScriptInputs';
 import { useCanvasStore } from '@/store/useCanvasStore';
 import { useScriptTask } from '@/hooks/useScriptTask';
 import { ScriptVersionPanel } from './shared/ScriptVersionPanel';
-import { scriptActive, scriptStatusLabel } from '@/lib/script/types';
+import { scriptActive, scriptStatusLabel, scriptPhaseLabel } from '@/lib/script/types';
 
 const Particles = dynamic(() => import('./shared/ScriptParticles'),{ ssr:false });
 const models = getModelsByCategory('TEXT').filter(model => model.provider === 'ark' || model.provider === 'gemini');
@@ -81,7 +81,7 @@ function ScriptNode(props: NodeProps<Node<NodeData>>) {
     <div className="flex h-full flex-col p-4">
       <div className={`relative flex shrink-0 items-center justify-center gap-2 text-xs text-violet-200 ${active && !text ? 'flex-1' : 'h-10'}`}>
         {active ? <Particles/> : <Feather size={16}/>}
-        <span role="status" className="relative rounded-lg bg-[#1a1a1a]/70 px-2 py-1">{task ? scriptStatusLabel[task.status] : '脚本创作'}</span>
+        <span role="status" className="relative rounded-lg bg-[#1a1a1a]/70 px-2 py-1">{task ? task.status === 'running' && task.phase ? scriptPhaseLabel[task.phase] : scriptStatusLabel[task.status] : '脚本创作'}</span>
       </div>
       {text ? <div className="nodrag nopan nowheel min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words text-sm leading-7 text-zinc-200">{text}</div> : !active ? <p className="m-auto text-center text-xs leading-6 text-zinc-500">填写创作要求，生成剧本或分镜文稿<br/>结果保留在脚本中，供你继续创作</p> : null}
       {(task?.error || error) && <p role="alert" className="mt-2 shrink-0 text-xs text-red-300">{task?.error || error}</p>}

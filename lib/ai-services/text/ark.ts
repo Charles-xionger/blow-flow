@@ -1,3 +1,4 @@
+import { TextStreamError, type TextStreamPhase } from './stream-types';
 import type { Model } from '@mariozechner/pi-ai';
 import { ARK_BASE_URL, arkTextModel } from './ark-models';
 
@@ -70,11 +71,12 @@ export async function generateArkText(id: string, prompt: string, options: {
 
 /** Responses SSE adapter. Never treats a truncated transport as successful completion. */
 export async function* streamArkText(id: string, prompt: string, options: {
-  apiKey: string; baseUrl?: string; images?: string[]; webSearch?: boolean; signal?: AbortSignal;
+  apiKey: string; baseUrl?: string; images?: string[]; webSearch?: boolean; signal?: AbortSignal; onPhase?: (phase: TextStreamPhase) => void;
 }): AsyncGenerator<string> {
   const model = arkTextModel(id);
   if (!model) throw new Error('未知的 Ark 语言模型');
   if (options.images?.length && !model.vision) throw new Error('此模型不支持图片输入');
+  options.onPhase?.('connecting');
   const response = await fetch(`${(options.baseUrl || ARK_BASE_URL).replace(/\/$/, '')}/responses`, {
     method: 'POST', redirect: 'error', signal: options.signal,
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${options.apiKey}` },
@@ -82,7 +84,8 @@ export async function* streamArkText(id: string, prompt: string, options: {
       ...(options.webSearch ? { tools: [{ type: 'web_search', max_keyword: 3 }] } : {}),
       input: [{ role: 'user', content: [...(options.images ?? []).map(image_url => ({ type: 'input_image', image_url })), { type: 'input_text', text: prompt }] }] }),
   });
-  if (!response.ok || !response.body) { await response.body?.cancel(); throw new Error(`Ark 请求失败（HTTP ${response.status}）`); }
+  if (!response.ok || !response.body) { await response.body?.cancel(); throw new TextStreamError(`Ark 请求失败（HTTP ${response.status}），请检查平台权限或配额`); }
+  options.onPhase?.('waiting');
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -98,12 +101,13 @@ export async function* streamArkText(id: string, prompt: string, options: {
         const data = frame.split('\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n');
         if (!data || data === '[DONE]') continue;
         const event = JSON.parse(data);
-        if (event.type === 'response.output_text.delta' && typeof event.delta === 'string') yield event.delta;
+        if (event.type === 'response.reasoning_summary_text.delta') options.onPhase?.('thinking');
+        if (event.type === 'response.output_text.delta' && typeof event.delta === 'string') { options.onPhase?.('writing'); yield event.delta; }
         if (event.type === 'response.completed') completed = true;
-        if (['error', 'response.failed', 'response.incomplete'].includes(event.type)) throw new Error('Ark 生成未完成，请检查平台配额和模型配置');
+        if (['error', 'response.failed', 'response.incomplete'].includes(event.type)) throw new TextStreamError('Ark 返回生成失败或未完成事件，请检查平台配额和模型配置');
       }
       if (done) break;
     }
-    if (!completed) throw new Error('模型连接中断，已接收的正文已保留');
+    if (!completed) throw new TextStreamError('模型流在完成事件前断开，已接收的正文已保留');
   } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
 }
