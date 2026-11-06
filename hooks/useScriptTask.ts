@@ -36,7 +36,7 @@ export function useScriptTask(nodeId: string) {
       return () => { closed = true; unsubscribe(); };
     }
   },[canvasId,canvasSession,nodeId]);
-  const start = async (input: ScriptInput) => {
+  const start = async (input: ScriptInput | (() => ScriptInput)) => {
     const originalSession = useCanvasStore.getState().canvasSession;
     if (busy.current === originalSession) return;
     busy.current = originalSession; setOperation({ session:originalSession,submitting:true });
@@ -49,7 +49,7 @@ export function useScriptTask(nodeId: string) {
       const node = state.nodes.find(n => n.id === nodeId)!;
       const pending = node.data.pendingScript;
       // Copied/imported nodes must never replay another canvas/node's request identity.
-      const request: CreateScriptTask = pending?.canvasId === submittedCanvas && pending.nodeId === nodeId ? pending : { requestId:crypto.randomUUID(),canvasId:submittedCanvas,nodeId,input };
+      const request: CreateScriptTask = pending?.canvasId === submittedCanvas && pending.nodeId === nodeId ? pending : { requestId:crypto.randomUUID(),canvasId:submittedCanvas,nodeId,input: typeof input === 'function' ? input() : input };
       state.updateNodeData(nodeId,{ pendingScript:request });
       await canvasAutosave.flush();
       if (!isCurrent(originalSession)) return;
