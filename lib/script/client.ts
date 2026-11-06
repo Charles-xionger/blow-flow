@@ -10,6 +10,12 @@ export async function createScriptTask(request: CreateScriptTask): Promise<Scrip
   if (!response.ok) throw new ScriptSubmissionError(result.error || '无法创建脚本任务', response.status >= 400 && response.status < 500);
   return result;
 }
+export async function stopScriptTask(id: string): Promise<ScriptTask> {
+  const response = await fetch(`/api/script/tasks/${encodeURIComponent(id)}/stop`, { method: 'POST' });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || '停止失败，请重试');
+  return result;
+}
 type Listener = (tasks: ScriptTask[], polling: boolean) => void;
 class ScriptNotifications {
   tasks = new Map<string, ScriptTask>();
