@@ -26,7 +26,7 @@ export function useScriptTask(nodeId: string) {
       setPolling(fallback);
     });
   },[canvasId,nodeId]);
-  const start = async (input: ScriptInput) => {
+  const start = async (input: ScriptInput | (() => ScriptInput)) => {
     if (busy.current) return;
     busy.current = true; setSubmitting(true); setError('');
     const originalSession = useCanvasStore.getState().canvasSession;
@@ -40,7 +40,7 @@ export function useScriptTask(nodeId: string) {
       const node = state.nodes.find(n => n.id === nodeId);
       if (!node) return;
       const pending = node.data.pendingScript;
-      const request: CreateScriptTask = pending || { requestId: crypto.randomUUID(), canvasId: submittedCanvas, nodeId, input };
+      const request: CreateScriptTask = pending || { requestId: crypto.randomUUID(), canvasId: submittedCanvas, nodeId, input: typeof input === 'function' ? input() : input };
       state.updateNodeData(nodeId,{ pendingScript:request });
       await canvasAutosave.flush();
       if (useCanvasStore.getState().saveStatus !== 'synced') throw new Error('请求身份保存失败，请恢复保存后重试');

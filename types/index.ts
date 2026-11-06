@@ -78,6 +78,8 @@ export interface NodeData extends Record<string, unknown> {
   count?: number;
   promptOptimize?: boolean;
 
+  scriptPreset?: string;
+  scriptInstruction?: string;
   scriptTaskId?: string;
   pendingScript?: import("@/lib/script/types").CreateScriptTask;
 

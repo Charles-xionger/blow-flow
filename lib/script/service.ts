@@ -1,8 +1,10 @@
+import { scriptPrompt } from './inputs';
+import { prepareScriptImages, ScriptPreflightError } from './preflight';
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { getDatabase } from '../db';
 import { getModelDefinition } from '../model-registry';
-import { streamText, type TextGenerationInput } from '../ai-services/text';
+import { validateTextConfiguration, streamText, type TextGenerationInput } from '../ai-services/text';
 import type { CreateScriptTask, ScriptInput, ScriptTask, ScriptStatus } from './types';
 
 export class ScriptError extends Error { constructor(message: string, public status = 400) { super(message); } }
@@ -39,6 +41,7 @@ export class ScriptService {
         if (prior.canvas_id !== request.canvasId || prior.node_id !== request.nodeId || prior.input !== serialized) throw new ScriptError('请求身份已用于其他输入', 409);
         return publicTask(prior);
       }
+      try { validateTextConfiguration(input.model, input.references.some(ref => ref.type === 'image')); } catch (error) { throw new ScriptError(error instanceof Error ? error.message : '模型配置不可用'); }
       if (!this.nodeExists(request.canvasId, request.nodeId)) throw new ScriptError('请先保存脚本节点；节点可能已被删除', 409);
       const active = this.db.prepare("SELECT id FROM script_tasks WHERE canvas_id=? AND node_id=? AND status IN ('queued','running','stopping')").get(request.canvasId, request.nodeId);
       if (active) throw new ScriptError('该节点已有活动任务', 409);
@@ -54,8 +57,14 @@ export class ScriptService {
     if (typeof value.model !== 'string') throw new ScriptError('请选择语言模型');
     const model = getModelDefinition(value.model);
     if (!model || model.category !== 'TEXT' || !['ark','gemini'].includes(model.provider || '')) throw new ScriptError('请选择支持流式生成的语言模型');
-    if (value.references?.length) throw new ScriptError('参考输入尚未开放');
-    return { model: model.id, requirements: value.requirements, instruction: typeof value.instruction === 'string' ? value.instruction.slice(0,100_000) : '', preset: typeof value.preset === 'string' ? value.preset.slice(0,100) : 'free', references: [] };
+    if (!Array.isArray(value.references) || value.references.length > 100) throw new ScriptError('参考列表无效或超过 100 项');
+    const references = value.references.map((ref, index) => {
+      if (!ref || typeof ref.nodeId !== 'string' || typeof ref.label !== 'string' || !['text','image'].includes(ref.type) || typeof ref.content !== 'string' || !ref.content.trim() || ref.content.length > 200_000) throw new ScriptError(`参考 ${index + 1} 内容为空或无效`);
+      return { nodeId: ref.nodeId.slice(0,200), label: ref.label.slice(0,200), type: ref.type, content: ref.content };
+    });
+    const image = references.find(ref => ref.type === 'image');
+    if (image && !model.vision) throw new ScriptError(`参考「${image.label}」是图片；模型 ${model.name} 不支持图片，请选择视觉模型`);
+    return { model: model.id, requirements: value.requirements, instruction: typeof value.instruction === 'string' ? value.instruction.slice(0,100_000) : '', preset: typeof value.preset === 'string' ? value.preset.slice(0,100) : 'free', references };
   }
   nodeExists(canvasId: string, nodeId: string) {
     const row = this.db.prepare('SELECT data FROM workflows WHERE id=? AND deleted_at IS NULL').get(canvasId) as { data: string } | undefined;
@@ -90,15 +99,16 @@ export class ScriptService {
     }, 5_000);
     try {
       const input = task.input;
-      for await (const delta of stream({ model: input.model, prompt: [input.instruction,input.requirements].filter(Boolean).join('\n\n'), signal: controller.signal })) {
+      const images = await prepareScriptImages(input, controller.signal);
+      for await (const delta of stream({ model: input.model, prompt: scriptPrompt(input), images, signal: controller.signal })) {
         controller.signal.throwIfAborted();
         if (!delta) continue;
         const changed = this.db.prepare("UPDATE script_tasks SET text=text||?,revision=revision+1,updated_at=? WHERE id=? AND lease=? AND lease_until>? AND status='running'").run(delta, Date.now(), task.id, lease, Date.now());
         if (!changed.changes) { controller.abort(); break; }
       }
       if (!controller.signal.aborted) this.finish(task.id, lease, this.get(task.id).text.trim() ? 'completed' : 'failed', this.get(task.id).text.trim() ? null : '模型未返回正文');
-    } catch {
-      this.finish(task.id, lease, 'failed', '生成失败或模型连接中断；已保存正文保留，请检查服务端模型配置与配额');
+    } catch (error) {
+      this.finish(task.id, lease, 'failed', error instanceof ScriptPreflightError ? error.message : '生成失败或模型连接中断；已保存正文保留，请检查服务端模型配置与配额');
     } finally { clearInterval(heartbeat); controller.abort(); }
     return true;
   }
