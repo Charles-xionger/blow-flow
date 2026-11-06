@@ -11,6 +11,7 @@ import { getModelsByCategory } from '@/lib/model-registry';
 import { promptText } from '@/lib/canvas/prompt';
 import { useCanvasStore } from '@/store/useCanvasStore';
 import { useScriptTask } from '@/hooks/useScriptTask';
+import { ScriptVersionPanel } from './shared/ScriptVersionPanel';
 import { scriptActive, scriptStatusLabel } from '@/lib/script/types';
 
 const Particles = dynamic(() => import('./shared/ScriptParticles'),{ ssr:false });
@@ -44,6 +45,7 @@ function ScriptNode(props: NodeProps<Node<NodeData>>) {
           className="flex items-center gap-2 rounded-xl bg-violet-500 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"><ArrowUp size={15}/>{submitting ? '提交中' : active ? '生成中' : data.pendingScript ? '恢复原请求' : task ? '重新生成' : '生成'}</button>
       </div>
       {(error || task?.error) && <p role="alert" className="mt-3 text-xs text-red-300">{error || task?.error}</p>}
+      <ScriptVersionPanel nodeId={id}/>
       {polling && <p role="status" className="mt-2 text-xs text-amber-300">实时连接暂不可用，每 10 秒同步已保存正文。</p>}
     </section>;
   return <NodeShell {...props} toolbar={<NodeToolbarButton label="展开创作输入" icon={Maximize2} onClick={() => setExpanded(true)} />} console={expanded ? (!props.dragging ? createPortal(consoleContent, document.body) : null) : consoleContent}>
