@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchThirdParty, constructUrl } from "@/lib/ai-services/network";
-import { getAllModelConfigs } from "@/lib/db/model-configs";
-import { GoogleGenAI } from "@google/genai";
-import { getModelsByCategory } from "@/lib/model-registry";
+import { generateText } from "@/lib/ai-services/text";
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,42 +11,6 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
-
-    console.log("[API] Requested model:", modelName);
-
-    // 获取可用的 TEXT 模型定义（从 model-registry）
-    const textModelDefinitions = getModelsByCategory("TEXT");
-
-    // 确定要使用的模型
-    let selectedModelDef = textModelDefinitions.find(
-      (m) => m.name === modelName,
-    );
-
-    // 如果没有指定或找不到，使用第一个 Gemini 模型
-    if (!selectedModelDef) {
-      selectedModelDef =
-        textModelDefinitions.find(
-          (m) =>
-            m.provider === "gemini" || m.name.toLowerCase().includes("gemini"),
-        ) || textModelDefinitions[0];
-    }
-
-    if (!selectedModelDef) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "No text model available. Please check model configuration.",
-        },
-        { status: 400 },
-      );
-    }
-
-    console.log(
-      "[API] Using model:",
-      selectedModelDef.name,
-      "ID:",
-      selectedModelDef.id,
-    );
 
     // 英文 prompt，要求拆分合理的结构
     const storyboardPrompt = `You are a professional cinematographer and storyboard artist. Break down the following story/scene description into ${shotCount} distinct shots.
@@ -78,106 +39,7 @@ Output Format (JSON only, no additional text):
   ]
 }`;
 
-    let content = "";
-
-    // 如果是 Gemini 模型，使用 Google AI SDK
-    if (selectedModelDef.provider === "gemini") {
-      const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
-
-      if (!apiKey) {
-        return NextResponse.json(
-          {
-            success: false,
-            error:
-              "Google API Key not configured. Please set GOOGLE_API_KEY or GEMINI_API_KEY in environment variables.",
-          },
-          { status: 500 },
-        );
-      }
-
-      console.log("[API] Using Google AI SDK for Gemini model");
-
-      // 使用新的 GoogleGenAI SDK
-      const ai = new GoogleGenAI({ apiKey });
-
-      // 重试逻辑：处理 503 等临时错误
-      let lastError: any;
-      const maxRetries = 3;
-      const baseDelay = 2000; // 2秒
-
-      for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-          const response = await ai.models.generateContent({
-            model: selectedModelDef.id,
-            contents: storyboardPrompt,
-          });
-
-          content = response.text || "";
-          console.log("[API] Gemini response received");
-          break; // 成功，退出重试循环
-        } catch (error: any) {
-          lastError = error;
-          const isRetryable =
-            error.status === 503 || // Service Unavailable
-            error.status === 429 || // Rate Limit
-            error.status === 500 || // Internal Server Error
-            error.code === "ECONNRESET" ||
-            error.code === "ETIMEDOUT";
-
-          if (isRetryable && attempt < maxRetries) {
-            const delay = baseDelay * Math.pow(2, attempt - 1); // 指数退避
-            console.log(
-              `[API] Retry attempt ${attempt}/${maxRetries} after ${delay}ms (Error: ${error.status || error.code})`,
-            );
-            await new Promise((resolve) => setTimeout(resolve, delay));
-          } else {
-            // 非重试错误或已达到最大重试次数
-            throw error;
-          }
-        }
-      }
-
-      if (!content) {
-        throw lastError || new Error("Failed to generate content");
-      }
-    } else {
-      // 对于其他模型，从数据库获取配置
-      const allConfigs = getAllModelConfigs();
-      const modelConfig = allConfigs[selectedModelDef.name];
-
-      if (!modelConfig) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: `Model "${selectedModelDef.name}" not configured in database. Please configure it in settings.`,
-          },
-          { status: 400 },
-        );
-      }
-
-      console.log(
-        "[API] Using database config for model:",
-        selectedModelDef.name,
-      );
-
-      const config = {
-        baseUrl: modelConfig.baseUrl,
-        key: modelConfig.key,
-        modelId: modelConfig.modelId,
-        endpoint: modelConfig.endpoint || "/v1/chat/completions",
-      };
-
-      const payload = {
-        model: config.modelId,
-        messages: [{ role: "user", content: storyboardPrompt }],
-        temperature: 0.7,
-      };
-
-      const url = constructUrl(config.baseUrl, config.endpoint);
-      const res = await fetchThirdParty(url, "POST", payload, config.key);
-
-      content = res.choices?.[0]?.message?.content || "";
-    }
+    const { text: content } = await generateText({ model: modelName, prompt: storyboardPrompt, signal: request.signal });
 
     // 提取 JSON（处理可能的 markdown 代码块）
     let jsonMatch = content.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);

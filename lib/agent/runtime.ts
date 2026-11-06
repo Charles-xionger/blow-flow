@@ -1,3 +1,4 @@
+import { resolveAgentModel } from './models';
 import type { AgentTool, StreamFn } from '@mariozechner/pi-agent-core';
 import type { UserMessage } from '@mariozechner/pi-ai';
 import { Type } from '@sinclair/typebox';
@@ -14,13 +15,11 @@ export function createPiRuntime(service: AgentService, options: {
     tracer?: AgentTracer;
 } = {}): AgentRuntime {
     const run = async (context: AgentRuntimeContext, trace: AgentRunTrace | undefined) => {
-        const [{ Agent }, { getModels, streamSimple }] = await Promise.all([import('@mariozechner/pi-agent-core'), import('@mariozechner/pi-ai')]);
+        const [{ Agent }, { streamSimple }] = await Promise.all([import('@mariozechner/pi-agent-core'), import('@mariozechner/pi-ai')]);
         const config = agentModels().find(m => m.id === context.task.modelId);
         if (!config || !(options.apiKey || process.env[config.apiKeyEnv]))
             throw new Error('Agent model unavailable');
-        const model = getModels('google').find(m => m.id === config.modelId);
-        if (!model)
-            throw new Error('Unknown Gemini model');
+        const { model, onPayload } = resolveAgentModel(config);
         const mcp = await connectAgentMcp(service, context.task.id);
         const definitions = await mcp.client.listTools();
         const tools: AgentTool[] = definitions.tools.map(tool => ({ name: tool.name, label: tool.name, description: tool.description ?? '', parameters: Type.Unsafe(tool.inputSchema), execute: async (id, args) => {
@@ -32,15 +31,17 @@ export function createPiRuntime(service: AgentService, options: {
                         text: string;
                     }[], details: {}, terminate: !service.isExecuting(context.task) };
             } }));
-        const agent = new Agent({ initialState: { model: { ...model, ...(config.baseUrl ? { baseUrl: config.baseUrl } : {}) }, tools, systemPrompt: AGENT_GUIDE }, getApiKey: () => options.apiKey || process.env[config.apiKeyEnv], streamFn: (model, ctx, streamOptions) => { if (!service.isExecuting(context.task))
-                throw new Error('Task paused'); trace?.generation(model.id, { system: ctx.systemPrompt, messages: ctx.messages }); return (options.streamFn ?? streamSimple)(model, ctx, streamOptions); }, toolExecution: 'sequential', beforeToolCall: async () => context.signal.aborted || !service.isExecuting(context.task) ? { block: true, reason: 'Task paused', terminate: true } : undefined });
+        const agent = new Agent({ initialState: { model, tools, systemPrompt: AGENT_GUIDE }, getApiKey: () => options.apiKey || process.env[config.apiKeyEnv], streamFn: (model, ctx, streamOptions) => { if (!service.isExecuting(context.task))
+                throw new Error('Task paused'); trace?.generation(model.id, { system: ctx.systemPrompt, messages: ctx.messages }); return (options.streamFn ?? streamSimple)(model, ctx, { ...streamOptions, ...(onPayload ? { onPayload } : {}) }); }, toolExecution: 'sequential', beforeToolCall: async () => context.signal.aborted || !service.isExecuting(context.task) ? { block: true, reason: 'Task paused', terminate: true } : undefined });
         const convert = async (message: AgentMessage): Promise<UserMessage> => {
             const content: UserMessage['content'] = [{ type: 'text', text: `${message.role === 'assistant' ? '此前助手回复：' : ''}${message.text}` }];
             for (const reference of message.references) {
                 const resolved = await resolveReference(service, context.task.projectId, reference, { historical: true });
                 content.push({ type: 'text', text: resolved.context });
-                if (resolved.image)
+                if (resolved.image && model.input.includes('image'))
                     content.push(resolved.image);
+                else if (resolved.image)
+                    content.push({ type: 'text', text: '当前模型不支持查看图片像素；只能使用上述素材信息。需要视觉分析时请用户选择 Doubao Seed 2.1 Pro。' });
             }
             return { role: 'user', content, timestamp: message.createdAt };
         };

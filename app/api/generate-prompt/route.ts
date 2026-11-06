@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GoogleGenAI } from "@google/genai";
-import { getAllModelConfigs } from "@/lib/db/model-configs";
-import { getModelsByCategory } from "@/lib/model-registry";
+import { generateText } from "@/lib/ai-services/text";
 
 interface GeneratePromptRequest {
+  textModel?: string;
   nodeType: "startEndToVideo" | "imageToVideo" | "textToVideo" | "textToImage";
   currentPrompt?: string;
   context: {
@@ -36,81 +35,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log("[API] Generate prompt request:", { nodeType, context });
-
-    // 获取所有配置的模型
-    const allConfigs = await getAllModelConfigs();
-    const textModels = getModelsByCategory("TEXT");
-
-    // 查找可用的 Gemini 文本模型
-    let selectedModel = "gemini-2.5-pro";
-    let apiKey: string | undefined;
-
-    // 优先使用数据库配置的模型
-    if (allConfigs && Object.keys(allConfigs).length > 0) {
-      // 查找 Gemini 模型
-      for (const [name, config] of Object.entries(allConfigs)) {
-        // 跳过非 TEXT 类别的模型（这里目前只有 IMAGE 和 VIDEO）
-        if (
-          name.toLowerCase().includes("gemini") ||
-          config.modelId?.toLowerCase().includes("gemini")
-        ) {
-          selectedModel = config.modelId || name;
-          apiKey = config.key;
-          console.log(`[API] Using configured Gemini model: ${selectedModel}`);
-          break;
-        }
-      }
-    }
-
-    // 如果没找到配置的模型，使用内置模型
-    if (!apiKey) {
-      const geminiModel = textModels.find((m) =>
-        m.id.toLowerCase().includes("gemini"),
-      );
-      if (geminiModel) {
-        selectedModel = geminiModel.id;
-      }
-      // 从环境变量获取 API Key
-      apiKey = process.env.GEMINI_API_KEY;
-    }
-
-    if (!apiKey) {
-      return NextResponse.json(
-        {
-          success: false,
-          error:
-            "Gemini API key not found. Please set GEMINI_API_KEY environment variable.",
-        },
-        { status: 400 },
-      );
-    }
-
-    // 根据节点类型生成系统提示
-    const systemPrompt = generateSystemPrompt(nodeType, currentPrompt, context);
-
-    console.log("[API] Using model:", selectedModel);
-    console.log("[API] System prompt length:", systemPrompt.length);
-
-    // 使用 Gemini SDK 生成提示词
-    const ai = new GoogleGenAI({ apiKey, apiVersion: "v1alpha" });
-
-    // 准备内容，如果有图片则包含图片数据
-    const contents = await prepareContents(systemPrompt, nodeType, context);
-
-    const result = await ai.models.generateContent({
-      model: selectedModel,
-      contents: [{ parts: contents }],
+    // context.model selects the target image/video model, not the language model.
+    const images = nodeType === "startEndToVideo" ? [context.startImage, context.endImage]
+      : nodeType === "imageToVideo" ? [context.inputImage] : [];
+    const result = await generateText({
+      model: body.textModel,
+      prompt: generateSystemPrompt(nodeType, currentPrompt, context),
+      images: images.filter((image): image is string => !!image),
+      signal: request.signal,
     });
-    const generatedPrompt = result.text || "";
-
-    console.log("[API] Generated prompt:", generatedPrompt);
-
-    return NextResponse.json({
-      success: true,
-      data: generatedPrompt,
-      model: selectedModel,
-    });
+    return NextResponse.json({ success: true, data: result.text, model: result.model });
   } catch (error: any) {
     console.error("[API] Prompt generation error:", error);
     return NextResponse.json(
@@ -121,156 +55,6 @@ export async function POST(request: NextRequest) {
       { status: 500 },
     );
   }
-}
-
-async function prepareContents(
-  systemPrompt: string,
-  nodeType: string,
-  context: any,
-) {
-  const parts: any[] = [{ text: systemPrompt }];
-
-  // 根据节点类型添加相应的图片
-  if (nodeType === "startEndToVideo") {
-    if (context.startImage) {
-      const imageData = await getImageData(context.startImage);
-      if (imageData) {
-        parts.push({
-          text: "\n\nStart Frame Image:",
-        });
-        parts.push({
-          inlineData: {
-            mimeType: imageData.mimeType,
-            data: imageData.base64Data,
-          },
-          mediaResolution: {
-            level: "media_resolution_high",
-          },
-        });
-      }
-    }
-    if (context.endImage) {
-      const imageData = await getImageData(context.endImage);
-      if (imageData) {
-        parts.push({
-          text: "\n\nEnd Frame Image:",
-        });
-        parts.push({
-          inlineData: {
-            mimeType: imageData.mimeType,
-            data: imageData.base64Data,
-          },
-          mediaResolution: {
-            level: "media_resolution_high",
-          },
-        });
-      }
-    }
-  } else if (nodeType === "imageToVideo" && context.inputImage) {
-    const imageData = await getImageData(context.inputImage);
-    if (imageData) {
-      parts.push({
-        text: "\n\nInput Image:",
-      });
-      parts.push({
-        inlineData: {
-          mimeType: imageData.mimeType,
-          data: imageData.base64Data,
-        },
-        mediaResolution: {
-          level: "media_resolution_high",
-        },
-      });
-    }
-  }
-
-  return parts;
-}
-
-async function getImageData(imageSource: string): Promise<{
-  mimeType: string;
-  base64Data: string;
-} | null> {
-  try {
-    // 情况1: data URL 格式 (data:image/jpeg;base64,...)
-    if (imageSource.startsWith("data:")) {
-      const match = imageSource.match(/^data:([^;]+);base64,(.+)$/);
-      if (match) {
-        return {
-          mimeType: match[1],
-          base64Data: match[2],
-        };
-      }
-    }
-
-    // 情况2: HTTP/HTTPS URL，需要下载并转换为 base64
-    if (
-      imageSource.startsWith("http://") ||
-      imageSource.startsWith("https://")
-    ) {
-      console.log("[API] Downloading image from URL:", imageSource);
-      const response = await fetch(imageSource);
-      if (!response.ok) {
-        console.error("[API] Failed to download image:", response.statusText);
-        return null;
-      }
-
-      // 从 URL 推断 MIME 类型
-      let mimeType = response.headers.get("content-type") || "";
-
-      // 如果 Content-Type 不可靠，从文件扩展名推断
-      if (!mimeType || mimeType === "application/octet-stream") {
-        mimeType = getMimeTypeFromUrl(imageSource);
-      }
-
-      // 将图片转换为 base64
-      const arrayBuffer = await response.arrayBuffer();
-      const base64Data = Buffer.from(arrayBuffer).toString("base64");
-
-      console.log(
-        "[API] Image downloaded and converted to base64, size:",
-        base64Data.length,
-        "mimeType:",
-        mimeType,
-      );
-      return {
-        mimeType,
-        base64Data,
-      };
-    }
-
-    // 情况3: 纯 base64 字符串（不推荐，但作为兜底）
-    // 假设是 JPEG 格式
-    console.log("[API] Treating as raw base64 data");
-    return {
-      mimeType: "image/jpeg",
-      base64Data: imageSource,
-    };
-  } catch (error) {
-    console.error("[API] Error processing image:", error);
-    return null;
-  }
-}
-
-function getMimeTypeFromUrl(url: string): string {
-  const lowerUrl = url.toLowerCase();
-
-  if (lowerUrl.includes(".png")) {
-    return "image/png";
-  } else if (lowerUrl.includes(".jpg") || lowerUrl.includes(".jpeg")) {
-    return "image/jpeg";
-  } else if (lowerUrl.includes(".gif")) {
-    return "image/gif";
-  } else if (lowerUrl.includes(".webp")) {
-    return "image/webp";
-  } else if (lowerUrl.includes(".bmp")) {
-    return "image/bmp";
-  } else if (lowerUrl.includes(".svg")) {
-    return "image/svg+xml";
-  }
-
-  // 默认返回 jpeg
-  return "image/jpeg";
 }
 
 function generateSystemPrompt(
