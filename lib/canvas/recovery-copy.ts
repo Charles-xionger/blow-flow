@@ -1,3 +1,4 @@
+import { migrateScriptSnapshot } from './script-migration';
 import { remapImageReferenceOrder } from '../generation/image-references';
 import { copiedGenerationData } from '../generation/recovery';
 import { remapPromptReferences, type Prompt } from './prompt';
@@ -5,6 +6,7 @@ import type { CanvasSnapshot } from './save-protocol';
 
 /** Copies get fresh node identities so independent task-recovery records cannot attach. */
 export function recoverySnapshot(snapshot: CanvasSnapshot): CanvasSnapshot {
+  snapshot = migrateScriptSnapshot(snapshot);
   const ids = new Map(snapshot.nodes.map(node => [node.id, crypto.randomUUID()]));
   return { ...snapshot, history: undefined,
     nodes: snapshot.nodes.map(node => ({ ...node, id: ids.get(node.id)!,

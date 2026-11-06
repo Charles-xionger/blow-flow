@@ -42,7 +42,6 @@ import ImageToImageNode from "@/components/nodes/ImageToImageNode";
 import ImageToVideoNode from "@/components/nodes/ImageToVideoNode";
 import StartEndToVideoNode from "@/components/nodes/StartEndToVideoNode";
 import ScriptNode from "@/components/nodes/ScriptNode";
-import CreativeDescNode from "@/components/nodes/CreativeDescNode";
 import OriginalImageNode from "@/components/nodes/OriginalImageNode";
 import CharacterNode from "@/components/nodes/CharacterNode";
 import { GroupNode } from "@/components/nodes/GroupNode";
@@ -62,8 +61,6 @@ const nodeTypes = {
   [NodeType.IMAGE_TO_VIDEO]: ImageToVideoNode,
   [NodeType.START_END_TO_VIDEO]: StartEndToVideoNode,
   [NodeType.SCRIPT]: ScriptNode,
-  [NodeType.CREATIVE_DESC]: CreativeDescNode,
-  [NodeType.STORYBOARD]: CreativeDescNode, // 使用同一个组件
   [NodeType.ORIGINAL_IMAGE]: OriginalImageNode,
   [NodeType.CHARACTER]: CharacterNode,
   [NodeType.GROUP]: GroupNode,
@@ -326,7 +323,7 @@ function CanvasInner() {
               case NodeType.IMAGE_TO_VIDEO:
               case NodeType.START_END_TO_VIDEO:
                 return "#8b5cf6"; // purple
-              case NodeType.CREATIVE_DESC:
+              case NodeType.SCRIPT:
                 return "#10b981"; // green
               case NodeType.ORIGINAL_IMAGE:
                 return "#f59e0b"; // amber

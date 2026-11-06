@@ -1,3 +1,4 @@
+import { migrateScriptSnapshot } from '../canvas/script-migration';
 import { validReferenceUrl } from '../generation/reference-files';
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv-provider.js';
 import type Database from 'better-sqlite3';
@@ -80,7 +81,7 @@ export class AgentService {
     canvas(projectId: string) { const row = this.db.prepare('SELECT data FROM workflows WHERE id=? AND deleted_at IS NULL').get(projectId) as {
         data: string;
     } | undefined; if (!row)
-        throw new Error('Project not found'); return JSON.parse(row.data); }
+        throw new Error('Project not found'); return migrateScriptSnapshot(JSON.parse(row.data)); }
     snapshot(projectId: string): AgentSnapshot { this.recover(); this.canvas(projectId); return { generations: this.generationSummary?.(projectId), tasks: (this.db.prepare('SELECT data FROM agent_tasks WHERE project_id=? ORDER BY rowid').all(projectId) as {
             data: string;
         }[]).map(r => JSON.parse(r.data)), messages: (this.db.prepare('SELECT data FROM agent_messages WHERE project_id=? ORDER BY rowid').all(projectId) as {

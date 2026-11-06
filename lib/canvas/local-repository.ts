@@ -1,3 +1,4 @@
+import { migrateScriptSnapshot } from './script-migration';
 import { mergeRemoteCanvas } from './remote-merge';
 import { restoredHistory } from './history';
 import { canonicalJSON, type CanvasSnapshot, type SaveAcknowledgement, type SaveOperation } from './save-protocol';
@@ -62,9 +63,10 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
     request.onerror = () => reject(request.error);
   });
   async function transaction<T>(mode: IDBTransactionMode, work: (tx: IDBTransaction) => Promise<T>): Promise<T> {
+    void mode;
     const db = await open();
     let tx: IDBTransaction;
-    try { tx = db.transaction(['drafts', 'operations', 'metadata'], mode); }
+    try { tx = db.transaction(['drafts', 'operations', 'metadata'], 'readwrite'); }
     catch (error) {
       if (error instanceof Error && error.name === 'InvalidStateError') {
         db.close(); connection = undefined;
@@ -77,7 +79,25 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
       tx.oncomplete = () => resolve(value);
       tx.onabort = () => reject(canvasStorageError(tx.error, 'aborted'));
       tx.onerror = () => {}; // onabort reports the final transaction outcome.
-      void work(tx).then(output => { value = output; }).catch(error => {
+      void (async () => {
+        const metadata = tx.objectStore('metadata');
+        if (!await result(metadata.get('scriptMigrationV1'))) {
+          const drafts = tx.objectStore('drafts'), operations = tx.objectStore('operations');
+          for (const draft of await result<CanvasDraft[]>(drafts.getAll())) {
+            const snapshot = migrateScriptSnapshot(draft.snapshot, draft.confirmedSnapshot);
+            if (snapshot === draft.snapshot) continue;
+            draft.snapshot = snapshot;
+            if (draft.confirmedSnapshot) draft.confirmedSnapshot = migrateScriptSnapshot(draft.confirmedSnapshot);
+            draft.localVersion++;
+            drafts.put(draft);
+            // Unknown-outcome requests are immutable: replay their exact payload,
+            // then acknowledge() queues the upgraded draft under a NEW request ID.
+            if (!draft.recovery && !await result(operations.get(draft.id))) operations.put(operation(draft));
+          }
+          metadata.put(true, 'scriptMigrationV1');
+        }
+        return work(tx);
+      })().then(output => { value = output; }).catch(error => {
         try { tx.abort(); } catch { /* May already have aborted. */ }
         // Preserve domain errors (such as an invalid recovery choice). Only
         // IndexedDB failures need the storage-specific recovery instructions.
@@ -156,6 +176,7 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
       });
     },
     mergeRemote(id: string, snapshot: CanvasSnapshot, serverVersion: number, rejectedRequestId?: string): Promise<CanvasDraft> {
+      snapshot = migrateScriptSnapshot(snapshot);
       return transaction('readwrite', async tx => {
         const drafts = tx.objectStore('drafts'), operations = tx.objectStore('operations');
         const draft = await result<CanvasDraft>(drafts.get(id));
@@ -176,6 +197,7 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
       });
     },
     reconcile(id: string, snapshot: CanvasSnapshot, serverVersion: number): Promise<CanvasDraft> {
+      snapshot = migrateScriptSnapshot(snapshot);
       return transaction('readwrite', async tx => {
         const drafts = tx.objectStore('drafts');
         const draft = await result<CanvasDraft>(drafts.get(id));
@@ -191,6 +213,7 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
       });
     },
     reconcileDeleted(id: string, snapshot: CanvasSnapshot, serverVersion: number, observationId?: string): Promise<CanvasDraft> {
+      snapshot = migrateScriptSnapshot(snapshot);
       return transaction('readwrite', async tx => {
         const drafts = tx.objectStore('drafts');
         const draft = await result<CanvasDraft>(drafts.get(id));
@@ -215,6 +238,7 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
       });
     },
     adoptRemote(id: string, snapshot: CanvasSnapshot, serverVersion: number): Promise<CanvasDraft> {
+      snapshot = migrateScriptSnapshot(snapshot);
       return transaction('readwrite', async tx => {
         const drafts = tx.objectStore('drafts');
         const previous = await result<CanvasDraft>(drafts.get(id));
@@ -254,6 +278,7 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
       });
     },
     async commit(id: string, snapshot: CanvasSnapshot, serverVersion: number, expectedLocalVersion?: number): Promise<CanvasDraft> {
+      snapshot = migrateScriptSnapshot(snapshot);
       return transaction('readwrite', async tx => {
         const drafts = tx.objectStore('drafts');
         const previous = await result<CanvasDraft | undefined>(drafts.get(id));
@@ -282,6 +307,7 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
       });
     },
     async adopt(id: string, snapshot: CanvasSnapshot, serverVersion: number): Promise<CanvasDraft> {
+      snapshot = migrateScriptSnapshot(snapshot);
       return transaction('readwrite', async tx => {
         const drafts = tx.objectStore('drafts');
         const previous = await result<CanvasDraft | undefined>(drafts.get(id));
@@ -351,7 +377,7 @@ export function createCanvasRepository(name = 'ai-flow-canvas') {
         if (draft.recovery || !pending || pending.requestId !== sent.requestId) return draft;
         draft.confirmedLocalVersion = sent.localVersion;
         draft.serverVersion = ack.version;
-        draft.confirmedSnapshot = sent.snapshot;
+        draft.confirmedSnapshot = migrateScriptSnapshot(sent.snapshot);
         drafts.put(draft);
         operations.delete(sent.id);
         if (draft.localVersion > sent.localVersion) operations.put(operation(draft));

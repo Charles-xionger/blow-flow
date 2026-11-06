@@ -58,7 +58,7 @@ pnpm test:browser
 
 本地追踪：运行 `scripts/setup-langfuse.sh`，按提示用 Docker 启动 Langfuse（网页 http://localhost:3100，避开 Web 的 3000），并把 `LANGFUSE_BASE_URL`、`LANGFUSE_PUBLIC_KEY`、`LANGFUSE_SECRET_KEY` 写入 `.env.local`。部署文件与生成的密钥在已忽略的 `.langfuse/`，可重复运行。agent worker 启动时读到这三个变量即开启追踪（启动日志会显示），每次任务运行在 Langfuse 记为一条 trace：会话为项目 ID，包含每轮模型调用（输入、输出、用量）、工具调用的参数与结果、失败原因；参考图只记录摘要，凭据已打码。未配置时追踪关闭，失败原因仍输出在 agent worker 终端。
 
-内置 Ark 语言模型为 `deepseek-v4-pro-ga-260813`（DeepSeek V4 Pro）和 `doubao-seed-2-1-pro-260915`（Doubao Seed 2.1 Pro），均使用 `https://ark.cn-beijing.volces.com/api/v3/responses` 和服务端 `ARK_API_KEY`，与 Seedream 共用密钥。配置后重启 Web 与 agent worker，即可在创作助手和分镜节点中选择。助手使用流式 Responses 与现有 MCP 工具；DeepSeek 默认启用 `web_search`（`max_keyword: 3`），图片分析请选择豆包。分镜生成不启用联网搜索；自动选择在配置 Ark 密钥时优先使用 Ark。提示词生成在配置 Ark 密钥后自动选择 Ark（有图片时使用豆包），可通过请求字段 `textModel` 指定模型，图片上下文作为 `input_image` 传入。
+内置 Ark 语言模型为 `deepseek-v4-pro-ga-260813`（DeepSeek V4 Pro）和 `doubao-seed-2-1-pro-260915`（Doubao Seed 2.1 Pro），均使用 `https://ark.cn-beijing.volces.com/api/v3/responses` 和服务端 `ARK_API_KEY`，与 Seedream 共用密钥。配置后重启 Web 与 agent worker，即可在创作助手和脚本节点中选择。助手使用流式 Responses 与现有 MCP 工具；DeepSeek 默认启用 `web_search`（`max_keyword: 3`），图片分析请选择豆包。脚本生成不启用联网搜索；自动选择在配置 Ark 密钥时优先使用 Ark。提示词生成在配置 Ark 密钥后自动选择 Ark（有图片时使用豆包），可通过请求字段 `textModel` 指定模型，图片上下文作为 `input_image` 传入。
 
 如果设置了 `AGENT_CONFIG_PATH`，文件中的模型列表会替换内置助手列表；请将需要的 Ark 模型加入其中。例如：
 
@@ -95,3 +95,5 @@ Ark 的 `baseUrl` 如覆盖，应包含 `/api/v3`，不包含 `/responses`。Pi 
 脚本节点通过 `/api/script/tasks` 提交幂等请求，独立的 `pnpm script:worker` 调用通用 `streamText` 模型适配层。配置服务端 `ARK_API_KEY`，或已有 Gemini 服务端密钥后重启 worker。`pnpm dev:all` 包含此 worker；生产环境也需持续运行它，并与 Web 共用 `DATABASE_PATH`。`SCRIPT_CONCURRENCY` 控制脚本任务并发上限（默认 5，范围 1–20）。
 
 SQLite 保存输入快照、任务身份、正文和修订号；页面经每画布一条 SSE 接收已持久化正文，连接失败时每 10 秒查询。关闭页面不会停止后台生成；执行进程丢失后租约过期，worker 将任务标记中断并保留正文，不重新调用供应商。脚本任务不写回整张画布，也不复活删除的节点。尚未提交的已删除节点任务不会调用模型。
+
+脚本旧项目升级、助手发布与人工联调步骤见 [脚本创作与迁移](docs/SCRIPT_CREATION.md)。

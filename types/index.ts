@@ -14,8 +14,6 @@ export enum NodeType {
   IMAGE_TO_VIDEO = "imageToVideo",
   START_END_TO_VIDEO = "startEndToVideo",
   SCRIPT = "script",
-  CREATIVE_DESC = "creativeDesc",
-  STORYBOARD = "storyboard",
   ORIGINAL_IMAGE = "originalImage",
   GROUP = "group",
   CHARACTER = "character",
@@ -85,19 +83,6 @@ export interface NodeData extends Record<string, unknown> {
   scriptInstruction?: string;
   scriptTaskId?: string;
   pendingScript?: import("@/lib/script/types").CreateScriptTask;
-
-  // Creative Desc 专用
-  optimizedPrompt?: string;
-
-  // Storyboard 专用
-  storyboardShots?: Array<{
-    shotNumber: number;
-    title: string;
-    description: string;
-    duration?: string;
-    cameraMovement?: string;
-  }>;
-  shotCount?: number;
 
   // Character 专用
   characterId?: string;

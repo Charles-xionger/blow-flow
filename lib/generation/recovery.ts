@@ -1,3 +1,4 @@
+import type { NodeData } from '../../types';
 import type { CreateGeneration, GenerationTask } from './types';
 import { createGeneration, deleteGenerationNode, generationActive, generationLabel, GenerationRequestError, getGeneration, resumeGeneration, retryGenerationSave } from './client';
 
@@ -29,10 +30,11 @@ export const clearedGenerationAssociation = {
   generationBlocked: false, generationCanRetrySave: false, generationSaving: false,
 } satisfies GenerationView;
 export const copiedGenerationData = {
+  pendingScript: undefined, pendingScriptPublish: undefined, scriptTaskId: undefined, scriptSource: undefined,
   ...clearedGenerationAssociation, isLoading: false, error: undefined,
   generationNodeId: undefined, generationContentVersion: undefined, generationBindingVersion: undefined,
   generationRevision: undefined, generationResultBlocked: undefined, generationResultArtifacts: undefined,
-} satisfies GenerationView;
+} satisfies GenerationView & Partial<NodeData>;
 
 interface ViewPort {
   // Returns undefined after deletion, navigation or unmount.

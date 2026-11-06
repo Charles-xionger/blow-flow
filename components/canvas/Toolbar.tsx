@@ -64,8 +64,7 @@ export function Toolbar() {
         const text = await file.text();
         const data = JSON.parse(text);
 
-        // TODO: 导入工作流到 store
-        console.log("导入数据:", data);
+        useCanvasStore.getState().importGraph(data.nodes, data.edges, { name: data.name, viewport: data.viewport });
         toast.success("导入成功", {
           description: "工作流已导入",
         });

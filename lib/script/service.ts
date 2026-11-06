@@ -1,3 +1,4 @@
+import { migrateScriptSnapshot } from '../canvas/script-migration';
 import { scriptPrompt } from './inputs';
 import { prepareScriptImages, ScriptPreflightError } from './preflight';
 import { randomUUID } from 'node:crypto';
@@ -70,7 +71,7 @@ export class ScriptService {
   }
   nodeExists(canvasId: string, nodeId: string) {
     const row = this.db.prepare('SELECT data FROM workflows WHERE id=? AND deleted_at IS NULL').get(canvasId) as { data: string } | undefined;
-    return !!row && JSON.parse(row.data).nodes.some((n: { id: string; type: string }) => n.id === nodeId && n.type === 'script');
+    return !!row && migrateScriptSnapshot(JSON.parse(row.data)).nodes.some((n: { id: string; type: string }) => n.id === nodeId && n.type === 'script');
   }
   /** Queued work has no provider to cancel; running work holds the slot until acknowledged. */
   stop(id: string): ScriptTask {

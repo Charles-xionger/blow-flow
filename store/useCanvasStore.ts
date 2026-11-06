@@ -1,3 +1,4 @@
+import { migrateScriptGraph, migrateScriptSnapshot } from '@/lib/canvas/script-migration';
 import { versionContent } from '@/lib/canvas/content-version';
 import { assertOriginalMedia } from '@/lib/canvas/original-media';
 import { assertCanvasGraph, descendants, groupGraphNodes, parentFirst, ungroupGraphNodes } from '@/lib/canvas/graph';
@@ -189,14 +190,6 @@ function createCanvasNode(type: NodeType, position: { x: number; y: number }, da
       },
     },
     [NodeType.SCRIPT]: { label: "脚本", data: { model: "doubao-seed-2-1-pro-260915" } },
-    [NodeType.CREATIVE_DESC]: {
-      label: "Creative Description",
-      data: { model: "BananaPro" },
-    },
-    [NodeType.STORYBOARD]: {
-      label: "Storyboard",
-      data: {},
-    },
     [NodeType.ORIGINAL_IMAGE]: {
       label: "Original Image",
       data: {},
@@ -308,6 +301,7 @@ export const useCanvasStore = create<CanvasState>()(
         importGraph: (nodes, edges, options = {}) => {
           // Legacy exports may contain edges to omitted nodes; detach those references.
           if (!Array.isArray(nodes) || !Array.isArray(edges)) throw new Error('画布节点与连线格式错误');
+          ({ nodes, edges } = migrateScriptGraph({ nodes, edges }));
           const sourceIds = new Set(nodes.map(node => node?.id));
           edges = edges.filter(edge => !edge || sourceIds.has(edge.source) && sourceIds.has(edge.target));
           assertCanvasGraph(nodes, edges);
@@ -565,6 +559,7 @@ export const useCanvasStore = create<CanvasState>()(
         },
 
         loadWorkflow: (workflow: WorkflowData) => {
+          workflow = migrateScriptSnapshot(workflow);
           set({
             canvasSession: get().canvasSession + 1,
             selectedNodeIds: [],

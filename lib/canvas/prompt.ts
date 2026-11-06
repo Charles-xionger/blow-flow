@@ -38,7 +38,7 @@ export type PromptGraph = { nodes: readonly PromptNode[]; edges: readonly { sour
 export type UpstreamNode = { id: string; kind: 'text' | 'image' | 'video'; label: string; name: string; src?: string };
 
 // Kept as literals so this module has no runtime dependency on the app's type modules.
-const textSources: ReadonlySet<string> = new Set(['text', 'creativeDesc', 'storyboard']);
+const textSources: ReadonlySet<string> = new Set(['text']);
 // Node types that take text input, so connecting a text node appends its reference.
 const referencingNodeTypes: ReadonlySet<string> = new Set(['text', 'textToImage', 'textToVideo']);
 
