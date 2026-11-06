@@ -54,7 +54,7 @@ export class ScriptPublishingService {
       }
       const targetId = request.mode === 'new' ? randomUUID() : request.targetId!;
       const data = { prompt:[{text:draft.draft}],textPurpose:request.purpose,scriptSource:{nodeId:request.nodeId,versionId:request.versionId,draftRevision:request.expectedDraftRevision} };
-      const applied = this.canvas.apply(request.canvasId,`script-publish:${request.requestId}`,request.mode === 'new' ? [{ kind:'create',node:{id:targetId,type:NodeType.TEXT,position:{x:source.position.x+440,y:source.position.y},...(source.parentId ? {parentId:source.parentId} : {}),data:{type:NodeType.TEXT,label:textPurposes[request.purpose],...data}} }] : [{kind:'update',id:targetId,data}],`发布${textPurposes[request.purpose]}`);
+      const applied = this.canvas.apply(request.canvasId,`script-publish:${request.requestId}`,request.mode === 'new' ? [{ kind:'create',node:{id:targetId,type:NodeType.TEXT,position:{x:source.position.x+440,y:source.position.y},...(source.parentId ? {parentId:source.parentId} : {}),data:{type:NodeType.TEXT,label:textPurposes[request.purpose],...data}} }] : [{kind:'update',id:targetId,data}],`发布${textPurposes[request.purpose]}`,false,undefined,undefined,{scriptPublication:true});
       const published = (getWorkflowById(request.canvasId)!.nodes as CanvasNode[]).find(n => n.id === targetId)!;
       this.db.prepare('INSERT INTO script_publish_links VALUES(?,?,?,?) ON CONFLICT(canvas_id,node_id) DO UPDATE SET target_id=excluded.target_id,revision=excluded.revision').run(request.canvasId,request.nodeId,targetId,revision(published));
       const result = {targetId,version:applied.version};

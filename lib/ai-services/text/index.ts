@@ -20,23 +20,29 @@ interface TextConnection {
 }
 type TextAdapter = (input: TextGenerationInput, connection: TextConnection) => Promise<string>;
 
+/** Shared image preparation; retry policy belongs to each execution path. */
+async function geminiParts(input: TextGenerationInput, signal?: AbortSignal) {
+  const parts: ({ text: string } | { inlineData: { mimeType: string; data: string } })[] = [{ text: input.prompt }];
+  for (const image of input.images ?? []) {
+    const embedded = image.match(/^data:(image\/[^;]+);base64,([\s\S]+)$/);
+    if (embedded) parts.push({ inlineData: { mimeType: embedded[1], data: embedded[2] } });
+    else {
+      const response = await fetch(image, { signal, redirect: 'error' });
+      if (!response.ok) throw new Error('无法读取参考图片');
+      parts.push({ inlineData: { mimeType: response.headers.get('content-type')?.split(';')[0] || 'image/jpeg',
+        data: Buffer.from(await response.arrayBuffer()).toString('base64') } });
+    }
+  }
+  return parts;
+}
+
 const adapters: Record<'gemini' | 'ark' | 'other', TextAdapter> = {
   ark: (input, connection) => generateArkText(connection.modelId, input.prompt, {
     images: input.images, webSearch: input.webSearch, signal: input.signal,
     apiKey: connection.apiKey, baseUrl: connection.baseUrl,
   }),
   gemini: async (input, connection) => {
-    const parts: ({ text: string } | { inlineData: { mimeType: string; data: string } })[] = [{ text: input.prompt }];
-    for (const image of input.images ?? []) {
-      const embedded = image.match(/^data:(image\/[^;]+);base64,([\s\S]+)$/);
-      if (embedded) parts.push({ inlineData: { mimeType: embedded[1], data: embedded[2] } });
-      else {
-        const response = await fetch(image, { signal: input.signal, redirect: 'error' });
-        if (!response.ok) throw new Error('无法读取参考图片');
-        parts.push({ inlineData: { mimeType: response.headers.get('content-type')?.split(';')[0] || 'image/jpeg',
-          data: Buffer.from(await response.arrayBuffer()).toString('base64') } });
-      }
-    }
+    const parts = await geminiParts(input, input.signal);
     const ai = new GoogleGenAI({ apiKey: connection.apiKey });
     for (let attempt = 0; ; attempt++) {
       try {
@@ -112,16 +118,7 @@ export async function* streamText(input: TextGenerationInput): AsyncGenerator<st
     return;
   }
   if (provider !== 'gemini') throw new Error('当前模型尚未提供流式文本能力');
-  const parts: ({ text: string } | { inlineData: { mimeType: string; data: string } })[] = [{ text: input.prompt }];
-  for (const image of input.images ?? []) {
-    const embedded = image.match(/^data:(image\/[^;]+);base64,([\s\S]+)$/);
-    if (embedded) parts.push({ inlineData: { mimeType: embedded[1], data: embedded[2] } });
-    else {
-      const response = await fetch(image, { signal, redirect: 'error' });
-      if (!response.ok) throw new Error('无法读取参考图片');
-      parts.push({ inlineData: { mimeType: response.headers.get('content-type')?.split(';')[0] || 'image/jpeg', data: Buffer.from(await response.arrayBuffer()).toString('base64') } });
-    }
-  }
+  const parts = await geminiParts(input, signal);
   const ai = new GoogleGenAI({ apiKey: connection.apiKey });
   const stream = await ai.models.generateContentStream({ model: connection.modelId, contents: [{ parts }], config: { abortSignal: signal, ...(input.webSearch ? { tools: [{ googleSearch: {} }] } : {}) } });
   let finished = false;
