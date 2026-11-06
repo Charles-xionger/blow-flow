@@ -86,6 +86,15 @@ function resolveTextConnection(input: TextGenerationInput) {
   return { connection, provider };
 }
 
+/** Validate configuration without submitting or exposing credentials. */
+export function validateTextConfiguration(model: string, hasImages = false): void {
+  const definition = getModelDefinition(model);
+  if (!definition || definition.category !== 'TEXT') throw new Error('所选语言模型不可用，请重新选择');
+  if (hasImages && !definition.vision) throw new Error(`语言模型 ${definition.name} 不支持参考图片`);
+  const { provider } = resolveTextConnection({ model, prompt: '' });
+  if (provider !== 'ark' && provider !== 'gemini') throw new Error('所选模型尚未提供流式文本能力');
+}
+
 export async function generateText(input: TextGenerationInput): Promise<{ text: string; model: string }> {
   const { connection, provider } = resolveTextConnection(input);
   const signal = input.signal ? AbortSignal.any([input.signal, AbortSignal.timeout(180_000)]) : AbortSignal.timeout(180_000);

@@ -9,6 +9,7 @@ export interface ModelDefinition {
   name: string;
   category: "IMAGE" | "VIDEO" | "TEXT";
   defaultEndpoint: string;
+  vision?: boolean;
   provider?: "gemini" | "ark" | "other"; // 用于标识是否使用 Gemini SDK
 }
 
@@ -26,13 +27,14 @@ const LEGACY_MODEL_KEYS: Record<string, string> = {
 const BUILTIN_MODELS: Record<string, ModelDefinition> = {
   ...Object.fromEntries(ARK_TEXT_MODELS.map(model => [model.name, {
     id: model.id, name: model.name, category: "TEXT" as const,
-    defaultEndpoint: "/api/v3/responses", provider: "ark" as const,
+    vision: model.vision, defaultEndpoint: "/api/v3/responses", provider: "ark" as const,
   }])),
   // === 文本模型 (Gemini) ===
   "Gemini 3.8 Flash": {
     id: "gemini-3.8-flash",
     name: "Gemini 3.8 Flash",
     category: "TEXT",
+    vision: true,
     defaultEndpoint: "",
     provider: "gemini",
   },
@@ -40,6 +42,7 @@ const BUILTIN_MODELS: Record<string, ModelDefinition> = {
     id: "gemini-4-argon",
     name: "Gemini 4 Argon",
     category: "TEXT",
+    vision: true,
     defaultEndpoint: "",
     provider: "gemini",
   },
@@ -48,6 +51,7 @@ const BUILTIN_MODELS: Record<string, ModelDefinition> = {
     id: "gemini-3-flash-preview",
     name: "Gemini 3 Flash Preview",
     category: "TEXT",
+    vision: true,
     defaultEndpoint: "",
     provider: "gemini",
   },
