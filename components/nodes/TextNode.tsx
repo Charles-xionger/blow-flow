@@ -8,6 +8,7 @@ import { useUpstreamNodes } from "@/hooks/useUpstreamNodes";
 import { expandPrompt, promptSegments, promptText } from "@/lib/canvas/prompt";
 import { useCanvasStore } from "@/store/useCanvasStore";
 import type { NodeData } from "@/types";
+import { textPurposes } from "@/lib/script/publishing-types";
 import { NodeShell } from "./NodeShell";
 import { NodeConsole } from "./shared/NodeConsole";
 import { PromptEditor } from "./shared/PromptEditor";
@@ -34,6 +35,7 @@ const TextNode = (props: NodeProps<Node<NodeData>>) => {
     >
       <div data-testid="text-content"
         className={`h-full w-full overflow-y-auto whitespace-pre-wrap break-words p-4 text-sm leading-relaxed ${content ? "text-zinc-200" : "text-zinc-500"}`}>
+        {data.textPurpose && <span className="mb-2 block text-xs text-violet-300">{textPurposes[data.textPurpose]}</span>}
         {content || "暂无内容"}
       </div>
     </NodeShell>

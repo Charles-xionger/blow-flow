@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useCanvasStore } from '@/store/useCanvasStore';
 import { scriptActive, scriptStatusLabel } from '@/lib/script/types';
+import { ScriptPublishPanel } from './ScriptPublishPanel';
 import type { ScriptVersion, ScriptVersions } from '@/lib/script/versions';
 
 async function requestVersions(url: string, body?: object) {
@@ -82,6 +83,7 @@ export function ScriptVersionPanel({ nodeId }: { nodeId:string }) {
         {editingId && <p className="mt-2 text-amber-300">本地修改尚未保存，请保存或放弃修改后切换版本。</p>}
         <div className="my-2 flex gap-3">{(['draft','original','input'] as const).map(value => <button key={value} type="button" aria-pressed={tab === value} onClick={() => setTab(value)} className={tab === value ? 'text-violet-300' : 'text-zinc-500'}>{{draft:'编辑稿',original:'模型原稿',input:'输入来源'}[value]}</button>)}</div>
         <div className={tab === 'draft' ? '' : 'hidden'}><DraftEditor key={version.id} version={version} onSaved={() => refresh.current()} onDirty={dirty => setEditingId(dirty ? version.id : null)}/></div>
+        <ScriptPublishPanel key={`${canvasId}:${nodeId}:${version.id}`} version={version} disabled={!!editingId || selecting}/>
         {tab === 'original' && <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-black/20 p-2 font-sans leading-6">{version.text || '尚无已保存正文'}</pre>}
         {tab === 'input' && <div className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-black/20 p-2 leading-6">
           <p>模型：{version.input.model} · 任务：{version.input.preset}</p><p>任务指令：{version.input.instruction || '无'}</p><p>创作要求：{version.input.requirements}</p>

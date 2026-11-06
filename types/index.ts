@@ -78,6 +78,9 @@ export interface NodeData extends Record<string, unknown> {
   count?: number;
   promptOptimize?: boolean;
 
+  textPurpose?: import("@/lib/script/publishing-types").TextPurpose;
+  scriptSource?: { nodeId: string; versionId: string; draftRevision: number };
+  pendingScriptPublish?: import("@/lib/script/publishing-types").PublishScript;
   scriptPreset?: string;
   scriptInstruction?: string;
   scriptTaskId?: string;
