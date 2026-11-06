@@ -52,7 +52,9 @@ function ScriptNode(props: NodeProps<Node<NodeData>>) {
   const model = models.find(model => model.id === data.model || model.name === data.model)?.id || data.model || models[0].id;
   const active = scriptActive(activeTask?.status);
   const text = task?.text || '';
-  const consoleContent = <section ref={consoleRef} aria-label="脚本节点控制台" className={`nokey nodrag nopan nowheel z-70 cursor-auto select-text rounded-[22px] border border-white/10 bg-[#242426] p-4 text-zinc-200 shadow-2xl ${expanded ? 'fixed inset-4 z-[200] flex flex-col overflow-auto' : 'absolute overflow-auto left-1/2 top-full mt-3 w-[560px] max-w-[calc(100vw-32px)] -translate-x-1/2'}`}>
+  // Use the same transform property as viewport clamping; Tailwind's translate utility
+  // uses the independent CSS translate property and would apply centering twice.
+  const consoleContent = <section ref={consoleRef} aria-label="脚本节点控制台" className={`nokey nodrag nopan nowheel z-70 cursor-auto select-text rounded-[22px] border border-white/10 bg-[#242426] p-4 text-zinc-200 shadow-2xl ${expanded ? 'fixed inset-4 z-[200] flex flex-col overflow-auto' : 'absolute overflow-auto left-1/2 top-full mt-3 w-[560px] max-w-[calc(100vw-32px)] [transform:translateX(-50%)]'}`}>
       <div className="mb-3 flex items-center justify-between text-xs text-zinc-400"><span>脚本创作</span>
         <button type="button" aria-label={expanded ? '收起输入区' : '展开输入区'} onClick={() => setExpanded(!expanded)} className="rounded-lg p-1.5 hover:bg-white/10">{expanded ? <Minimize2 size={15}/> : <Maximize2 size={15}/>}</button>
       </div>
