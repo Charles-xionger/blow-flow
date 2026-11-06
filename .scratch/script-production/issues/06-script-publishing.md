@@ -1,6 +1,6 @@
 # 06：发布文本与冲突保护
 
-Status: claimed
+Status: resolved
 
 **What to build:** 用户主动将选定版本的编辑稿发布为文本节点，并能安全更新原文本或创建新文本；下游只读取发布结果。
 
@@ -29,3 +29,11 @@ Status: claimed
 ## Source
 
 [第一阶段规格](../spec.md)；[任务总览](../tickets.md)。
+
+## Answer
+
+- 新增共享 `ScriptPublishingService.publish` 与 `/api/script/publish`，在同一 SQLite immediate 事务内读取选用完成版本、校验编辑稿修订，调用既有 `CanvasAgentService.apply`，写入发布关联与幂等回执。历史、内容版本及下游输入变化复用现有语义写入，不直接覆盖旧整图。
+- 文本携带 `textPurpose` 和 `scriptSource` 来源；再次发布明确选择新建或更新。更新比较上次发布快照，冲突返回当前展开文本及不透明修订；明确覆盖仍校验用户查看过的修订。删除目标仅允许新建，不复活。
+- 独立发布组件接入版本面板，未保存编辑稿不可发布；发布前刷新保存，持久化请求身份，网络结果未知时恢复原请求。服务回执在选用版本／编辑稿检查之前重放，删除项目优先于回执。
+- 助手入口可复用 `publish(request, authorize)`；回调在事务内执行，调用方必须验证助手任务执行权及 ADR-0011 内容所有权。迁移任务须清除复制／导入节点的 pendingScriptPublish 和跨节点来源关联。
+- 已合并任务 03 的最新集成提交 `f23fec5`；类型检查、受影响文件 ESLint、git diff --check 通过。遵守用户要求，未编写或运行自动测试、浏览器验收或真实模型调用；规格中的演示链路尚未实际执行。
