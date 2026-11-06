@@ -56,6 +56,11 @@ function ScriptNode(props: NodeProps<Node<NodeData>>) {
       <div className="mb-3 flex items-center justify-between text-xs text-zinc-400"><span>脚本创作</span>
         <button type="button" aria-label={expanded ? '收起输入区' : '展开输入区'} onClick={() => setExpanded(!expanded)} className="rounded-lg p-1.5 hover:bg-white/10">{expanded ? <Minimize2 size={15}/> : <Maximize2 size={15}/>}</button>
       </div>
+      {!!data.legacyScriptArchive && <details className="mb-3 text-xs text-zinc-400">
+        <summary className="cursor-pointer">旧创作内容迁移档案（原文与连线）</summary>
+        <p className="my-2">已有文本保持原文；无法可靠匹配的旧结果和连线保留在此，可查看和复制，未重新生成。</p>
+        <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words select-text">{JSON.stringify(data.legacyScriptArchive, null, 2)}</pre>
+      </details>}
       <ScriptInputs id={id} data={data} expanded={expanded} task={task}/>
       <div className="mt-3 flex items-center gap-2">
         <select aria-label="语言模型" value={model} onChange={event => update(id,{ model:event.target.value })} className="min-w-0 max-w-[70%] rounded-xl bg-[#303033] px-3 py-2 text-xs outline-none">

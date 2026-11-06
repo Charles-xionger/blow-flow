@@ -1,11 +1,12 @@
+import { scriptPresets } from '../script/inputs';
 import { normalizeImageOptions } from '../generation/image-options';
 import { NodeType, type NodeData } from '../../types';
 import type { CanvasModel } from './canvas-models';
 import { validGenerationDimensions } from '../generation/dimensions';
 import { imageAspectRatios, imagePresetDimensions } from '../generation/image-dimensions';
 import { videoDimensions, videoRatios, videoResolutions } from '../generation/video';
-const strings = new Set(['label', 'customTitle', 'model', 'optimizedPrompt']);
-const fields = new Set([...strings, 'type', 'prompt', 'generationWidth', 'generationHeight', 'generationSizePreset', 'imageOptions', 'aspectRatio', 'videoResolution', 'videoAspectRatio', 'videoDuration', 'videoInstanceType', 'storyboardShots', 'shotCount', 'resolution', 'duration', 'count', 'promptOptimize']);
+const strings = new Set(['label', 'customTitle', 'model', 'scriptInstruction', 'scriptPreset']);
+const fields = new Set([...strings, 'type', 'prompt', 'generationWidth', 'generationHeight', 'generationSizePreset', 'imageOptions', 'aspectRatio', 'videoResolution', 'videoAspectRatio', 'videoDuration', 'videoInstanceType', 'resolution', 'duration', 'count', 'promptOptimize']);
 export function validateCanvasParameters(previous: NodeData, patch: Partial<NodeData>, models: CanvasModel[]): Partial<NodeData> {
     if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new Error('Node data must be an object');
     for (const [key, value] of Object.entries(patch)) {
@@ -14,16 +15,16 @@ export function validateCanvasParameters(previous: NodeData, patch: Partial<Node
     }
     if (patch.type !== undefined && !Object.values(NodeType).includes(patch.type)) throw new Error('Invalid node type');
     if (patch.prompt !== undefined && typeof patch.prompt !== 'string' && (!Array.isArray(patch.prompt) || !patch.prompt.every(segment => segment && Object.keys(segment).length === 1 && ('text' in segment ? typeof segment.text === 'string' : 'ref' in segment && typeof segment.ref === 'string')))) throw new Error('Invalid prompt');
-    if (patch.storyboardShots !== undefined && (!Array.isArray(patch.storyboardShots) || patch.storyboardShots.length > 100 || !patch.storyboardShots.every(shot => Number.isInteger(shot.shotNumber) && shot.shotNumber > 0 && typeof shot.title === 'string' && typeof shot.description === 'string' && (shot.duration === undefined || typeof shot.duration === 'string') && (shot.cameraMovement === undefined || typeof shot.cameraMovement === 'string')))) throw new Error('Invalid storyboard shots');
-    if (patch.shotCount !== undefined && (!Number.isInteger(patch.shotCount) || patch.shotCount < 1 || patch.shotCount > 100)) throw new Error('Invalid shot count');
     const data = { ...previous, ...patch };
+    if (patch.scriptPreset !== undefined && !scriptPresets.some(preset => preset.id === patch.scriptPreset)) throw new Error('Invalid script preset');
+    if ((patch.scriptPreset !== undefined || patch.scriptInstruction !== undefined) && data.type !== NodeType.SCRIPT) throw new Error('Script parameters require a script node');
     const parameterKeys = ['model', 'generationWidth', 'generationHeight', 'generationSizePreset', 'imageOptions', 'aspectRatio', 'videoResolution', 'videoAspectRatio', 'videoDuration', 'videoInstanceType', 'resolution', 'duration', 'count', 'promptOptimize'];
     if (!parameterKeys.some(key => key in patch) && !(patch.type && data.model)) return patch;
     const model = models.find(model => model.id === data.model && model.configured);
     if (!model) throw new Error('Select a configured model');
     const imageTypes = [NodeType.TEXT_TO_IMAGE, NodeType.IMAGE_TO_IMAGE];
     const videoTypes = [NodeType.TEXT_TO_VIDEO, NodeType.IMAGE_TO_VIDEO, NodeType.START_END_TO_VIDEO];
-    if (!(model.category === 'IMAGE' ? imageTypes : model.category === 'VIDEO' ? videoTypes : [NodeType.TEXT, NodeType.CREATIVE_DESC, NodeType.STORYBOARD]).includes(data.type)) throw new Error('Model is incompatible with this node type');
+    if (!(model.category === 'IMAGE' ? imageTypes : model.category === 'VIDEO' ? videoTypes : [NodeType.TEXT, NodeType.SCRIPT]).includes(data.type)) throw new Error('Model is incompatible with this node type');
     const result = { ...patch };
     if (model.legacy && model.category !== 'TEXT') {
         if (Object.keys(patch).some(key => key === 'imageOptions' || key.startsWith('generation') || key.startsWith('video'))) throw new Error('This existing model uses editor presets, not task-service pixel parameters');

@@ -1,3 +1,4 @@
+import { migrateScriptSnapshot } from '../canvas/script-migration';
 import { createCanvasHistory } from '../canvas/history';
 import { getDatabase } from "./index";
 import type { Node, Edge, Viewport } from "@xyflow/react";
@@ -38,7 +39,7 @@ export function getAllWorkflows(): WorkflowData[] {
   return rows.map((row) => ({
     id: row.id,
     name: row.name,
-    ...JSON.parse(row.data),
+    ...migrateScriptSnapshot(JSON.parse(row.data)),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     version: row.version,
@@ -55,7 +56,7 @@ export function getWorkflowById(id: string): WorkflowData | null {
   return {
     id: row.id,
     name: row.name,
-    ...JSON.parse(row.data),
+    ...migrateScriptSnapshot(JSON.parse(row.data)),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     version: row.version,
@@ -65,8 +66,8 @@ export function getWorkflowById(id: string): WorkflowData | null {
 /** The only content writer: content, version and receipt commit atomically. */
 export function saveWorkflow(operation: SaveOperation): SaveAcknowledgement {
   validateSaveOperation(operation);
-  const { id, requestId, baseVersion, snapshot } = operation;
-  const digest = createHash("sha256").update(canonicalJSON({ baseVersion, snapshot })).digest("hex");
+  const { id, requestId, baseVersion } = operation;
+  const digest = createHash("sha256").update(canonicalJSON({ baseVersion, snapshot: operation.snapshot })).digest("hex");
   const db = getDatabase();
   return db.transaction(() => {
     // Deletion dominates historical receipts: a replay must never report a
@@ -82,8 +83,9 @@ export function saveWorkflow(operation: SaveOperation): SaveAcknowledgement {
     if ((existing?.version ?? 0) !== baseVersion) throw new CanvasSaveError("Canvas version conflict; local content has been preserved", 409);
     const version = baseVersion + 1;
     const now = Date.now();
-    let history = snapshot.history;
     const previous = existing ? JSON.parse(existing.data) : undefined;
+    const snapshot = migrateScriptSnapshot(operation.snapshot, previous);
+    let history = snapshot.history;
     const present = new Set(snapshot.nodes.map(node => node.id));
     const deletedNode = db.prepare('INSERT OR IGNORE INTO canvas_deleted_nodes VALUES (?,?)');
     for (const node of previous?.nodes ?? []) if (!present.has(node.id)) deletedNode.run(id, node.id);
@@ -94,7 +96,7 @@ export function saveWorkflow(operation: SaveOperation): SaveAcknowledgement {
         .change({ nodes: snapshot.nodes, edges: snapshot.edges, projectName: snapshot.name });
       history = state.history;
     }
-    const data = JSON.stringify({ nodes: snapshot.nodes, edges: snapshot.edges, viewport: snapshot.viewport, history });
+    const data = JSON.stringify(migrateScriptSnapshot({ nodes: snapshot.nodes, edges: snapshot.edges, viewport: snapshot.viewport, history }));
     const cover = projectCover(snapshot.nodes, existing ? JSON.parse(existing.data).nodes : [], existing?.cover_url);
     db.prepare(`INSERT INTO workflows (id, name, data, created_at, updated_at, version, cover_url, node_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET name = excluded.name, data = excluded.data,

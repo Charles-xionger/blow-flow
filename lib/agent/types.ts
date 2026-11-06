@@ -19,7 +19,7 @@ export interface AgentQuestion {
     id: string;
     text: string;
     options: string[];
-    scope?: { kind: 'delete' | 'edit'; ids: string[] } | { kind: 'generation'; items: { nodeId: string; modelId: string; specification?: string; newNode?: boolean; input: import('../generation/types').GenerationInput }[] };
+    scope?: { kind: 'scriptPublish'; digest: string; targetId?: string } | { kind: 'delete' | 'edit'; ids: string[] } | { kind: 'generation'; items: { nodeId: string; modelId: string; specification?: string; newNode?: boolean; input: import('../generation/types').GenerationInput }[] };
     answer?: string;
     cancelled?: boolean;
 }

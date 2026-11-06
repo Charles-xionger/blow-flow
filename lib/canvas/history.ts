@@ -1,3 +1,4 @@
+import { migrateScriptGraph } from './script-migration';
 import { historyDetails } from './history-summary';
 import { packHistoryMedia, resolveHistoryMedia } from './history-media';
 import { Immer, enablePatches, type Patch } from 'immer';
@@ -35,7 +36,7 @@ export interface CanvasHistory {
 type State = { nodes: Node[]; edges: Edge[]; projectName: string; canvasSession: number; history?: CanvasHistory; selectedNodeIds?: string[] };
 const generationFields = new Set(['generationTaskId', 'pendingGeneration', 'generationNodeId', 'generationContentVersion', 'generationBindingVersion', 'generationRevision', 'generationResultBlocked', 'generationResultArtifacts']);
 const transientNode = new Set(['selected', 'dragging', 'measured', 'resizing', 'width', 'height']);
-const transientData = new Set(['activeToolbarItem', 'isStackOpen', 'isLoading', 'error', 'generationStatus', 'generationBlocked', 'generationCanRetrySave', 'generationSaving', 'generationTaskId', 'pendingGeneration', 'generationNodeId', 'generationContentVersion', 'generationBindingVersion', 'generationRevision', 'generationResultBlocked', 'generationResultArtifacts']);
+const transientData = new Set(['pendingScript', 'pendingScriptPublish', 'scriptTaskId', 'activeToolbarItem', 'isStackOpen', 'isLoading', 'error', 'generationStatus', 'generationBlocked', 'generationCanRetrySave', 'generationSaving', 'generationTaskId', 'pendingGeneration', 'generationNodeId', 'generationContentVersion', 'generationBindingVersion', 'generationRevision', 'generationResultBlocked', 'generationResultArtifacts']);
 const omit = (value: Record<string, unknown>, keys: Set<string>) => Object.fromEntries(Object.entries(value).filter(([key, v]) => !keys.has(key) && v !== undefined));
 const projectedNodes = new WeakMap<Node, Node>();
 function content(state: Pick<State, 'nodes' | 'edges' | 'projectName'>): Content {
@@ -201,6 +202,7 @@ export function createCanvasHistory(get: () => State, publish: (state: Partial<S
     const entry = history.records.find(entry => entry.id === target);
     if (!entry) return;
     let next = immer.applyPatches(content(state), resolveHistoryMedia(direction === 'undo' ? entry.inverse : entry.patches, history.assets));
+    next = migrateScriptGraph(next);
     const restored = restore(state, next);
     next = { ...next, nodes: restored.nodes, edges: restored.edges };
     if (canRestore) {
