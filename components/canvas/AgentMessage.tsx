@@ -1,9 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { Check, Copy, FileText, ImagePlus, Sparkles } from 'lucide-react';
+import { Check, Copy, FileText, ImagePlus } from 'lucide-react';
 import type { AgentMessage as Message } from '@/lib/agent/types';
 import styles from './AgentSidebar.module.css';
+import { BrandMark } from '@/components/ui/brand-mark';
 
 export function AgentMessage({ message }: { message: Message }) {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
@@ -13,7 +14,7 @@ export function AgentMessage({ message }: { message: Message }) {
   }
   return <article className={message.role === 'user' ? styles.userMessage : styles.assistantMessage}>
     <div className={styles.messageLabel}>
-      {message.role === 'assistant' && <Sparkles size={13}/>}
+      {message.role === 'assistant' && <BrandMark size={16}/>}
       <span>{message.role === 'user' ? '你' : '创作助手'}</span>
       <time dateTime={new Date(message.createdAt).toISOString()}>{new Date(message.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time>
     </div>

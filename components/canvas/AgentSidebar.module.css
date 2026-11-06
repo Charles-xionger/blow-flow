@@ -7,7 +7,7 @@
 .header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 18px 18px 14px; flex-shrink: 0; }
 .identity { display: flex; align-items: center; gap: 10px; }
 .identity strong { font-size: 14px; font-weight: 600; }
-.logo { display: grid; place-items: center; width: 36px; height: 36px; background: var(--foreground); color: var(--background); border-radius: 12px; }
+.logo { display: grid; place-items: center; width: 36px; height: 36px; background: #3b82f614; border-radius: 12px; }
 .subtitle { display: block; margin-top: 3px; color: var(--muted-foreground); font-size: 11px; }
 .actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .actions button { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; color: var(--muted-foreground); }

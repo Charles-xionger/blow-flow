@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState, type ReactNode, type PointerEvent } from 'react';
-import { GripHorizontal, Maximize2, Minimize2, PanelRight, PanelsTopLeft, Sparkles, X } from 'lucide-react';
+import { GripHorizontal, Maximize2, Minimize2, PanelRight, PanelsTopLeft, X } from 'lucide-react';
 import styles from './AgentSidebar.module.css';
+import { BrandMark } from '@/components/ui/brand-mark';
 
 type Position = { x: number; y: number };
 const preferenceKey = 'ai-flow:assistant-layout';
@@ -61,7 +62,7 @@ export function AgentPanelFrame({ children, close }: { children: ReactNode; clos
     <header className={styles.header}>
       <div className={styles.identity} data-draggable={mode === 'floating'} title={mode === 'floating' ? '拖动以移动助手' : undefined}
         onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={() => { drag.current = null; }} onPointerCancel={() => { drag.current = null; }}>
-        <span className={styles.logo}><Sparkles size={18}/></span>
+        <span className={styles.logo}><BrandMark size={26}/></span>
         <div><strong>创作助手</strong><span className={styles.subtitle}>{mode === 'floating' ? '浮动窗口 · 拖动标题栏移动' : '从灵感到画布，陪你一起创作'}</span></div>
         {mode === 'floating' && <GripHorizontal size={14} className={styles.dragIcon}/>}
       </div>

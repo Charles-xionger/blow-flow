@@ -8,7 +8,6 @@ import { useReactFlow, useStore } from "@xyflow/react";
 import { useRouter } from "next/navigation";
 import { canvasAutosave, useCanvasStore } from "@/store/useCanvasStore";
 import {
-  Sparkles,
   Download,
   Upload,
   Save,
@@ -19,6 +18,7 @@ import {
   ArrowLeft,
 } from "lucide-react";
 import { SettingsModal } from "@/components/settings/SettingsModal";
+import { BrandMark } from "@/components/ui/brand-mark";
 import { toast } from "sonner";
 
 export const TopBar = memo(function TopBar() {
@@ -209,7 +209,7 @@ export const TopBar = memo(function TopBar() {
                 : "bg-blue-100 text-blue-600"
             }`}
           >
-            <Sparkles size={16} />
+            <BrandMark size={28} />
           </div>
 
           {/* 项目名称 */}

@@ -1,9 +1,10 @@
 'use client';
-import { ArrowDown, ArrowUp, Check, ChevronDown, ImagePlus, Loader2, Scan, Sparkles, Square, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, ChevronDown, ImagePlus, Loader2, Scan, Square, X } from 'lucide-react';
 import { AgentMessage } from './AgentMessage';
 import { AgentPanelFrame } from './AgentPanelFrame';
 import { AgentNodePicker } from './AgentNodePicker';
 import styles from './AgentSidebar.module.css';
+import { BrandMark } from '@/components/ui/brand-mark';
 import { uploadAgentReference } from '@/lib/agent/upload';
 import { useEffect, useState, useRef } from 'react';
 import { useCanvasStore, canvasAutosave } from '@/store/useCanvasStore';
@@ -20,7 +21,7 @@ export function AgentSidebar(){
   const [opening,setOpening]=useState(false);
   const [openError,setOpenError]=useState('');
   async function toggle(){if(open){setOpen(false);return;}setOpening(true);setOpenError('');try{await canvasAutosave.flush();if(!useCanvasStore.getState().currentWorkflowId){const id=await createWorkspaceProject(null);router.replace(`/canvas?project=${encodeURIComponent(id)}&assistant=1`);return;}setOpen(true);}catch{setOpenError('无法打开助手，请等待画布同步后重试。');}finally{setOpening(false);}}
-  return <><button aria-label="创作助手" disabled={opening} onClick={()=>void toggle()} aria-expanded={open} className={styles.launcher}><Sparkles size={16} />创作助手</button>{openError&&<p role="alert" className="fixed right-4 top-32 z-180 bg-background p-2">{openError}</p>}{open && projectId && <AgentConversation key={projectId} projectId={projectId} close={()=>setOpen(false)}/>}</>;
+  return <><button aria-label="创作助手" disabled={opening} onClick={()=>void toggle()} aria-expanded={open} className={styles.launcher}><BrandMark size={20} />创作助手</button>{openError&&<p role="alert" className="fixed right-4 top-32 z-180 bg-background p-2">{openError}</p>}{open && projectId && <AgentConversation key={projectId} projectId={projectId} close={()=>setOpen(false)}/>}</>;
 }
 function AgentConversation({projectId,close}:{projectId:string;close:()=>void}){
   const [snapshot,setSnapshot]=useState<Snapshot>({tasks:[],messages:[],models:[]});
@@ -97,7 +98,7 @@ function AgentConversation({projectId,close}:{projectId:string;close:()=>void}){
     <div className={styles.context}><span><Scan size={13}/> 当前画布</span><span role="status"><i data-active={task?.status==='running'||task?.status==='queued'}/>{task?task.status==='interrupted'?'待继续':task.awaitingGeneration?'等待生成结果':task.question?.scope?.kind==='generation'&&waiting?'等待批准':statusText[task.status]:'可以开始创作'}</span></div>
     <div ref={list} className={styles.messages} aria-label="助手消息" onScroll={()=>{const el=list.current!;const isAway=el.scrollHeight-el.scrollTop-el.clientHeight>64;followLatest.current=!isAway;setAway(isAway);}}>
       {snapshot.messages.length===0&&<div className={styles.empty}>
-        <span className={styles.welcomeIcon}><Sparkles size={28}/></span><span className={styles.eyebrow}>你的画布创作伙伴</span><h2>今天，想创作什么？</h2><p>聊聊你的想法，或引用画布中的素材。<br/>我们可以从一个故事、一组分镜开始。</p>
+        <span className={styles.welcomeIcon}><BrandMark size={40}/></span><span className={styles.eyebrow}>你的画布创作伙伴</span><h2>今天，想创作什么？</h2><p>聊聊你的想法，或引用画布中的素材。<br/>我们可以从一个故事、一组分镜开始。</p>
         <div className={styles.starters}>{[{title:'写一个故事',detail:'把灵感展开成完整剧本',prompt:'帮我写一个故事剧本：'},{title:'拆解成分镜',detail:'将故事转化为镜头与画面',prompt:'帮我把画布中的剧本拆解成分镜。'},{title:'构思一组画面',detail:'一起探索主题、风格与构图',prompt:'帮我构思一组画面的主题、风格和构图：'}].map(item=><button key={item.title} onClick={()=>{setText(item.prompt);input.current?.focus();}}><span><strong>{item.title}</strong><small>{item.detail}</small></span><ArrowUp size={15}/></button>)}</div>
       </div>}
       {snapshot.messages.map(message=><AgentMessage key={message.id} message={message}/>)}
