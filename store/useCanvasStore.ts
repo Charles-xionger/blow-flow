@@ -188,6 +188,7 @@ function createCanvasNode(type: NodeType, position: { x: number; y: number }, da
         count: 1,
       },
     },
+    [NodeType.SCRIPT]: { label: "脚本", data: { model: "doubao-seed-2-1-pro-260915" } },
     [NodeType.CREATIVE_DESC]: {
       label: "Creative Description",
       data: { model: "BananaPro" },

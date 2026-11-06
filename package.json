@@ -14,7 +14,8 @@
     "test": "node --test tests/*.test.cjs",
     "test:browser": "playwright test",
     "agent:worker": "tsx scripts/agent-worker.ts",
-    "prepare": "git config core.hooksPath .githooks || true"
+    "prepare": "git config core.hooksPath .githooks || true",
+    "script:worker": "tsx scripts/script-worker.ts"
   },
   "dependencies": {
     "@google/genai": "^1.39.0",
@@ -40,6 +41,8 @@
     "@tiptap/extensions": "^3.32.2",
     "@tiptap/pm": "^3.32.2",
     "@tiptap/react": "^3.32.2",
+    "@tsparticles/engine": "3.9.1",
+    "@tsparticles/slim": "3.9.1",
     "@types/jszip": "^3.4.1",
     "@xyflow/react": "^12.10.0",
     "ali-oss": "^6.23.0",

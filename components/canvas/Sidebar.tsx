@@ -339,9 +339,9 @@ export const Sidebar = memo(function Sidebar() {
           />
           <NodeButton
             icon={Sparkles}
-            label="创意描述"
-            description="AI增强提示词"
-            type={NodeType.CREATIVE_DESC}
+            label="脚本"
+            description="剧本与分镜创作"
+            type={NodeType.SCRIPT}
             color={
               isDark
                 ? "bg-emerald-500/15 text-emerald-400"

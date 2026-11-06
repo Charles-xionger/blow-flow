@@ -89,10 +89,10 @@ export function QuickAddNode({ nodeId }: QuickAddNodeProps) {
               </button>
 
               <button
-                onClick={() => handleAddNode(NodeType.CREATIVE_DESC)}
+                onClick={() => handleAddNode(NodeType.SCRIPT)}
                 className="flex w-full items-center px-3 py-2 text-sm text-gray-200 hover:bg-gray-800"
               >
-                创意描述
+                脚本
               </button>
 
               <button

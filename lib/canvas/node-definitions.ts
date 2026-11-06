@@ -16,6 +16,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
   [NodeType.IMAGE_TO_IMAGE]: { input: true, accepts: ["image", "character"], outputs: ["image"], height: 240 },
   [NodeType.IMAGE_TO_VIDEO]: { input: true, accepts: ["image", "character"], outputs: ["video"], height: 240 },
   [NodeType.START_END_TO_VIDEO]: { input: true, accepts: ["image", "character"], outputs: ["video"], height: 240 },
+  [NodeType.SCRIPT]: { input: true, accepts: ["text", "image"], outputs: [], height: 320 },
   [NodeType.CREATIVE_DESC]: { input: false, accepts: [], outputs: ["text"], height: 200 },
   [NodeType.STORYBOARD]: { input: false, accepts: [], outputs: ["text"], height: 200 },
   [NodeType.ORIGINAL_IMAGE]: { input: false, accepts: [], outputs: ["image"], height: 240 },

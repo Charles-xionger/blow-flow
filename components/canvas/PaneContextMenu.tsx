@@ -121,13 +121,13 @@ export function PaneContextMenu({ x, y, onClose }: PaneContextMenuProps) {
 
           <div className="my-1 border-t border-gray-700" />
 
-          {/* 创意描述 */}
+          {/* 脚本 */}
           <button
-            onClick={() => handleAddNode(NodeType.CREATIVE_DESC)}
+            onClick={() => handleAddNode(NodeType.SCRIPT)}
             className="flex w-full items-center gap-3 px-4 py-2 text-sm text-gray-200 hover:bg-gray-800"
           >
             <Wand2 size={16} />
-            <span>创意描述</span>
+            <span>脚本</span>
           </button>
 
           {/* 原始图片 */}

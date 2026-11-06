@@ -312,11 +312,11 @@ export function NodeContextMenu({
                     </button>
                     <button
                       onClick={() =>
-                        handleAddConnectedNode(NodeType.CREATIVE_DESC)
+                        handleAddConnectedNode(NodeType.SCRIPT)
                       }
                       className="flex w-full items-center gap-3 px-4 py-2 text-sm text-gray-200 hover:bg-gray-800"
                     >
-                      创意描述
+                      脚本
                     </button>
                   </div>
                 </div>

@@ -1,10 +1,11 @@
-// Web alone leaves Agent and generation tasks queued forever; run all three processes together.
+// Web alone leaves background tasks queued; run all workers together.
 const { spawn } = require('node:child_process');
 const readline = require('node:readline');
 const processes = [
   ['web', 'dev'],
   ['generation', 'generation:worker'],
   ['agent', 'agent:worker'],
+  ['script', 'script:worker'],
 ];
 const width = Math.max(...processes.map(([name]) => name.length));
 let stopping = false;
