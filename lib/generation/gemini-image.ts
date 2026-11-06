@@ -5,7 +5,6 @@ import { inspectReference, readReferenceBody, validReferenceUrl } from './refere
 export function geminiImageConfig(): GenerationConfig {
     const connection = { id: 'gemini-images', baseUrl: 'https://generativelanguage.googleapis.com', apiKeyEnv: 'GEMINI_API_KEY', concurrency: 1, requestTimeoutMs: 180000, pollIntervalMs: 5000, queryTimeoutMs: 300000, maxQueryErrors: 1 };
     return {connections:[connection],models:[{ id:'gemini-3-pro-image-preview',name:'Nano Banana Pro (Gemini)',category:'IMAGE',adapter:'gemini-image',version:'1',connectionId:connection.id,
-        workflowId:'',workflow:{},outputNode:'',mapping: {prompt:{nodeId:'',fieldName:''},width:{nodeId:'',fieldName:''},height:{nodeId:'',fieldName:''},seed:{nodeId:'',fieldName:''}},
         capabilities:{prompt:true,referenceImages:true,dimensions:{min:64,max:8192,step:8,defaultWidth:1024,defaultHeight:1024},image:{maxImages:8,sizes:['1K','2K','4K'],aspectRatios:['1:1','16:9','9:16','4:3','3:4']}}}]};
 }
 export function geminiImageParameters(input: GenerationInput) {

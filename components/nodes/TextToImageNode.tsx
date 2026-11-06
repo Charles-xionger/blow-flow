@@ -1,5 +1,7 @@
 "use client";
 
+import { ImageGenerationRouter } from "./shared/ImageGenerationRouter";
+
 import { nodeContentEqual } from "@/lib/canvas/node-content";
 
 import { memo, useCallback, useState, useEffect, useMemo } from "react";
@@ -11,6 +13,7 @@ import type { NodeData } from "@/types";
 import { getImageModels } from "@/lib/model-registry";
 import { expandPrompt, promptIsEmpty, promptSegments, referenceImages } from "@/lib/canvas/prompt";
 
+import { imageModelSelection } from "@/lib/generation/image-models";
 import { validGenerationDimensions } from "@/lib/generation/dimensions";
 import { generationModels } from "@/lib/generation/client";
 import type { PublicModel } from "@/lib/generation/types";
@@ -75,7 +78,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
       return;
     }
     if (taskModel || data.pendingGeneration) {
-      if (references.length || data.inputImages?.length) {
+      if (references.length || data.inputImages?.length || data.imageReferences?.length) {
         updateNodeData(id, { error: "此模型不支持参考图" });
         return;
       }
@@ -146,6 +149,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
     data.generationWidth,
     data.generationHeight,
     data.inputImages,
+    data.imageReferences,
     data.model,
     data.aspectRatio,
     data.resolution,
@@ -175,7 +179,7 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
               aria-label="生图模型"
               value={data.model || imageModels[0]?.value || ""}
               disabled={data.isLoading || !!data.pendingGeneration || data.generationBlocked}
-              onChange={(e) => updateNodeData(id, { model: e.target.value, usesGenerationTasks: taskModels.some(m => m.id === e.target.value) })}
+              onChange={e => updateNodeData(id, imageModelSelection(e.target.value, taskModels, data.aspectRatio))}
               className={consoleSelectClass}
             >
               {taskModels.map(m => <option key={m.id} value={m.id}>{m.name}{m.configured ? "" : "（未配置）"}</option>)}
@@ -204,4 +208,5 @@ const TextToImageNode = (props: NodeProps<Node<NodeData>>) => {
 
 TextToImageNode.displayName = "TextToImageNode";
 
-export default memo(TextToImageNode, nodeContentEqual);
+const RoutedTextToImageNode = (props: NodeProps<Node<NodeData>>) => <ImageGenerationRouter {...props} legacy={TextToImageNode} />;
+export default memo(RoutedTextToImageNode, nodeContentEqual);

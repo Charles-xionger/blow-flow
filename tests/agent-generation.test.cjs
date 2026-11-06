@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-require-imports */
 require('../scripts/register-typescript.cjs');
 const {test,after}=require('node:test'); const assert=require('node:assert/strict');
 process.env.DATABASE_PATH=':memory:';process.env.RUNNINGHUB_API_KEY='fake';
@@ -96,4 +95,30 @@ test('Agent generation into a node that already has a result lands in a new node
   assert.ok(edges.some(e=>e.source==='up'&&e.target===created.id));assert.ok(edges.some(e=>e.source==='up'&&e.target==='image'));
   assert.match(service.snapshot('keep-original').generations[0].items[0].note,/新节点/);
  }finally{worker.close();service.stop('keep-original','stop');}
+});
+
+test('Seedream Agent generation carries advanced options through approval and preserves existing content', async () => {
+ process.env.ARK_API_KEY='fake-ark';
+ const {seedreamImageConfig}=require('../lib/generation/seedream');
+ const {task}=setup('seedream-agent');
+ const service=new AgentService(getDatabase());
+ const generation=new GenerationService(getDatabase(),seedreamImageConfig());
+ registerGenerationTools(service,generation);
+ const options={outputFormat:'jpeg',watermark:true,promptOptimization:'fast',background:'opaque'};
+ await service.runNext(async c=>{
+   const models=await c.tool('models','generation_models',{});
+   assert.ok(models.some(m=>m.id==='doubao-seedream-5-0-pro-260628'));
+   await c.tool('prepare','prepare_generation',{items:[{nodeId:'image',modelId:'doubao-seedream-5-0-pro-260628',input:{prompt:'cat',width:2048,height:1152,imageOptions:options}}]});
+ });
+ const question=service.task(task.id).question;
+ assert.deepEqual(question.scope.items[0].input.imageOptions,options);
+ assert.match(question.scope.items[0].specification,/JPEG/);
+ let paid=0;
+ const worker=new GenerationWorker(generation,{fetch:async()=>assert.fail(),imageFetch:async(_url,init)=>{paid++;assert.equal(JSON.parse(init.body).output_format,'jpeg');return Response.json({data:[{url:'https://output.test/cat.jpeg'}]});},save:async()=> 'https://assets.invalid/seedream.jpeg'});
+ try {
+   assert.equal(await worker.tick(),false);
+   service.answer('seedream-agent',{requestId:'approve',questionId:question.id,text:'确认生成'});
+   await worker.tick();await service.runNext(async()=>{});
+   assert.equal(paid,1);assert.equal(service.canvas('seedream-agent').nodes[0].data.imageSrc,'https://assets.invalid/seedream.jpeg');
+ } finally {worker.close();}
 });

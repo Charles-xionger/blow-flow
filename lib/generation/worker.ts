@@ -1,4 +1,6 @@
-import { generateExistingGeminiImage } from './gemini-image';
+import { resolveImageOptions } from './image-options';
+import { ImageGenerationError } from './image-errors';
+import { generateImage } from './image-adapters';
 import type { GenerationInput } from './types';
 import { RunningHubSockets } from './runninghub-sockets';
 import { uploadReferences, ReferencePreparationError, referencePreparationLeaseMs } from './reference-upload';
@@ -9,8 +11,9 @@ import { platformCall, submissionRejections, transientPlatformErrors, PlatformEr
 
 export interface WorkerIO {
   fetch: PlatformFetch;
+  imageFetch?: typeof fetch;
   generateImage?: (snapshot: TaskSnapshot, input: GenerationInput, beforeSubmit: () => void) => Promise<string>;
-  save: (url: string, taskId: string, index: number, mediaType?: 'image' | 'video') => Promise<string>;
+  save: (url: string, taskId: string, index: number, mediaType?: 'image' | 'video', outputFormat?: 'png' | 'jpeg') => Promise<string>;
   inspectReference?: Parameters<typeof uploadReferences>[4];
   now?: () => number;
 }
@@ -120,14 +123,20 @@ export class GenerationWorker {
     let started = false;
     try {
       const input = JSON.parse(task.input);
-      if (snapshot.model.adapter === 'gemini-image') {
-        const result = await (this.io.generateImage ?? generateExistingGeminiImage)(snapshot, input, () => {
+      if (snapshot.model.adapter !== 'runninghub-workflow') {
+        const beforeSubmit = () => {
           if (!this.startSubmission(task, snapshot)) throw new Error('Submission cancelled');
           started = true;
-        });
+        };
+        const results = this.io.generateImage
+          ? [await this.io.generateImage(snapshot, input, beforeSubmit)]
+          : await generateImage(snapshot, input, { beforeSubmit, fetch: this.io.imageFetch,
+            renewPreparation: () => {
+              if (!this.update(task, { lease_until: this.now() + snapshot.connection.requestTimeoutMs + 30_000 })) throw new Error('Task ownership changed');
+            } });
         if (!started) throw new Error('Adapter did not authorize submission');
-        if (!this.update(task, {status:'succeeded',results:JSON.stringify([result]),save_status:'pending',lease_until:0,error:null})) return;
-        task.status = 'succeeded'; task.results = JSON.stringify([result]);
+        if (!this.update(task, {status:'succeeded',results:JSON.stringify(results),save_status:'pending',lease_until:0,error:null})) return;
+        task.status = 'succeeded'; task.results = JSON.stringify(results);
         await this.saveArtifacts(task);
         return;
       }
@@ -155,6 +164,10 @@ export class GenerationWorker {
       if (accepted && data?.taskStatus !== 'FAILED') this.track(task, snapshot, data);
     } catch (error) {
       if (task.status === 'succeeded') throw error;
+      if (error instanceof ImageGenerationError) {
+        this.update(task, { status: 'failed', error: error.message, lease_until: 0 });
+        return;
+      }
       if (error instanceof ReferencePreparationError && error.diagnostic) this.diagnostic(task, snapshot, error.diagnostic);
       this.update(task, started
         ? { status: 'uncertain', error: '提交结果待核实，请勿重复生成', lease_until: 0 }
@@ -169,7 +182,8 @@ export class GenerationWorker {
         // Renew for each bounded transfer and stop immediately if a new owner fenced us.
         if (!this.update(task, { save_status: 'saving', lease_until: this.now() + artifactTransferTiming.leaseMs, error: null })) return;
         const snapshot: TaskSnapshot = JSON.parse(task.snapshot);
-        artifacts.push(await this.io.save(urls[index], task.id, index, snapshot.model.category === 'VIDEO' ? 'video' : 'image'));
+        artifacts.push(await this.io.save(urls[index], task.id, index, snapshot.model.category === 'VIDEO' ? 'video' : 'image',
+          snapshot.model.capabilities.image?.options ? resolveImageOptions((JSON.parse(task.input) as GenerationInput).imageOptions, snapshot.model.capabilities.image).outputFormat : undefined));
         if (!this.update(task, { artifacts: JSON.stringify(artifacts) })) return;
       }
       this.update(task, { save_status: 'saved', lease_until: 0, error: null });
@@ -183,6 +197,8 @@ export class GenerationWorker {
   }
   private async query(task: TaskRecord, snapshot: TaskSnapshot) {
     try {
+      if (snapshot.model.adapter !== 'runninghub-workflow') throw new Error('Image task has no query protocol');
+      const model = snapshot.model;
       const result = await platformCall(snapshot, 'outputs', { taskId: task.platform_id }, this.io.fetch,
         r => this.diagnostic(task, snapshot, r));
       const hasAddress = result.data && typeof result.data === 'object' && 'netWssUrl' in result.data;
@@ -202,7 +218,7 @@ export class GenerationWorker {
       if (result.code !== 0) throw new PlatformError(transientPlatformErrors.has(result.code) ? 'transient' : 'business');
       if (!Array.isArray(result.data) || !result.data.length) throw new PlatformError('unknown');
       const files = result.data.filter((f: { nodeId?: string; fileType?: string; fileUrl?: string }) => {
-        if (String(f.nodeId) !== snapshot.model.outputNode) return false;
+        if (String(f.nodeId) !== model.outputNode) return false;
         if (snapshot.model.category !== 'VIDEO') return true;
         return ['mp4', 'video/mp4'].includes(String(f.fileType).toLowerCase())
           || (!f.fileType && typeof f.fileUrl === 'string' && /\.mp4(?:$|\?)/i.test(f.fileUrl));

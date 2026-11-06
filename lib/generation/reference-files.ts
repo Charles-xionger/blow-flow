@@ -64,7 +64,8 @@ export async function inspectReference(buffer: Buffer, filename: string, kind: R
     const duration = Number(kind === 'video' ? visual?.duration || info.format?.duration : info.format?.duration);
     if (kind === 'video' && (!Number.isFinite(duration) || duration < 5 / 24 || duration > 15.1))
       throw new Error('参考视频须为约 0.21–15 秒，请先选取片段后上传');
-    return { hasAudio, ...(Number.isFinite(duration) ? { duration } : {}) };
+    const imageMetadata = kind === 'image' ? await (await import('sharp')).default(buffer).metadata() : undefined;
+    return { hasAudio, ...(imageMetadata ? { hasAlpha: imageMetadata.hasAlpha } : {}), ...(Number.isFinite(duration) ? { duration } : {}) };
   } catch (error) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')
       throw new Error('服务端未安装 ffprobe，暂时无法校验参考素材');

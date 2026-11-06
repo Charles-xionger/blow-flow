@@ -1,13 +1,15 @@
-import { geminiImageConfig } from './gemini-image';
+import { validateImageModel } from './image-adapters';
+import { seedreamImageConfig } from './seedream';
 import { validGenerationDimensions } from './dimensions';
 import fs from 'node:fs';
 import workflow from '../../config/workflows/krea2.json';
 import h3Workflow from '../../config/workflows/h3.json';
 import type { GenerationConfig } from './types';
 
+const seedream = seedreamImageConfig();
 export const defaultConfig: GenerationConfig = {
   connections: [{ id: 'runninghub-international', baseUrl: '', apiKeyEnv: 'RUNNINGHUB_API_KEY', concurrency: 5,
-    requestTimeoutMs: 30_000, pollIntervalMs: 5000, queryTimeoutMs: 30 * 60_000, maxQueryErrors: 3 }],
+    requestTimeoutMs: 30_000, pollIntervalMs: 5000, queryTimeoutMs: 30 * 60_000, maxQueryErrors: 3 }, ...seedream.connections],
   models: [{ id: 'runninghub-krea2', name: 'Krea2', category: 'IMAGE', adapter: 'runninghub-workflow', version: '1',
     connectionId: 'runninghub-international', workflowId: '2109340746494357505', workflow, outputNode: '103',
     mapping: { prompt: { nodeId: '102', fieldName: 'prompt' }, width: { nodeId: '10', fieldName: 'custom_width' },
@@ -22,7 +24,7 @@ export const defaultConfig: GenerationConfig = {
       references: { nodeId: '136', imageLoader: '199', videoLoader: '185', audioLoader: '182' },
       capabilities: { prompt: true, referenceImages: true,
         dimensions: { min: 32, max: 4096, step: 32, defaultWidth: 1280, defaultHeight: 736 },
-        video: { minDuration: 5, maxDuration: 15, defaultDuration: 7, fps: 24, maxImages: 9, maxVideos: 3, maxAudios: 3 } } }],
+        video: { minDuration: 5, maxDuration: 15, defaultDuration: 7, fps: 24, maxImages: 9, maxVideos: 3, maxAudios: 3 } } }, ...seedream.models],
 };
 
 // Admin-only file; secrets are environment references, never model properties.
@@ -55,20 +57,15 @@ export function validateGenerationConfig(config: GenerationConfig): void {
   }
   const models = new Set<string>();
   for (const m of config.models) {
-    keys(m, ['id', 'name', 'category', 'adapter', 'version', 'connectionId', 'workflowId', 'workflow', 'outputNode', 'mapping', 'capabilities', 'references']);
-    if (!m.id || models.has(m.id) || !m.version || !m.name || !connections.has(m.connectionId) || !['runninghub-workflow','gemini-image'].includes(m.adapter) || !['IMAGE', 'VIDEO'].includes(m.category) || typeof m.workflowId !== 'string')
+    keys(m, ['id', 'name', 'category', 'adapter', 'version', 'connectionId', 'workflowId', 'workflow', 'outputNode', 'mapping', 'capabilities', 'references', 'providerModel']);
+    if (!m.id || models.has(m.id) || !m.version || !m.name || !connections.has(m.connectionId) || !['IMAGE', 'VIDEO'].includes(m.category))
       throw new Error('Invalid generation model');
     models.add(m.id);
-    if (m.adapter === 'gemini-image') {
-      const expected = geminiImageConfig();
-      const connection = config.connections.find(c => c.id === m.connectionId)!;
-      const capabilities = expected.models[0].capabilities;
-      if (m.category !== 'IMAGE' || m.id !== expected.models[0].id || connection.apiKeyEnv !== 'GEMINI_API_KEY' || connection.baseUrl !== expected.connections[0].baseUrl ||
-        m.capabilities.prompt !== true || !m.capabilities.referenceImages || m.capabilities.video || m.capabilities.image?.maxImages !== 8 ||
-        JSON.stringify(m.capabilities.image?.sizes) !== JSON.stringify(capabilities.image!.sizes) || JSON.stringify(m.capabilities.image?.aspectRatios) !== JSON.stringify(capabilities.image!.aspectRatios) ||
-        Object.entries(capabilities.dimensions).some(([key,value]) => m.capabilities.dimensions[key as keyof typeof capabilities.dimensions] !== value)) throw new Error('Invalid Gemini image model');
+    if (m.adapter !== 'runninghub-workflow') {
+      validateImageModel(m, config.connections.find(c => c.id === m.connectionId)!);
       continue;
     }
+    if (typeof m.workflowId !== 'string') throw new Error('Invalid workflow model');
     keys(m.capabilities, ['prompt', 'referenceImages', 'dimensions', 'video']);
     if (m.capabilities.prompt !== true || m.capabilities.referenceImages !== (m.category === 'VIDEO')) throw new Error('Unsupported capabilities');
     const d = m.capabilities.dimensions;

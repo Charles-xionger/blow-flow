@@ -1,5 +1,6 @@
 import { GenerationPermissions } from './permissions';
-import { geminiImageParameters } from './gemini-image';
+import { validateImageInput } from './image-adapters';
+import { normalizeImageOptions } from './image-options';
 import { validGenerationDimensions } from './dimensions';
 import { validReferenceUrl } from './reference-files';
 import { validateGenerationConfig } from './config';
@@ -94,7 +95,6 @@ export class GenerationService {
       if (!model) throw new GenerationError('未知模型');
       const connection = this.config.connections.find(c => c.id === model.connectionId);
       if (!connection || !this.configured(connection)) throw new GenerationError('平台连接未配置', 503);
-      if (!['runninghub-workflow','gemini-image'].includes(model.adapter)) throw new GenerationError('不支持的适配器');
       const d = model.capabilities.dimensions;
       if (!validGenerationDimensions(d, request.input.width, request.input.height))
         throw new GenerationError(`尺寸必须为 ${d.min}–${d.max} 范围内 ${d.step} 的倍数`);
@@ -102,7 +102,7 @@ export class GenerationService {
       const id = randomUUID();
       const now = Date.now();
       // 48 random bits are exactly representable both by JSON and ComfyUI.
-      const input = { ...request.input, seed: randomBytes(6).readUIntBE(0, 6) };
+      const input = { ...request.input, ...(model.adapter === 'runninghub-workflow' ? { seed: randomBytes(6).readUIntBE(0, 6) } : {}) };
       this.db.prepare(`INSERT INTO generation_tasks
         (id, request_id, request_json, connection_id, snapshot, input, status, created_at, updated_at, submission_started)
         VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)`).run(id, request.requestId, requestJson,
@@ -195,7 +195,7 @@ function validateRequest(value: unknown): CreateGeneration {
   const r = object(value);
   onlyKeys(r, ['requestId', 'modelId', 'input', 'canvasId', 'nodeId']);
   const input = object(r.input);
-  onlyKeys(input, ['prompt', 'width', 'height', 'referenceImages', 'duration', 'references', 'instanceType']);
+  onlyKeys(input, ['prompt', 'width', 'height', 'referenceImages', 'duration', 'references', 'instanceType', 'imageOptions']);
   if (input.instanceType !== undefined && input.instanceType !== 'plus') throw new GenerationError('无效的执行渠道');
   if (input.referenceImages !== undefined && (!Array.isArray(input.referenceImages) || input.referenceImages.length))
     throw new GenerationError('此模型不支持参考图');
@@ -219,15 +219,16 @@ function validateRequest(value: unknown): CreateGeneration {
     input: { prompt: text(input.prompt), width: input.width, height: input.height,
       ...(input.duration !== undefined ? { duration: input.duration as number } : {}),
       ...(references !== undefined ? { references } : {}),
+      ...(input.imageOptions !== undefined ? { imageOptions: parseImageOptions(input.imageOptions) } : {}),
       ...(input.instanceType === 'plus' ? { instanceType: 'plus' as const } : {}) } satisfies GenerationInput };
 }
 
 function validateModelInput(model: ModelConfig, input: GenerationInput) {
-  if (model.adapter === 'gemini-image') {
-    geminiImageParameters(input);
-    if (input.duration !== undefined || input.instanceType !== undefined || (input.references ?? []).some(r => r.kind !== 'image') || (input.references?.length ?? 0) > 8) throw new GenerationError('不支持的 Gemini 图片参数');
+  if (model.adapter !== 'runninghub-workflow') {
+    try { validateImageInput(model, input); } catch (error) { throw new GenerationError(error instanceof Error ? error.message : '无效的图片参数'); }
     return;
   }
+  if (input.imageOptions !== undefined) throw new GenerationError('此模型不支持图片高级设置');
   const video = model.capabilities.video;
   if (!video) {
     if (input.duration !== undefined || input.references !== undefined) throw new GenerationError('此模型不支持视频或参考素材参数');
@@ -239,4 +240,8 @@ function validateModelInput(model: ModelConfig, input: GenerationInput) {
     if ((input.references || []).filter(r => r.kind === kind).length > limit)
       throw new GenerationError(`参考${{ image: '图片', video: '视频', audio: '音频' }[kind]}最多 ${limit} 个`);
   }
+}
+
+function parseImageOptions(value: unknown) {
+  try { return normalizeImageOptions(value); } catch { throw new GenerationError('无效的图片高级设置'); }
 }

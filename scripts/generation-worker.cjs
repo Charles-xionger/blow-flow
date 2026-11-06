@@ -5,21 +5,22 @@ const { GenerationWorker } = require('../lib/generation/worker.ts');
 const { saveGenerationImage } = require('../lib/generation/storage.ts');
 const { createRunningHubTransport } = require('../lib/generation/transport.ts');
 const { closeDatabase } = require('../lib/db/index.ts');
-const { setTimeout: delay } = require('node:timers/promises');
-let stopping = false;
-process.on('SIGINT', () => { stopping = true; });
-process.on('SIGTERM', () => { stopping = true; });
+const { runGenerationWorker } = require('../lib/generation/runner.ts');
+const stopping = new AbortController();
+process.on('SIGINT', () => stopping.abort());
+process.on('SIGTERM', () => stopping.abort());
 async function main() {
   const service = getGenerationService();
   const transport = createRunningHubTransport();
   const worker = new GenerationWorker(service, { fetch: transport.fetch, save: saveGenerationImage });
   try {
     console.log('[generation] worker started');
-    while (!stopping) {
-      try { if (await worker.tick()) continue; }
-      catch { console.error('[generation] worker iteration failed; inspect private task diagnostics'); }
-      await delay(1000);
-    }
+    await runGenerationWorker(worker, {
+      // Extra lane allows query/save work alongside synchronous providers. Claims still enforce limits.
+      parallelism: service.config.connections.reduce((sum, connection) => sum + connection.concurrency, 1),
+      signal: stopping.signal,
+      onError: () => console.error('[generation] worker iteration failed; inspect private task diagnostics'),
+    });
   } finally {
     worker.close();
     await transport.close();

@@ -1,5 +1,7 @@
 "use client";
 
+import { ImageGenerationRouter } from "./shared/ImageGenerationRouter";
+
 import { nodeContentEqual } from "@/lib/canvas/node-content";
 
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
@@ -7,6 +9,9 @@ import type { Node, NodeProps } from "@xyflow/react";
 import { RefreshCw } from "lucide-react";
 import { useUpstreamNodes } from "@/hooks/useUpstreamNodes";
 import { expandPrompt, promptIsEmpty, promptSegments, referenceImages } from "@/lib/canvas/prompt";
+import { supportsImageNodeModel, imageModelSelection } from "@/lib/generation/image-models";
+import { generationModels } from "@/lib/generation/client";
+import type { PublicModel } from "@/lib/generation/types";
 import { getImageModels } from "@/lib/model-registry";
 import { useCanvasStore } from "@/store/useCanvasStore";
 import type { NodeData } from "@/types";
@@ -36,6 +41,7 @@ const ImageToImageNode = (props: NodeProps<Node<NodeData>>) => {
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
   const [imageModels, setImageModels] = useState<Array<{ value: string; label: string }>>([]);
 
+  const [taskModels, setTaskModels] = useState<PublicModel[]>([]);
   const upstream = useUpstreamNodes(id);
   const hasInput = useCanvasStore((state) => !!props.selected && referenceImages(id, state).length > 0);
   // Only the open console shows this, so closed nodes skip the expansion on every store change.
@@ -45,9 +51,13 @@ const ImageToImageNode = (props: NodeProps<Node<NodeData>>) => {
   // 加载图片模型列表
   useEffect(() => {
     setImageModels(getImageModels());
+    let active = true;
+    generationModels().then(models => { if (active) setTaskModels(models.filter(model => supportsImageNodeModel(model, 'imageToImage'))); }).catch(() => {});
+    return () => { active = false; };
   }, []);
 
   const handleGenerate = useCallback(async (skipCache = false) => {
+    if (data.usesGenerationTasks) return;
     // Upstream content is read now, so a run always uses its current value.
     const canvas = useCanvasStore.getState();
     const prompt = expandPrompt(id, canvas);
@@ -89,7 +99,7 @@ const ImageToImageNode = (props: NodeProps<Node<NodeData>>) => {
         error: error instanceof Error ? error.message : "生成失败",
       });
     }
-  }, [id, data.model, data.aspectRatio, data.resolution, data.promptOptimize]);
+  }, [id, data.usesGenerationTasks, data.model, data.aspectRatio, data.resolution, data.promptOptimize]);
 
   const hasResult = !!data.imageSrc && !data.isLoading;
 
@@ -97,7 +107,7 @@ const ImageToImageNode = (props: NodeProps<Node<NodeData>>) => {
     <NodeShell {...props} stageTestId="image-preview"
       toolbar={<ImageToolbarActions nodeId={id} src={hasResult ? data.imageSrc : undefined} alt="Generated" />}
       console={
-        <NodeConsole data={data} onRun={() => void handleGenerate()} runDisabled={!hasInput || !hasPrompt}
+        <NodeConsole data={data} onRun={() => void handleGenerate()} runDisabled={!!data.usesGenerationTasks || !hasInput || !hasPrompt}
           notice={hasInput ? undefined : "请连接图片节点（支持多张图片参考）"}
           connections={<NodeConnections nodeId={id} upstream={upstream} />}
           editor={
@@ -106,7 +116,8 @@ const ImageToImageNode = (props: NodeProps<Node<NodeData>>) => {
           }
           config={<>
             <select aria-label="生图模型" value={data.model || imageModels[0]?.value || ""} disabled={data.isLoading}
-              onChange={event => updateNodeData(id, { model: event.target.value })} className={consoleSelectClass}>
+              onChange={event => updateNodeData(id, imageModelSelection(event.target.value, taskModels, data.aspectRatio))} className={consoleSelectClass}>
+              {taskModels.map(model => <option key={model.id} value={model.id}>{model.name}{model.configured ? "" : "（未配置）"}</option>)}
               {imageModels.map(model => <option key={model.value} value={model.value}>{model.label}</option>)}
             </select>
             <ImageModelSettings aspectRatio={data.aspectRatio || "1:1"} resolution={data.resolution || "1024x1024"}
@@ -131,4 +142,5 @@ const ImageToImageNode = (props: NodeProps<Node<NodeData>>) => {
 
 ImageToImageNode.displayName = "ImageToImageNode";
 
-export default memo(ImageToImageNode, nodeContentEqual);
+const RoutedImageToImageNode = (props: NodeProps<Node<NodeData>>) => <ImageGenerationRouter {...props} legacy={ImageToImageNode} />;
+export default memo(RoutedImageToImageNode, nodeContentEqual);

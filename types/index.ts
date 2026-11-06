@@ -1,5 +1,6 @@
+import type { ImageReference } from '@/lib/generation/image-references';
 import type { Prompt } from "@/lib/canvas/prompt";
-import type { CreateGeneration } from "@/lib/generation/types";
+import type { CreateGeneration, ImageGenerationOptions } from "@/lib/generation/types";
 import type { ImageSizePreset } from "@/lib/generation/image-dimensions";
 import type { VideoReference, VideoResolution } from "@/lib/generation/video";
 import { Edge, Node } from "@xyflow/react";
@@ -52,6 +53,9 @@ export interface NodeData extends Record<string, unknown> {
   generationWidth?: number;
   generationHeight?: number;
   generationSizePreset?: ImageSizePreset;
+  imageOptions?: ImageGenerationOptions;
+  imageReferences?: ImageReference[];
+  imageReferenceOrder?: string[];
   videoReferences?: VideoReference[];
   videoReferenceOrder?: string[];
   videoReferenceAudio?: Record<string, boolean>;

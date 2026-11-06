@@ -202,3 +202,16 @@ test('Agent-created storyboard text keeps its own content when connected to its 
     assert.deepEqual(saved.nodes.find(n => n.id === 'shot2').data.prompt, [{ text: '归来' }, { ref: 'a' }]);
     assert.deepEqual(saved.edges.map(e => e.source), ['a', 'a']);
 });
+
+test('Agent creates Seedream nodes with official 1.5K dimensions and durable advanced settings', async () => {
+  process.env.ARK_API_KEY = 'fake-ark';
+  const service = setup('seedream-settings');
+  const task = service.send('seedream-settings', { requestId: 'send', text: '新增画面', modelId: 'test' });
+  await service.runNext(c => c.tool('image', 'edit_canvas', { operations: [{ kind: 'create', node: { id: 'seedream', type: 'textToImage',
+    data: { type: 'textToImage', label: '雨夜', model: 'doubao-seedream-5-0-pro-260628', generationSizePreset: '1.5k', aspectRatio: '16:9',
+      imageOptions: { outputFormat: 'jpeg', promptOptimization: 'fast', watermark: true } } } }] }));
+  assert.equal(service.task(task.id).status, 'completed');
+  const data = service.canvas('seedream-settings').nodes.find(node => node.id === 'seedream').data;
+  assert.equal(data.generationWidth, 2048); assert.equal(data.generationHeight, 1152);
+  assert.equal(data.imageOptions.outputFormat, 'jpeg');
+});

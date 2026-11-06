@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-require-imports -- Node test entry point. */
 require('../scripts/register-typescript.cjs');
 require('fake-indexeddb/auto');
 const Module = require('node:module');
@@ -329,4 +328,28 @@ test('mixed edits replay in order after offline reopen, lost acknowledgement and
     assert.throws(() => saveWorkflow({ ...next, requestId: 'stale-writer', baseVersion: 0 }), /version conflict/);
     assert.deepEqual((await repository.read('a')).snapshot, a.snapshot);
   } finally { closeDatabase(); }
+});
+
+test('import preserves Seedream reference order and prompt numbering after assigning new node identities', () => {
+  const edit = start();
+  const { imageReferences, imagePrompt } = require('../lib/generation/image-references.ts');
+  edit.importGraph([
+    { id: 'a', type: T.ORIGINAL_IMAGE, position: { x: 0, y: 0 }, data: { type: T.ORIGINAL_IMAGE, label: 'A', imageSrc: 'https://assets.test/a.png' } },
+    { id: 'b', type: T.ORIGINAL_IMAGE, position: { x: 0, y: 100 }, data: { type: T.ORIGINAL_IMAGE, label: 'B', imageSrc: 'https://assets.test/b.png' } },
+    { id: 'target', type: T.IMAGE_TO_IMAGE, position: { x: 400, y: 0 }, data: { type: T.IMAGE_TO_IMAGE, label: 'Target', model: 'doubao-seedream-5-0-pro-260628',
+      imageReferenceOrder: ['node:b:0', 'node:a:0'], prompt: [{ ref: 'a' }, { text: ' then ' }, { ref: 'b' }] } },
+  ], [{ id: 'at', source: 'a', target: 'target' }, { id: 'bt', source: 'b', target: 'target' }]);
+  const graph = store.getState();
+  const target = graph.nodes.find(node => node.data.label === 'Target');
+  const references = imageReferences(target.id, graph);
+  assert.deepEqual(references.map(ref => ref.url), ['https://assets.test/b.png', 'https://assets.test/a.png']);
+  assert.equal(imagePrompt(target.id, graph, references), '图片2 then 图片1');
+  const { recoverySnapshot } = require('../lib/canvas/recovery-copy.ts');
+  const recovery = recoverySnapshot(canvasSnapshot(graph));
+  const recoveredTarget = recovery.nodes.find(node => node.data.label === 'Target');
+  const recoveredReferences = imageReferences(recoveredTarget.id, recovery);
+  assert.deepEqual(recoveredReferences.map(ref => ref.url), references.map(ref => ref.url));
+  assert.equal(imagePrompt(recoveredTarget.id, recovery, recoveredReferences), '图片2 then 图片1');
+  edit.undo(); edit.redo();
+  assert.deepEqual(imageReferences(target.id, store.getState()).map(ref => ref.url), references.map(ref => ref.url));
 });

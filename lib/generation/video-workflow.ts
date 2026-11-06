@@ -6,6 +6,7 @@ export interface UploadedReference extends GenerationReference { fileName: strin
 
 export function connectVideoReferences(graph: Record<string, WorkflowNode>, snapshot: TaskSnapshot,
   input: GenerationInput, uploaded: UploadedReference[]) {
+  if (snapshot.model.adapter !== 'runninghub-workflow') throw new Error('Invalid workflow adapter');
   const mapping = snapshot.model.references!;
   const target = graph[mapping.nodeId];
   for (const key of Object.keys(target.inputs)) if (/^ref_(images|videos|video_audios|audios)\./.test(key)) delete target.inputs[key];

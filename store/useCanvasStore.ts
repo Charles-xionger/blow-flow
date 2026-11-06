@@ -7,6 +7,7 @@ import { CanvasStorageError } from "@/lib/canvas/storage-error";
 import { copiedGenerationData, deleteNodeGeneration, generationAssociation, restoreDeletedGeneration } from "@/lib/generation/recovery";
 import { isValidCanvasConnection } from "@/lib/canvas/connections";
 import { detachReferences, remapPromptReferences, syncReferences } from "@/lib/canvas/prompt";
+import { remapImageReferenceOrder } from '@/lib/generation/image-references';
 import { remapReferenceIds } from '@/lib/generation/video';
 import { toast } from "sonner";
 import { create } from "zustand";
@@ -318,6 +319,7 @@ export const useCanvasStore = create<CanvasState>()(
             data: { ...withoutTaskAssociation(node.data),
               prompt: remapPromptReferences(detachReferences(node.data.prompt, nodes,
                 ref => !edges.some(edge => edge.source === ref && edge.target === node.id)), ids),
+              imageReferenceOrder: remapImageReferenceOrder(node.data.imageReferenceOrder, ids),
               ...remapReferenceIds(node.data.videoReferenceOrder, node.data.videoReferenceAudio, ids) } }));
           const importedEdges = edges.map(edge => ({ ...edge, id: nanoid(), selected: false,
             source: ids.get(edge.source)!, target: ids.get(edge.target)! }));
@@ -469,7 +471,7 @@ export const useCanvasStore = create<CanvasState>()(
         // 更新节点数据
         updateNodeData: (nodeId: string, data: Partial<NodeData>) => {
           assertOriginalMedia(data);
-          if (['imageSrc', 'videoSrc', 'outputArtifacts', 'videoReferences'].some(key => key in data)) edits.end();
+          if (['imageSrc', 'videoSrc', 'outputArtifacts', 'videoReferences', 'imageReferences'].some(key => key in data)) edits.end();
           let nodes = get().nodes.map(node => node.id === nodeId ? { ...node, data: { ...node.data, ...data } } : node);
           const beforeEdges = get().edges;
           const edges = data.model === undefined && data.type === undefined ? beforeEdges : beforeEdges.filter(edge =>

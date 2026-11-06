@@ -5,6 +5,7 @@ type Content = { nodes: Node[]; edges: Edge[]; name: string };
 const fields: Record<string, string> = {
   label: '名称', customTitle: '标题', prompt: '提示词', model: '模型', type: '类型',
   imageSrc: '图片素材', videoSrc: '视频素材', inputImages: '输入图片', outputArtifacts: '生成素材',
+  imageOptions: '图片高级设置', imageReferences: '参考图片', imageReferenceOrder: '图片参考顺序',
   videoReferences: '参考素材', videoReferenceOrder: '参考顺序', videoReferenceAudio: '参考音频',
   aspectRatio: '画幅', resolution: '分辨率', duration: '时长', count: '数量', promptOptimize: '提示词优化',
   generationWidth: '生成宽度', generationHeight: '生成高度', generationSizePreset: '尺寸档位',

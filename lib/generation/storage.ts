@@ -29,8 +29,8 @@ interface StorageIO {
 
 // SDK/network dependencies are external boundaries; the same saver is used by the worker and recovery tests.
 export function createGenerationImageSaver(io: StorageIO) {
-  return async (url: string, taskId: string, index: number, mediaType: 'image' | 'video' = 'image'): Promise<string> => {
-    const key = mediaType === 'video' ? `videos/generation/${taskId}/${index}.mp4` : `images/generation/${taskId}/${index}.png`;
+  return async (url: string, taskId: string, index: number, mediaType: 'image' | 'video' = 'image', outputFormat: 'png' | 'jpeg' = 'png'): Promise<string> => {
+    const key = mediaType === 'video' ? `videos/generation/${taskId}/${index}.mp4` : `images/generation/${taskId}/${index}.${outputFormat}`;
     // A previous process may have uploaded successfully before recording the URL.
     try {
       await io.client.head(key, { timeout: artifactTransferTiming.headTimeoutMs });
@@ -59,10 +59,10 @@ export function createGenerationImageSaver(io: StorageIO) {
   };
 }
 
-export async function saveGenerationImage(url: string, taskId: string, index: number, mediaType: 'image' | 'video' = 'image'): Promise<string> {
+export async function saveGenerationImage(url: string, taskId: string, index: number, mediaType: 'image' | 'video' = 'image', outputFormat: 'png' | 'jpeg' = 'png'): Promise<string> {
   const { OSS_REGION: region, OSS_ACCESS_KEY_ID: accessKeyId, OSS_ACCESS_KEY_SECRET: accessKeySecret, OSS_BUCKET_NAME: bucket } = process.env;
   if (!region || !accessKeyId || !accessKeySecret || !bucket) throw new ArtifactSaveError('configuration');
   const client = new OSS({ region, accessKeyId, accessKeySecret, bucket, timeout: artifactTransferTiming.uploadTimeoutMs });
   return createGenerationImageSaver({ fetch, client,
-    publicUrl: key => `https://${bucket}.${region}.aliyuncs.com/${key}` })(url, taskId, index, mediaType);
+    publicUrl: key => `https://${bucket}.${region}.aliyuncs.com/${key}` })(url, taskId, index, mediaType, outputFormat);
 }

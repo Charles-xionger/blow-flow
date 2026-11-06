@@ -23,6 +23,7 @@ export function parsePlatformJson(raw: string): PlatformReply {
 }
 
 export function submission(snapshot: TaskSnapshot, input: GenerationInput & { seed: number }, references: UploadedReference[] = []) {
+  if (snapshot.model.adapter !== 'runninghub-workflow') throw new Error('Invalid workflow adapter');
   const graph = structuredClone(snapshot.model.workflow);
   const values = { ...input, customResolution: true };
   const nodeInfoList = Object.entries(snapshot.model.mapping).map(([key, mapping]) => {
