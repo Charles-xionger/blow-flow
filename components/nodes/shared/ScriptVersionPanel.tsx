@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
+import { clearScriptDraft, editScriptDraft, loadScriptDrafts, scriptDraftKey, useScriptDraftStore } from '@/store/useScriptDraftStore';
 import { useCanvasStore } from '@/store/useCanvasStore';
 import { scriptActive, scriptStatusLabel } from '@/lib/script/types';
 import { ScriptPublishPanel } from './ScriptPublishPanel';
@@ -11,8 +12,9 @@ async function requestVersions(url: string, body?: object) {
   if (!response.ok) throw new Error(value.error || '无法读取脚本版本');
   return value;
 }
-function DraftEditor({ version, onSaved, onDirty }: { version:ScriptVersion; onSaved:() => void; onDirty:(dirty:boolean) => void }) {
-  const [editing,setEditing] = useState<{text:string;revision:number} | null>(null);
+function DraftEditor({ version, onSaved }: { version:ScriptVersion; onSaved:() => void }) {
+  const key = scriptDraftKey(version.canvasId,version.nodeId,version.id);
+  const editing = useScriptDraftStore(state => state.drafts[key]);
   const [saving,setSaving] = useState(false);
   const [error,setError] = useState('');
   const changedElsewhere = editing && editing.revision !== version.draftRevision;
@@ -21,17 +23,17 @@ function DraftEditor({ version, onSaved, onDirty }: { version:ScriptVersion; onS
     setSaving(true); setError('');
     try {
       await requestVersions('/api/script/versions',{ action:'draft',versionId:version.id,text:editing.text,expectedRevision:editing.revision });
-      setEditing(null); onDirty(false); onSaved();
+      clearScriptDraft(key,editing); onSaved();
     } catch (error) { setError(error instanceof Error ? error.message : '编辑稿保存失败'); }
     finally { setSaving(false); }
   };
   return <div>
     <textarea aria-label="脚本编辑稿" value={editing?.text ?? version.draft} readOnly={scriptActive(version.status) || saving}
-      onChange={event => { onDirty(true); setEditing(previous => ({text:event.target.value,revision:previous?.revision ?? version.draftRevision})); }}
+      onChange={event => editScriptDraft(key,event.target.value,version.draftRevision)}
       className="h-48 w-full resize-y rounded-lg bg-black/20 p-2 text-sm leading-6 outline-none"/>
     <div className="mt-1 flex items-center gap-3">
       <button type="button" disabled={!editing || saving || !!changedElsewhere} onClick={() => void save()} className="rounded bg-violet-600 px-3 py-1 disabled:opacity-40">{saving ? '保存中' : '保存编辑稿'}</button>
-      {editing && <button type="button" disabled={saving} onClick={() => { setEditing(null); onDirty(false); setError(''); }}>放弃本地修改</button>}
+      {editing && <button type="button" disabled={saving} onClick={() => { clearScriptDraft(key,editing); setError(''); }}>放弃本地修改</button>}
       {!editing && <span className="text-zinc-500">已保存 · 修订 {version.draftRevision}</span>}
     </div>
     {(error || changedElsewhere) && <p role="alert" className="mt-2 text-amber-300">{error || '其他窗口已保存新编辑稿。你的本地修改仍在，请复制保留后放弃本地修改以载入最新稿。'}</p>}
@@ -44,7 +46,8 @@ export function ScriptVersionPanel({ nodeId }: { nodeId:string }) {
   const [error,setError] = useState('');
   const [tab,setTab] = useState<'draft'|'original'|'input'>('draft');
   const [selecting,setSelecting] = useState(false);
-  const [editingId,setEditingId] = useState<string | null>(null);
+  const { drafts, loaded, storageError } = useScriptDraftStore();
+  useEffect(() => { loadScriptDrafts(); },[]);
   const refresh = useRef<() => void>(() => {});
   useEffect(() => {
     if (!canvasId) return;
@@ -61,6 +64,7 @@ export function ScriptVersionPanel({ nodeId }: { nodeId:string }) {
     return () => { alive = false; clearInterval(timer); refresh.current = () => {}; };
   },[canvasId,nodeId]);
   const versions = state?.versions.filter(v => v.canvasId === canvasId && v.nodeId === nodeId) ?? [];
+  const editingId = versions.find(v => drafts[scriptDraftKey(v.canvasId,v.nodeId,v.id)])?.id;
   const version = versions.find(v => v.id === (editingId ?? state?.selectedId));
   const select = async (versionId:string) => {
     if (!state || selecting) return;
@@ -74,7 +78,7 @@ export function ScriptVersionPanel({ nodeId }: { nodeId:string }) {
   return <section aria-label="脚本历史版本" className="mt-3 border-t border-white/10 pt-3 text-xs">
     <details>
       <summary className="cursor-pointer text-zinc-300">历史版本与编辑稿（{versions.length}）{version ? ` · ${scriptStatusLabel[version.status]}` : ''}</summary>
-      {version && <div className="mt-3">
+      {loaded && version && <div className="mt-3">
         <label className="flex items-center gap-2">选用版本
           <select aria-label="选用脚本版本" disabled={selecting || !!editingId} value={version.id} onChange={event => void select(event.target.value)} className="min-w-0 flex-1 rounded bg-[#303033] p-2">
             {versions.map((v,index) => <option key={v.id} value={v.id}>第 {versions.length-index} 版 · {v.input.model} · {new Date(v.createdAt).toLocaleString()} · {scriptStatusLabel[v.status]}</option>)}
@@ -82,7 +86,7 @@ export function ScriptVersionPanel({ nodeId }: { nodeId:string }) {
         </label>
         {editingId && <p className="mt-2 text-amber-300">本地修改尚未保存，请保存或放弃修改后切换版本。</p>}
         <div className="my-2 flex gap-3">{(['draft','original','input'] as const).map(value => <button key={value} type="button" aria-pressed={tab === value} onClick={() => setTab(value)} className={tab === value ? 'text-violet-300' : 'text-zinc-500'}>{{draft:'编辑稿',original:'模型原稿',input:'输入来源'}[value]}</button>)}</div>
-        <div className={tab === 'draft' ? '' : 'hidden'}><DraftEditor key={version.id} version={version} onSaved={() => refresh.current()} onDirty={dirty => setEditingId(dirty ? version.id : null)}/></div>
+        <div className={tab === 'draft' ? '' : 'hidden'}><DraftEditor key={version.id} version={version} onSaved={() => refresh.current()}/></div>
         <ScriptPublishPanel key={`${canvasId}:${nodeId}:${version.id}`} version={version} disabled={!!editingId || selecting}/>
         {tab === 'original' && <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-black/20 p-2 font-sans leading-6">{version.text || '尚无已保存正文'}</pre>}
         {tab === 'input' && <div className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-black/20 p-2 leading-6">
@@ -91,6 +95,7 @@ export function ScriptVersionPanel({ nodeId }: { nodeId:string }) {
         </div>}
       </div>}
     </details>
+    {storageError && <p role="alert" className="mt-2 text-amber-300">{storageError}</p>}
     {error && <p role="alert" className="mt-2 text-amber-300">{error}</p>}
   </section>;
 }

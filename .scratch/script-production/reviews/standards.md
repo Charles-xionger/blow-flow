@@ -1,0 +1,7 @@
+## Standards
+
+- **[P2] Use the canvas preview cache for reference thumbnails** — `components/nodes/shared/ScriptInputs.tsx:38` renders `<Image unoptimized ... src={ref.content}>`. Opening the script console therefore loads and decodes every full original image just to show a 112×56 thumbnail; animated sources can also animate. This contradicts **`docs/adr/0006-canvas-preview-cache.md`**, which requires static, bounded canvas previews and keeps originals for generation, downloads and deliberate full viewing. Use the existing `CanvasPreview compact` component, as `NodeConnections` and `TaskVideoNode` do, while retaining the original URL in the frozen generation input. This is a documented architectural violation.
+
+- **[P3] Possible Duplicated Code (judgement call)** — `lib/ai-services/text/index.ts:115–124` repeats lines 29–39: `for (const image of input.images ?? [])`, data-URL parsing, image fetching, MIME fallback and base64 conversion. Changes to Gemini image handling now require editing both the synchronous and streaming paths, risking divergent handling of the same reference. Extract the common content-parts preparation into a helper accepting the signal; retain their distinct execution/retry semantics. Source: the **Duplicated Code** baseline in `.agents/skills/code-review/SKILL.md` (“extract the shared shape, call it from both”). No repository rule requires these copies.
+
+Static inspection only; no tests or provider calls were run, as requested.

@@ -1,6 +1,6 @@
 "use client";
 import { useState } from 'react';
-import Image from 'next/image';
+import { CanvasPreview } from '@/components/ui/canvas-preview';
 import type { NodeData } from '@/types';
 import { useCanvasStore } from '@/store/useCanvasStore';
 import { useUpstreamNodes } from '@/hooks/useUpstreamNodes';
@@ -35,7 +35,7 @@ export function ScriptInputs({ id, data, expanded, task }: { id: string; data: N
     </label>}
     <details className="mb-3" open><summary className="cursor-pointer text-xs text-zinc-400">参考内容 · {references.length} 项 · 全部参与生成</summary>
       <div className="mt-2 flex max-h-36 gap-2 overflow-auto">{references.map((ref, index) => <div key={`${ref.nodeId}-${index}`} title={ref.type === 'text' ? ref.content : ref.label} className="w-32 shrink-0 rounded-xl border border-white/10 bg-black/20 p-2">
-        {ref.type === 'image' ? <Image unoptimized width={112} height={56} src={ref.content} alt={ref.label} className="h-14 w-full rounded object-contain" /> : <p className="line-clamp-3 h-14 whitespace-pre-wrap break-words text-[10px] text-zinc-400">{ref.content || '文本为空'}</p>}
+        {ref.type === 'image' ? <CanvasPreview compact src={ref.content} alt={ref.label} className="h-14 w-full rounded object-contain" /> : <p className="line-clamp-3 h-14 whitespace-pre-wrap break-words text-[10px] text-zinc-400">{ref.content || '文本为空'}</p>}
         <p className="mt-1 truncate text-[11px]">{index + 1}. {ref.label}</p>
       </div>)}</div>
       {!references.length && !referenceError && <p className="mt-1 text-xs text-zinc-500">连接文本或图片，在要求中输入 @ 引用节点。</p>}
