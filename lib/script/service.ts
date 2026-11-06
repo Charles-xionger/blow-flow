@@ -24,13 +24,15 @@ export class ScriptService {
       CREATE UNIQUE INDEX IF NOT EXISTS script_one_active ON script_tasks(canvas_id,node_id) WHERE status IN ('queued','running','stopping');
       CREATE INDEX IF NOT EXISTS script_canvas ON script_tasks(canvas_id,created_at);`);
   }
-  get(id: string) { const row = this.row(id); if (!row) throw new ScriptError('脚本任务不存在', 404); return publicTask(row); }
+  get(id: string) { this.recoverExpired(); const row = this.row(id); if (!row) throw new ScriptError('脚本任务不存在', 404); return publicTask(row); }
   list(canvasId: string, nodeId?: string): ScriptTask[] {
+    this.recoverExpired();
     const rows = nodeId ? this.db.prepare('SELECT * FROM script_tasks WHERE canvas_id=? AND node_id=? ORDER BY created_at DESC, rowid DESC').all(canvasId, nodeId)
       : this.db.prepare('SELECT * FROM script_tasks WHERE canvas_id=? ORDER BY created_at DESC, rowid DESC').all(canvasId);
     return (rows as Row[]).map(publicTask);
   }
   create(value: unknown): ScriptTask {
+    this.recoverExpired();
     const request = value as CreateScriptTask;
     if (!request || ['requestId','canvasId','nodeId'].some(key => typeof request[key as keyof CreateScriptTask] !== 'string' || !(request[key as keyof CreateScriptTask] as string).length || (request[key as keyof CreateScriptTask] as string).length > 200)) throw new ScriptError('任务身份无效');
     const input = this.validateInput(request.input);
@@ -70,8 +72,14 @@ export class ScriptService {
     const row = this.db.prepare('SELECT data FROM workflows WHERE id=? AND deleted_at IS NULL').get(canvasId) as { data: string } | undefined;
     return !!row && JSON.parse(row.data).nodes.some((n: { id: string; type: string }) => n.id === nodeId && n.type === 'script');
   }
+  /** Queued work has no provider to cancel; running work holds the slot until acknowledged. */
+  stop(id: string): ScriptTask {
+    this.recoverExpired();
+    this.db.prepare("UPDATE script_tasks SET status=CASE WHEN status='queued' THEN 'stopped' ELSE 'stopping' END,revision=revision+1,updated_at=? WHERE id=? AND status IN ('queued','running')").run(Date.now(), id);
+    return this.get(id);
+  }
   recoverExpired() {
-    this.db.prepare("UPDATE script_tasks SET status=CASE WHEN status='stopping' THEN 'stopped' ELSE 'interrupted' END,error='后台执行中断，已保存正文保留；请主动重新生成',revision=revision+1,updated_at=?,lease=NULL,lease_until=NULL WHERE status IN ('running','stopping') AND lease_until<?").run(Date.now(), Date.now());
+    this.db.prepare("UPDATE script_tasks SET status=CASE WHEN status='stopping' THEN 'stopped' ELSE 'interrupted' END,error='后台执行中断，已保存正文保留；请主动重新生成',revision=revision+1,updated_at=?,lease=NULL,lease_until=NULL WHERE status IN ('running','stopping') AND (lease_until IS NULL OR lease_until<=?)").run(Date.now(), Date.now());
   }
   async runNext(stream: ScriptStream = streamText): Promise<boolean> {
     this.recoverExpired();
@@ -91,6 +99,13 @@ export class ScriptService {
     }).immediate();
     if (!claimed) return false;
     const { task, lease } = claimed; const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(new Error('生成超时，已保存正文保留')), 180_000);
+    const cancellation = setInterval(() => {
+      try {
+        const row = this.row(task.id);
+        if (!row || row.status !== 'running' || row.lease !== lease || (row.lease_until || 0) <= Date.now()) controller.abort();
+      } catch { controller.abort(); }
+    }, 250);
     const heartbeat = setInterval(() => {
       try {
         const result = this.db.prepare("UPDATE script_tasks SET lease_until=? WHERE id=? AND lease=? AND lease_until>? AND status='running'").run(Date.now()+30_000, task.id, lease, Date.now());
@@ -100,7 +115,7 @@ export class ScriptService {
     try {
       const input = task.input;
       const images = await prepareScriptImages(input, controller.signal);
-      for await (const delta of stream({ model: input.model, prompt: scriptPrompt(input), images, signal: controller.signal })) {
+      for await (const delta of abortableStream(stream({ model: input.model, prompt: scriptPrompt(input), images, signal: controller.signal }), controller.signal)) {
         controller.signal.throwIfAborted();
         if (!delta) continue;
         const changed = this.db.prepare("UPDATE script_tasks SET text=text||?,revision=revision+1,updated_at=? WHERE id=? AND lease=? AND lease_until>? AND status='running'").run(delta, Date.now(), task.id, lease, Date.now());
@@ -109,7 +124,12 @@ export class ScriptService {
       if (!controller.signal.aborted) this.finish(task.id, lease, this.get(task.id).text.trim() ? 'completed' : 'failed', this.get(task.id).text.trim() ? null : '模型未返回正文');
     } catch (error) {
       this.finish(task.id, lease, 'failed', error instanceof ScriptPreflightError ? error.message : '生成失败或模型连接中断；已保存正文保留，请检查服务端模型配置与配额');
-    } finally { clearInterval(heartbeat); controller.abort(); }
+    } finally {
+      clearInterval(heartbeat); clearInterval(cancellation); clearTimeout(timeout); controller.abort();
+      // Stop wins over completion once its persisted transition has happened.
+      this.db.prepare("UPDATE script_tasks SET status='stopped',error=NULL,revision=revision+1,updated_at=?,lease=NULL,lease_until=NULL WHERE id=? AND lease=? AND status='stopping'").run(Date.now(), task.id, lease);
+      this.recoverExpired();
+    }
     return true;
   }
   finish(id: string, lease: string, status: ScriptStatus, error: string | null) {
@@ -118,3 +138,25 @@ export class ScriptService {
   private row(id: string) { return this.db.prepare('SELECT * FROM script_tasks WHERE id=?').get(id) as Row | undefined; }
 }
 export const getScriptService = () => new ScriptService(getDatabase());
+
+/** A provider that ignores abort cannot retain an executor slot or deliver late deltas. */
+async function* abortableStream(source: AsyncIterable<string>, signal: AbortSignal) {
+  const iterator = source[Symbol.asyncIterator]();
+  let rejectAbort: (reason: unknown) => void = () => {};
+  const aborted = new Promise<never>((_, reject) => { rejectAbort = reject; });
+  const onAbort = () => rejectAbort(signal.reason);
+  signal.addEventListener('abort', onAbort, { once: true });
+  try {
+    signal.throwIfAborted();
+    while (true) {
+      const next = await Promise.race([iterator.next(), aborted]);
+      if (next.done) return;
+      signal.throwIfAborted();
+      yield next.value;
+    }
+  } finally {
+    signal.removeEventListener('abort', onAbort);
+    // Do not await a stuck adapter's return; the lease/status fence owns writes.
+    void iterator.return?.().catch(() => {});
+  }
+}

@@ -1,63 +1,87 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { canvasAutosave, useCanvasStore } from '@/store/useCanvasStore';
-import { createScriptTask, subscribeScriptTasks, ScriptSubmissionError } from '@/lib/script/client';
-import type { CreateScriptTask, ScriptInput, ScriptTask } from '@/lib/script/types';
+import { createScriptTask, stopScriptTask, subscribeScriptTasks, ScriptSubmissionError } from '@/lib/script/client';
+import { scriptActive, type CreateScriptTask, type ScriptInput, type ScriptTask } from '@/lib/script/types';
 
+function mergeTasks(previous: ScriptTask[], incoming: ScriptTask[]) {
+  const merged = new Map(previous.map(task => [task.id, task]));
+  for (const task of incoming) if (!merged.has(task.id) || merged.get(task.id)!.revision < task.revision) merged.set(task.id, task);
+  return [...merged.values()].sort((a,b) => b.createdAt-a.createdAt);
+}
 export function useScriptTask(nodeId: string) {
   const canvasId = useCanvasStore(s => s.currentWorkflowId);
-  const [tasks,setTasks] = useState<ScriptTask[]>([]);
-  const [polling,setPolling] = useState(false);
-  const [submitting,setSubmitting] = useState(false);
-  const [error,setError] = useState('');
-  const busy = useRef(false);
-  const session = useRef(canvasId);
-  session.current = canvasId;
+  const canvasSession = useCanvasStore(s => s.canvasSession);
+  const [snapshot,setSnapshot] = useState<{ session: number; tasks: ScriptTask[]; polling: boolean }>({ session: -1,tasks:[],polling:false });
+  const [operation,setOperation] = useState<{ session: number; submitting?: boolean; stopping?: boolean; error?: string }>({ session:-1 });
+  const busy = useRef<number | null>(null);
+  const mounted = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; },[]);
+  const isCurrent = (session: number) => mounted.current && useCanvasStore.getState().canvasSession === session && useCanvasStore.getState().nodes.some(node => node.id === nodeId && node.type === 'script');
+  const accept = (task: ScriptTask, session: number) => setSnapshot(previous => ({ session,polling:previous.session === session && previous.polling,tasks:mergeTasks(previous.session === session ? previous.tasks : [],[task]) }));
   useEffect(() => {
     if (!canvasId) return;
-    return subscribeScriptTasks(canvasId,(all,fallback) => {
-      setTasks(previous => {
-        const merged = new Map(previous.filter(t => t.canvasId === canvasId && t.nodeId === nodeId).map(t => [t.id,t]));
-        for (const task of all.filter(t => t.nodeId === nodeId)) {
-          if (!merged.has(task.id) || merged.get(task.id)!.revision < task.revision) merged.set(task.id,task);
-        }
-        return [...merged.values()].sort((a,b) => b.createdAt-a.createdAt);
+    let closed = false;
+    return subscribeWithCleanup();
+    function subscribeWithCleanup() {
+      const unsubscribe = subscribeScriptTasks(canvasId!, (all,polling) => {
+        const state = useCanvasStore.getState();
+        if (closed || state.canvasSession !== canvasSession) return;
+        const tasks = all.filter(task => task.canvasId === canvasId && task.nodeId === nodeId);
+        setSnapshot(previous => ({ session:canvasSession,tasks:mergeTasks(previous.session === canvasSession ? previous.tasks : [], tasks),polling }));
+        const pending = state.nodes.find(node => node.id === nodeId)?.data.pendingScript;
+        const recovered = pending && tasks.find(task => task.requestId === pending.requestId && pending.canvasId === canvasId && pending.nodeId === nodeId);
+        if (recovered) state.updateNodeData(nodeId,{ pendingScript:undefined,scriptTaskId:recovered.id });
       });
-      setPolling(fallback);
-    });
-  },[canvasId,nodeId]);
+      return () => { closed = true; unsubscribe(); };
+    }
+  },[canvasId,canvasSession,nodeId]);
   const start = async (input: ScriptInput | (() => ScriptInput)) => {
-    if (busy.current) return;
-    busy.current = true; setSubmitting(true); setError('');
     const originalSession = useCanvasStore.getState().canvasSession;
-    let submittedCanvas: string | null = null;
+    if (busy.current === originalSession) return;
+    busy.current = originalSession; setOperation({ session:originalSession,submitting:true });
     try {
       await canvasAutosave.flush();
+      if (!isCurrent(originalSession)) return;
       const state = useCanvasStore.getState();
-      if (state.canvasSession !== originalSession) return;
-      submittedCanvas = state.currentWorkflowId;
+      const submittedCanvas = state.currentWorkflowId;
       if (!submittedCanvas || state.saveStatus !== 'synced') throw new Error('请先完成画布保存，再生成脚本');
-      const node = state.nodes.find(n => n.id === nodeId);
-      if (!node) return;
+      const node = state.nodes.find(n => n.id === nodeId)!;
       const pending = node.data.pendingScript;
-      const request: CreateScriptTask = pending || { requestId: crypto.randomUUID(), canvasId: submittedCanvas, nodeId, input: typeof input === 'function' ? input() : input };
+      // Copied/imported nodes must never replay another canvas/node's request identity.
+      const request: CreateScriptTask = pending?.canvasId === submittedCanvas && pending.nodeId === nodeId ? pending : { requestId:crypto.randomUUID(),canvasId:submittedCanvas,nodeId,input: typeof input === 'function' ? input() : input };
       state.updateNodeData(nodeId,{ pendingScript:request });
       await canvasAutosave.flush();
+      if (!isCurrent(originalSession)) return;
       if (useCanvasStore.getState().saveStatus !== 'synced') throw new Error('请求身份保存失败，请恢复保存后重试');
       const task = await createScriptTask(request);
-      if (session.current !== submittedCanvas || !useCanvasStore.getState().nodes.some(n => n.id === nodeId)) return;
-      useCanvasStore.getState().updateNodeData(nodeId,{ pendingScript:undefined, scriptTaskId:task.id });
-      setTasks(previous => {
-        const newer = previous.find(t => t.id === task.id && t.revision > task.revision);
-        return [newer || task,...previous.filter(t => t.id !== task.id)].sort((a,b) => b.createdAt-a.createdAt);
-      });
+      if (!isCurrent(originalSession)) return;
+      useCanvasStore.getState().updateNodeData(nodeId,{ pendingScript:undefined,scriptTaskId:task.id });
+      accept(task,originalSession);
     } catch (failure) {
-      if (useCanvasStore.getState().canvasSession === originalSession) {
+      if (isCurrent(originalSession)) {
         if (failure instanceof ScriptSubmissionError && failure.definitive) useCanvasStore.getState().updateNodeData(nodeId,{ pendingScript:undefined });
-        setError(failure instanceof Error ? failure.message : '提交失败；可恢复原请求');
+        setOperation({ session:originalSession,error:failure instanceof Error ? failure.message : '提交失败；可恢复原请求' });
       }
+    } finally {
+      if (busy.current === originalSession) busy.current = null;
+      if (isCurrent(originalSession)) setOperation(previous => previous.session === originalSession ? { ...previous,submitting:false } : previous);
     }
-    finally { busy.current = false; setSubmitting(false); }
   };
-  return { tasks:tasks.filter(t => t.canvasId === canvasId), task:tasks.find(t => t.canvasId === canvasId), polling, submitting, error, start };
+  const tasks = snapshot.session === canvasSession ? snapshot.tasks.filter(task => task.canvasId === canvasId && task.nodeId === nodeId) : [];
+  const activeTask = tasks.find(task => scriptActive(task.status));
+  const stop = async () => {
+    if (!activeTask || (operation.session === canvasSession && operation.stopping)) return;
+    const originalSession = canvasSession;
+    setOperation({ session:originalSession,stopping:true });
+    try {
+      const task = await stopScriptTask(activeTask.id);
+      if (isCurrent(originalSession)) { accept(task,originalSession); setOperation({ session:originalSession }); }
+    } catch (failure) {
+      if (isCurrent(originalSession)) setOperation({ session:originalSession,error:failure instanceof Error ? failure.message : '停止失败，请重试' });
+    }
+  };
+  return { tasks,task:tasks[0],activeTask,polling:snapshot.session === canvasSession && snapshot.polling,
+    submitting:operation.session === canvasSession && !!operation.submitting,stopping:operation.session === canvasSession && !!operation.stopping,
+    error:operation.session === canvasSession ? operation.error || '' : '',start,stop };
 }
