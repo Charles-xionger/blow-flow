@@ -1,4 +1,6 @@
 ---
+
+> 脚本节点的版本、编辑稿及发布流程已被 [ADR 0013](0013-script-streams-to-text-nodes.md) 取代；以下保留为历史决定。
 status: accepted
 ---
 

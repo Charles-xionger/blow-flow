@@ -92,7 +92,7 @@ Ark 的 `baseUrl` 如覆盖，应包含 `/api/v3`，不包含 `/responses`。Pi 
 
 ### 脚本后台生成
 
-脚本节点通过 `/api/script/tasks` 提交幂等请求，独立的 `pnpm script:worker` 调用通用 `streamText` 模型适配层。配置服务端 `ARK_API_KEY`，或已有 Gemini 服务端密钥后重启 worker。`pnpm dev:all` 包含此 worker；生产环境也需持续运行它，并与 Web 共用 `DATABASE_PATH`。`SCRIPT_CONCURRENCY` 控制脚本任务并发上限（默认 5，范围 1–20）。
+脚本节点只配置输入，点击生成立即创建相连的文本节点并在其中流式展示正文，不需要发布或历史版本管理。通过 `/api/script/tasks` 提交幂等请求，独立的 `pnpm script:worker` 调用通用 `streamText` 模型适配层。配置服务端 `ARK_API_KEY`，或已有 Gemini 服务端密钥后重启 worker。`pnpm dev:all` 包含此 worker；生产环境也需持续运行它，并与 Web 共用 `DATABASE_PATH`。`SCRIPT_CONCURRENCY` 控制脚本任务并发上限（默认 5，范围 1–20）。
 
 SQLite 保存输入快照、任务身份、正文和修订号；页面经每画布一条 SSE 接收已持久化正文，连接失败时每 10 秒查询。关闭页面不会停止后台生成；执行进程丢失后租约过期，worker 将任务标记中断并保留正文，不重新调用供应商。脚本任务不写回整张画布，也不复活删除的节点。尚未提交的已删除节点任务不会调用模型。
 

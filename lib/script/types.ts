@@ -11,6 +11,8 @@ export interface ScriptInput {
 }
 export interface CreateScriptTask { requestId: string; canvasId: string; nodeId: string; input: ScriptInput }
 export interface ScriptTask {
+  outputNodeId?: string;
+  outputSaved?: boolean;
   id: string; requestId: string; canvasId: string; nodeId: string;
   input: ScriptInput; status: ScriptStatus; text: string; revision: number;
   createdAt: number; updatedAt: number; error?: string; phase?: ScriptPhase;

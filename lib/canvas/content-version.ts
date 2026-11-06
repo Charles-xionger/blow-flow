@@ -2,12 +2,16 @@ import type { CanvasNode } from '../../types';
 import type { Edge } from '@xyflow/react';
 import { canonicalJSON } from './save-protocol';
 
-const runtimeData = new Set(['isLoading', 'error', 'generationTaskId', 'pendingGeneration', 'generationStatus',
+const runtimeData = new Set(['scriptOutputTaskId', 'scriptTaskId', 'pendingScript', 'isLoading', 'error', 'generationTaskId', 'pendingGeneration', 'generationStatus',
   'generationBlocked', 'generationCanRetrySave', 'generationSaving', 'generationNodeId', 'generationContentVersion', 'generationBindingVersion', 'generationRevision', 'generationResultBlocked', 'generationResultArtifacts', 'activeToolbarItem', 'isStackOpen']);
 
 // Content revisions are execution facts, not undoable values. Changing an input
 // also protects downstream nodes whose generation consumed that input.
 export function versionContent(before: CanvasNode[], after: CanvasNode[], edges: Edge[], resultNode?: string, previousEdges: Edge[] = edges): CanvasNode[] {
+  // A script→result line records origin, not a live input dependency.
+  const scriptIds = new Set([...before,...after].filter(node => node.type === 'script').map(node => node.id));
+  edges = edges.filter(edge => !scriptIds.has(edge.source));
+  previousEdges = previousEdges.filter(edge => !scriptIds.has(edge.source));
   const previous = new Map(before.map(node => [node.id, node]));
   const affected = new Set(after.filter(node => {
     const old = previous.get(node.id);

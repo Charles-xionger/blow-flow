@@ -3,10 +3,10 @@ import type { NodeData } from '@/types';
 import type { ScriptInput } from './types';
 
 export const scriptPresets = [
-  { id: 'free', label: '自由创作', instruction: '结合全部参考和创作要求完成文字创作。保留用户的创作意图，直接输出正文。' },
-  { id: 'screenplay', label: '生成剧本', instruction: '结合全部参考创作完整剧本，清晰呈现人物、场景、行动和对白，保持情节与人物动机一致。直接输出可编辑的剧本文本。' },
-  { id: 'storyboard', label: '生成分镜', instruction: '结合全部参考生成完整分镜文稿，按镜头描述场景、景别、构图、人物行动、镜头运动、对白及声音。保持叙事连续，直接输出文本。' },
-  { id: 'extract', label: '提取角色／场景／道具', instruction: '从全部参考中提取角色、场景和道具，分别整理名称、描述与创作特征；区分原文事实与补充建议。只输出可编辑文本，不创建素材或制作台。' },
+  { id: 'free', label: '自由创作', description: '故事创意、文案与自由写作', instruction: '结合全部参考和创作要求完成文字创作。保留用户的创作意图，直接输出正文。' },
+  { id: 'screenplay', label: '写剧本', description: '将想法写成场景、行动与对白', instruction: '结合全部参考创作完整剧本，清晰呈现人物、场景、行动和对白，保持情节与人物动机一致。直接输出可编辑的剧本文本。' },
+  { id: 'storyboard', label: '拆分镜', description: '把故事转为逐镜头的画面描述', instruction: '结合全部参考生成完整分镜文稿，按镜头描述场景、景别、构图、人物行动、镜头运动、对白及声音。保持叙事连续，直接输出文本。' },
+  { id: 'extract', label: '提取素材', description: '整理角色、场景和道具描述', instruction: '从全部参考中提取角色、场景和道具，分别整理名称、描述与创作特征；区分原文事实与补充建议。只输出可编辑文本，不创建素材或制作台。' },
 ] as const;
 
 /** Called after autosave: original image identities and fully expanded text are frozen together. */

@@ -23,13 +23,15 @@ export function ScriptInputs({ id, data, expanded, task }: { id: string; data: N
   try { references = JSON.parse(snapshot); } catch { referenceError = snapshot; }
   const changed = task && JSON.stringify(task.input.references) !== snapshot;
   return <>
-    <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
-      <label>创作任务 <select aria-label="创作任务" value={preset.id} onChange={e => {
-        const next = scriptPresets.find(p => p.id === e.target.value)!;
-        update(id, { scriptPreset: next.id, scriptInstruction: next.instruction });
-      }} className="rounded-lg bg-[#303033] p-2">{scriptPresets.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}</select></label>
-      <button type="button" aria-expanded={instructions} onClick={() => setInstructions(!instructions)} className="rounded-lg p-2 hover:bg-white/10">任务指令</button>
+    <div role="group" aria-label="创作指令" className="mb-3 grid grid-cols-2 gap-2">
+      {scriptPresets.map(item => <button key={item.id} type="button" aria-pressed={preset.id === item.id}
+        onClick={() => update(id,{scriptPreset:item.id,scriptInstruction:item.instruction})}
+        className={`rounded-xl border p-3 text-left transition-colors ${preset.id === item.id ? 'border-violet-400/60 bg-violet-500/15' : 'border-white/5 bg-white/[0.03] hover:bg-white/[0.07]'}`}>
+        <span className={`block text-xs font-medium ${preset.id === item.id ? 'text-violet-200' : 'text-zinc-300'}`}>{item.label}</span>
+        <span className="mt-1 block text-[11px] leading-5 text-zinc-500">{item.description}</span>
+      </button>)}
     </div>
+    <button type="button" aria-expanded={instructions} onClick={() => setInstructions(!instructions)} className="mb-3 text-xs text-zinc-400 hover:text-zinc-200">{instructions ? '收起指令' : '查看／调整指令'}{data.scriptInstruction && data.scriptInstruction !== preset.instruction ? ' · 已自定义' : ''}</button>
     {instructions && <label className="mb-3 block text-xs text-zinc-400">本节点任务指令（切换任务将使用新预设指令）
       <textarea aria-label="任务指令" value={data.scriptInstruction ?? preset.instruction} onChange={e => update(id, { scriptInstruction: e.target.value })} className="mt-1 max-h-64 min-h-24 w-full resize-y rounded-xl bg-black/20 p-3 text-sm leading-6 text-zinc-200 outline-none" />
     </label>}
@@ -41,7 +43,7 @@ export function ScriptInputs({ id, data, expanded, task }: { id: string; data: N
       {!references.length && !referenceError && <p className="mt-1 text-xs text-zinc-500">连接文本或图片，在要求中输入 @ 引用节点。</p>}
     </details>
     {referenceError && <p role="alert" className="mb-2 text-xs text-red-300">{referenceError}</p>}
-    {changed && <p role="status" className="mb-2 text-xs text-amber-300">参考已更新；当前版本保留生成时的输入，新生成使用最新内容。</p>}
+    {changed && <p role="status" className="mb-2 text-xs text-amber-300">参考已更新；本次生成使用原输入，下次生成使用最新内容。</p>}
     <div className={expanded ? 'min-h-32 flex-1 overflow-auto [&_[role=textbox]]:max-h-none [&_[role=textbox]]:min-h-64' : 'min-h-32 [&_[role=textbox]]:max-h-52'}>
       <PromptEditor value={promptSegments(data.prompt)} upstream={upstream} placeholder="描述创作要求；输入 @ 引用参考节点…" onChange={prompt => update(id, { prompt })} />
     </div>

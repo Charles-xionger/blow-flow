@@ -10,7 +10,7 @@ import { createCanvasHistory, type CanvasHistory } from '../canvas/history';
 import { canonicalJSON } from '../canvas/save-protocol';
 import { assertCanvasGraph, descendants } from '../canvas/graph';
 import { isValidCanvasConnection } from '../canvas/connections';
-import { expandPrompt, promptSegments, syncReferences } from '../canvas/prompt';
+import { promptSegments, syncReferences } from '../canvas/prompt';
 import { assertOriginalMedia } from '../canvas/original-media';
 import type { Edge } from '@xyflow/react';
 import { NodeType, type CanvasNode, type NodeData } from '../../types';
@@ -35,7 +35,7 @@ export class CanvasAgentService {
         const row = getDatabase().prepare('SELECT result FROM agent_canvas_receipts WHERE project_id=? AND identity=?').get(projectId, identity) as { result: string } | undefined;
         return row ? JSON.parse(row.result) : undefined;
     }
-    apply(projectId: string, identity: string, operations: CanvasOperation[], label = '助手编辑', validateInput = false, expectedVersion?: number, authorize?: () => boolean, scope?: { scriptPublication: true }): CanvasEditResult {
+    apply(projectId: string, identity: string, operations: CanvasOperation[], label = '助手编辑', validateInput = false, expectedVersion?: number, authorize?: () => boolean): CanvasEditResult {
         if (!identity || !Array.isArray(operations) || operations.length > 100 || typeof label !== 'string') throw new Error('Invalid canvas step');
         const digest = createHash('sha256').update(canonicalJSON({ operations, label })).digest('hex');
         return getDatabase().transaction(() => {
@@ -77,7 +77,6 @@ export class CanvasAgentService {
                     if (!node) { skipped.push(`${operation.id}: target deleted or absent`); return; }
                     if (operation.kind === 'update') {
                         assertOriginalMedia(operation.data);
-                        if (!scope?.scriptPublication && node.data.scriptSource) throw new Error('Use publish_script to update a published target with conflict protection');
                         const data = validateInput ? validateCanvasParameters(node.data, operation.data, this.models()) : operation.data;
                         nodes = nodes.map(value => value.id === node.id ? { ...value, data: { ...value.data, ...data }, ...(operation.data.type ? { type: operation.data.type } : {}) } : value);
                         edges = edges.filter(edge => isValidCanvasConnection(edge, nodes, edges.filter(other => other.id !== edge.id)));
@@ -93,16 +92,6 @@ export class CanvasAgentService {
                     ? [...beforeEdges, operation.edge] : beforeEdges;
                 nodes = syncReferences(nodes, referenceBaseline, edges);
                 assertCanvasGraph(nodes, edges);
-                // Connections and upstream edits can rewrite published text without an update op.
-                // Check the effective graph before any durable writes, even for delete/layout callers.
-                if (!scope?.scriptPublication) for (const before of state.nodes) {
-                    if (!before.data.scriptSource) continue;
-                    const after = nodes.find(node => node.id === before.id);
-                    if (after && (canonicalJSON(promptSegments(before.data.prompt)) !== canonicalJSON(promptSegments(after.data.prompt)) ||
-                        expandPrompt(before.id, state) !== expandPrompt(after.id, { nodes, edges }))) {
-                        throw new Error('Use publish_script to update a published target with conflict protection');
-                    }
-                }
                 nodes = versionContent(state.nodes, nodes, edges, undefined, state.edges);
                 history.change({ nodes, edges }, { record: true, id: `${identity}:${index}`, source: 'agent', label });
             });

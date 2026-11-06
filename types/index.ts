@@ -82,6 +82,8 @@ export interface NodeData extends Record<string, unknown> {
   scriptPreset?: string;
   scriptInstruction?: string;
   scriptTaskId?: string;
+  scriptOutputTaskId?: string;
+  scriptOutputSource?: string;
   pendingScript?: import("@/lib/script/types").CreateScriptTask;
 
   // Character 专用

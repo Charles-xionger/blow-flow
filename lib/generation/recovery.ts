@@ -30,7 +30,7 @@ export const clearedGenerationAssociation = {
   generationBlocked: false, generationCanRetrySave: false, generationSaving: false,
 } satisfies GenerationView;
 export const copiedGenerationData = {
-  pendingScript: undefined, pendingScriptPublish: undefined, scriptTaskId: undefined, scriptSource: undefined,
+  pendingScript: undefined, pendingScriptPublish: undefined, scriptTaskId: undefined, scriptOutputTaskId: undefined, scriptOutputSource: undefined, scriptSource: undefined,
   ...clearedGenerationAssociation, isLoading: false, error: undefined,
   generationNodeId: undefined, generationContentVersion: undefined, generationBindingVersion: undefined,
   generationRevision: undefined, generationResultBlocked: undefined, generationResultArtifacts: undefined,

@@ -1,5 +1,7 @@
 # 第一阶段：脚本创作闭环
 
+> 2026-11-06 用户更正：本文的版本／编辑稿／发布流程已被 [ADR 0013](../../docs/adr/0013-script-streams-to-text-nodes.md) 取代。当前流程为脚本发起生成、独立文本节点流式展示和直接编辑；本文保留作实施历史。
+
 Status: resolved
 
 已在 `integration/script-production` 完成六项实施任务及代码审查修复。实现与静态检查已完成；遵守用户要求，未运行测试或真实模型联调。见[任务总览](tickets.md)和[审查记录](review.md)。

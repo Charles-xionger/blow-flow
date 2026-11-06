@@ -58,6 +58,7 @@ export function useScriptTask(nodeId: string) {
       if (!isCurrent(originalSession)) return;
       useCanvasStore.getState().updateNodeData(nodeId,{ pendingScript:undefined,scriptTaskId:task.id });
       accept(task,originalSession);
+      await canvasAutosave.flush();
     } catch (failure) {
       if (isCurrent(originalSession)) {
         if (failure instanceof ScriptSubmissionError && failure.definitive) useCanvasStore.getState().updateNodeData(nodeId,{ pendingScript:undefined });

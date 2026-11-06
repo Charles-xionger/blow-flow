@@ -1,3 +1,6 @@
+import type { CanvasNode } from '../../types';
+import { getWorkflowById } from '../db/workflows';
+import { createScriptOutput, finishScriptOutput } from './output';
 import { TextStreamError } from '../ai-services/text/stream-types';
 import { scriptPhaseLabel, type ScriptPhase } from './types';
 import { migrateScriptSnapshot } from '../canvas/script-migration';
@@ -12,9 +15,9 @@ import type { CreateScriptTask, ScriptInput, ScriptTask, ScriptStatus } from './
 
 export class ScriptError extends Error { constructor(message: string, public status = 400) { super(message); } }
 type Row = { id: string; request_id: string; canvas_id: string; node_id: string; input: string; status: ScriptStatus;
-  text: string; phase: ScriptPhase; revision: number; created_at: number; updated_at: number; error: string | null; lease: string | null; lease_until: number | null };
+  output_node_id: string | null; output_saved: number; text: string; phase: ScriptPhase; revision: number; created_at: number; updated_at: number; error: string | null; lease: string | null; lease_until: number | null };
 const publicTask = (r: Row): ScriptTask => ({ id: r.id, requestId: r.request_id, canvasId: r.canvas_id, nodeId: r.node_id,
-  input: JSON.parse(r.input), status: r.status, text: r.text, phase: r.phase, revision: r.revision, createdAt: r.created_at, updatedAt: r.updated_at, error: r.error || undefined });
+  input: JSON.parse(r.input), outputNodeId: r.output_node_id || undefined, outputSaved: !!r.output_saved, status: r.status, text: r.text, phase: r.phase, revision: r.revision, createdAt: r.created_at, updatedAt: r.updated_at, error: r.error || undefined });
 export type ScriptStream = (input: TextGenerationInput) => AsyncIterable<string>;
 
 /** SQLite is authoritative. All executor writes are fenced by a renewable lease. */
@@ -29,6 +32,8 @@ export class ScriptService {
     db.transaction(() => {
       const columns = db.prepare('PRAGMA table_info(script_tasks)').all() as { name: string }[];
       if (!columns.some(column => column.name === 'phase')) db.exec("ALTER TABLE script_tasks ADD COLUMN phase TEXT NOT NULL DEFAULT 'preparing'");
+      if (!columns.some(column => column.name === 'output_node_id')) db.exec("ALTER TABLE script_tasks ADD COLUMN output_node_id TEXT");
+      if (!columns.some(column => column.name === 'output_saved')) db.exec("ALTER TABLE script_tasks ADD COLUMN output_saved INTEGER NOT NULL DEFAULT 0");
     }).immediate();
   }
   get(id: string) { this.recoverExpired(); const row = this.row(id); if (!row) throw new ScriptError('脚本任务不存在', 404); return publicTask(row); }
@@ -57,7 +62,10 @@ export class ScriptService {
       const id = randomUUID(); const now = Date.now();
       this.db.prepare('INSERT INTO script_tasks(id,request_id,canvas_id,node_id,input,status,created_at,updated_at) VALUES(?,?,?,?,?,\'queued\',?,?)')
         .run(id, request.requestId, request.canvasId, request.nodeId, serialized, now, now);
-      return this.get(id);
+      const task = publicTask(this.row(id)!);
+      const outputId = createScriptOutput(task);
+      this.db.prepare('UPDATE script_tasks SET output_node_id=? WHERE id=?').run(outputId,id);
+      return publicTask(this.row(id)!);
     }).immediate();
   }
   /** Extend input preparation here; serialized snapshots must never contain credentials. */
@@ -87,6 +95,35 @@ export class ScriptService {
   }
   recoverExpired() {
     this.db.prepare("UPDATE script_tasks SET status=CASE WHEN status='stopping' THEN 'stopped' ELSE 'interrupted' END,error='后台执行中断，已保存正文保留；请主动重新生成',revision=revision+1,updated_at=?,lease=NULL,lease_until=NULL WHERE status IN ('running','stopping') AND (lease_until IS NULL OR lease_until<=?)").run(Date.now(), Date.now());
+    this.attachLegacyOutputs();
+    this.saveFinishedOutputs();
+  }
+  private attachLegacyOutputs() {
+    const rows = this.db.prepare("SELECT * FROM script_tasks WHERE output_node_id IS NULL").all() as Row[];
+    const hasDrafts = !!this.db.prepare("SELECT name FROM sqlite_master WHERE name='script_drafts'").get();
+    for (const row of rows) {
+      const draft = hasDrafts ? this.db.prepare("SELECT text FROM script_drafts WHERE version_id=?").get(row.id) as {text:string} | undefined : undefined;
+      const text = draft?.text ?? row.text;
+      if (!text && !['queued','running','stopping'].includes(row.status)) continue;
+      if (!this.nodeExists(row.canvas_id,row.node_id)) continue;
+      this.db.transaction(() => {
+        const existing = (getWorkflowById(row.canvas_id)?.nodes as CanvasNode[] | undefined)?.find(node => node.data.scriptSource?.versionId === row.id);
+        const task = { ...publicTask(row),text };
+        const id = existing?.id || createScriptOutput(task);
+        this.db.prepare("UPDATE script_tasks SET output_node_id=?,revision=revision+1 WHERE id=?").run(id,row.id);
+        if (existing || !['queued','running','stopping'].includes(row.status)) {
+          if (!existing) finishScriptOutput({...task,outputNodeId:id});
+          this.db.prepare("UPDATE script_tasks SET output_saved=1,revision=revision+1 WHERE id=?").run(row.id);
+        }
+      }).immediate();
+    }
+  }
+  private saveFinishedOutputs() {
+    const rows = this.db.prepare("SELECT * FROM script_tasks WHERE output_node_id IS NOT NULL AND output_saved=0 AND status IN ('completed','failed','stopped','interrupted')").all() as Row[];
+    for (const row of rows) this.db.transaction(() => {
+      finishScriptOutput(publicTask(row));
+      this.db.prepare('UPDATE script_tasks SET output_saved=1,revision=revision+1 WHERE id=?').run(row.id);
+    }).immediate();
   }
   async runNext(stream: ScriptStream = streamText): Promise<boolean> {
     this.recoverExpired();
@@ -150,7 +187,10 @@ export class ScriptService {
     return true;
   }
   finish(id: string, lease: string, status: ScriptStatus, error: string | null) {
+    this.db.transaction(() => {
     this.db.prepare("UPDATE script_tasks SET status=?,error=?,revision=revision+1,updated_at=?,lease=NULL,lease_until=NULL WHERE id=? AND lease=? AND lease_until>? AND status='running'").run(status,error,Date.now(),id,lease,Date.now());
+      this.saveFinishedOutputs();
+    }).immediate();
   }
   private row(id: string) { return this.db.prepare('SELECT * FROM script_tasks WHERE id=?').get(id) as Row | undefined; }
 }
