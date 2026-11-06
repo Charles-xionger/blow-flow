@@ -1,6 +1,6 @@
 # 06：发布文本与冲突保护
 
-Status: ready-for-agent
+Status: claimed
 
 **What to build:** 用户主动将选定版本的编辑稿发布为文本节点，并能安全更新原文本或创建新文本；下游只读取发布结果。
 
