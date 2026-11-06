@@ -67,3 +67,43 @@ export async function generateArkText(id: string, prompt: string, options: {
   if (!text.trim()) throw new Error('Ark 未返回文本内容');
   return text;
 }
+
+/** Responses SSE adapter. Never treats a truncated transport as successful completion. */
+export async function* streamArkText(id: string, prompt: string, options: {
+  apiKey: string; baseUrl?: string; images?: string[]; webSearch?: boolean; signal?: AbortSignal;
+}): AsyncGenerator<string> {
+  const model = arkTextModel(id);
+  if (!model) throw new Error('未知的 Ark 语言模型');
+  if (options.images?.length && !model.vision) throw new Error('此模型不支持图片输入');
+  const response = await fetch(`${(options.baseUrl || ARK_BASE_URL).replace(/\/$/, '')}/responses`, {
+    method: 'POST', redirect: 'error', signal: options.signal,
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${options.apiKey}` },
+    body: JSON.stringify({ model: model.id, stream: true,
+      ...(options.webSearch ? { tools: [{ type: 'web_search', max_keyword: 3 }] } : {}),
+      input: [{ role: 'user', content: [...(options.images ?? []).map(image_url => ({ type: 'input_image', image_url })), { type: 'input_text', text: prompt }] }] }),
+  });
+  if (!response.ok || !response.body) { await response.body?.cancel(); throw new Error(`Ark 请求失败（HTTP ${response.status}）`); }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let completed = false;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+      buffer = buffer.replace(/\r\n/g, '\n');
+      let boundary: number;
+      while ((boundary = buffer.indexOf('\n\n')) >= 0) {
+        const frame = buffer.slice(0, boundary); buffer = buffer.slice(boundary + 2);
+        const data = frame.split('\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n');
+        if (!data || data === '[DONE]') continue;
+        const event = JSON.parse(data);
+        if (event.type === 'response.output_text.delta' && typeof event.delta === 'string') yield event.delta;
+        if (event.type === 'response.completed') completed = true;
+        if (['error', 'response.failed', 'response.incomplete'].includes(event.type)) throw new Error('Ark 生成未完成，请检查平台配额和模型配置');
+      }
+      if (done) break;
+    }
+    if (!completed) throw new Error('模型连接中断，已接收的正文已保留');
+  } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+}

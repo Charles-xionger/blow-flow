@@ -41,6 +41,7 @@ import TextToVideoNode from "@/components/nodes/TextToVideoNode";
 import ImageToImageNode from "@/components/nodes/ImageToImageNode";
 import ImageToVideoNode from "@/components/nodes/ImageToVideoNode";
 import StartEndToVideoNode from "@/components/nodes/StartEndToVideoNode";
+import ScriptNode from "@/components/nodes/ScriptNode";
 import CreativeDescNode from "@/components/nodes/CreativeDescNode";
 import OriginalImageNode from "@/components/nodes/OriginalImageNode";
 import CharacterNode from "@/components/nodes/CharacterNode";
@@ -60,6 +61,7 @@ const nodeTypes = {
   [NodeType.IMAGE_TO_IMAGE]: ImageToImageNode,
   [NodeType.IMAGE_TO_VIDEO]: ImageToVideoNode,
   [NodeType.START_END_TO_VIDEO]: StartEndToVideoNode,
+  [NodeType.SCRIPT]: ScriptNode,
   [NodeType.CREATIVE_DESC]: CreativeDescNode,
   [NodeType.STORYBOARD]: CreativeDescNode, // 使用同一个组件
   [NodeType.ORIGINAL_IMAGE]: OriginalImageNode,

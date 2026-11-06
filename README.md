@@ -8,11 +8,11 @@ First, run the development server:
 pnpm dev:all
 ```
 
-同时启动 Web、生成 worker（RunningHub 图片/视频）和助手 worker（规划并写画布），输出带进程前缀；任一进程退出则全部停止。只启动 `pnpm dev` 时，生成与助手任务会停在队列，界面上表现为发送后没有反应。
+同时启动 Web、生成 worker（图片/视频）、助手 worker（规划并写画布）和脚本 worker（流式文本），输出带进程前缀；任一进程退出则全部停止。只启动 `pnpm dev` 时，生成、助手与脚本任务会停在队列，界面上表现为发送后没有反应。
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-也可以在三个终端分别运行 `pnpm dev`、`pnpm generation:worker` 与 `pnpm agent:worker`。Web 和 worker 需从同一项目目录启动，使用相同的 `.env.local` 和数据库。配置 key 后需重启 worker。完整配置与恢复说明见 [Krea2 生成任务与恢复](docs/KREA2_GENERATION.md)。
+也可以在四个终端分别运行 `pnpm dev`、`pnpm generation:worker`、`pnpm agent:worker` 与 `pnpm script:worker`。Web 和 worker 需从同一项目目录启动，使用相同的 `.env.local` 和数据库。配置 key 后需重启 worker。完整配置与恢复说明见 [Krea2 生成任务与恢复](docs/KREA2_GENERATION.md)。
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
@@ -89,3 +89,9 @@ Ark 的 `baseUrl` 如覆盖，应包含 `/api/v3`，不包含 `/responses`。Pi 
 助手生成需要同时运行 `pnpm agent:worker` 与 `pnpm generation:worker`，与 Web 共用 SQLite 和管理员配置。生成 worker 负责供应商查询及产物保存；助手 worker 负责持久产物挂接与后续规划。助手 worker 使用 15 秒租约，重启后旧租约到期时，中断规划（包括等待生成结果的后续规划）显示“待继续”，用户点击“继续创作”后续行。等待回答或批准仍保持未决，用户回答即继续；已停止、完成或失败的任务不会自动重启。并行部署的 worker 不接管仍有有效租约的同项目任务。
 
 已提交生成继续查询、保存并挂接到仍存在的目标，不等待用户继续规划；尚未提交的已批准操作在继续前保持排队，并在实际提交前再次检查批准和画布绑定。保存失败后自动重试已有产物最多三次（5、10、20 秒退避），仍失败则保留原因，可要求再次重试保存；任何保存重试都不重新生成。提交事实不明确仍显示待核实，不自动重付费。浏览器回归的独立测试控制端口为 3218，用于真实重启受控助手 worker，仅存在于测试启动脚本。
+
+### 脚本后台生成
+
+脚本节点通过 `/api/script/tasks` 提交幂等请求，独立的 `pnpm script:worker` 调用通用 `streamText` 模型适配层。配置服务端 `ARK_API_KEY`，或已有 Gemini 服务端密钥后重启 worker。`pnpm dev:all` 包含此 worker；生产环境也需持续运行它，并与 Web 共用 `DATABASE_PATH`。`SCRIPT_CONCURRENCY` 控制脚本任务并发上限（默认 5，范围 1–20）。
+
+SQLite 保存输入快照、任务身份、正文和修订号；页面经每画布一条 SSE 接收已持久化正文，连接失败时每 10 秒查询。关闭页面不会停止后台生成；执行进程丢失后租约过期，worker 将任务标记中断并保留正文，不重新调用供应商。脚本任务不写回整张画布，也不复活删除的节点。尚未提交的已删除节点任务不会调用模型。
