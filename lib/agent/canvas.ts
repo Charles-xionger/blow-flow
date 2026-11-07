@@ -31,7 +31,7 @@ export class CanvasAgentService {
         getDatabase().exec('CREATE TABLE IF NOT EXISTS agent_canvas_receipts(project_id TEXT, identity TEXT, digest TEXT, result TEXT, PRIMARY KEY(project_id,identity)); CREATE TABLE IF NOT EXISTS agent_delete_permissions(message_id TEXT PRIMARY KEY)');
     }
     receipt(projectId: string, identity: string): CanvasEditResult | undefined {
-        if (!getWorkflowById(projectId)) throw new Error('Project deleted');
+        if (!getDatabase().prepare('SELECT 1 FROM workflows WHERE id=? AND deleted_at IS NULL').get(projectId)) throw new Error('Project deleted');
         const row = getDatabase().prepare('SELECT result FROM agent_canvas_receipts WHERE project_id=? AND identity=?').get(projectId, identity) as { result: string } | undefined;
         return row ? JSON.parse(row.result) : undefined;
     }

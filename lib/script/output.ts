@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { CanvasAgentService } from '../agent/canvas';
+import { CanvasAgentService, type CanvasOperation } from '../agent/canvas';
+import { getDatabase } from '../db';
 import { getWorkflowById } from '../db/workflows';
 import { promptSegments } from '../canvas/prompt';
 import { NodeType, type CanvasNode } from '../../types';
@@ -66,14 +67,22 @@ export function ensureScriptShotOutputs(task: ScriptTask) {
 /** Terminal content becomes ordinary editable text; never revive deleted nodes or replace manual edits. */
 export function finishScriptOutput(task: ScriptTask) {
   ensureScriptShotOutputs(task);
-  const graph = getWorkflowById(task.canvasId);
-  for (const id of scriptOutputIds(task)) {
-    const target = (graph?.nodes as CanvasNode[] | undefined)?.find(node => node.id === id);
-    if (!target || target.data.scriptOutputTaskId !== task.id || promptSegments(target.data.prompt).some(segment => 'ref' in segment || segment.text.length > 0)) continue;
-    const text = scriptOutputText(task, id);
-    if (!text) continue;
-    new CanvasAgentService().apply(task.canvasId, `script-output-finish:${task.id}:${id}`, [
-      {kind:'update',id,data:{prompt:[{text}]}},
-    ], '保存生成文本');
+  const ids = scriptOutputIds(task);
+  const canvas = new CanvasAgentService();
+  // Bound each lock to a small batch. Receipts make a crash between batches safely resumable.
+  for (let offset = 0; offset < ids.length; offset += 20) {
+    getDatabase().transaction(() => {
+      const identity = `script-output-finish:${task.id}:batch:${offset / 20}`;
+      const graph = getWorkflowById(task.canvasId);
+      if (!graph || canvas.receipt(task.canvasId, identity)) return;
+      const operations: CanvasOperation[] = [];
+      for (const id of ids.slice(offset, offset + 20)) {
+        const target = (graph.nodes as CanvasNode[]).find(node => node.id === id);
+        if (!target || target.data.scriptOutputTaskId !== task.id || promptSegments(target.data.prompt).some(segment => 'ref' in segment || segment.text.length > 0)) continue;
+        const text = scriptOutputText(task, id);
+        if (text) operations.push({kind:'update',id,data:{prompt:[{text}]}});
+      }
+      if (operations.length) canvas.apply(task.canvasId, identity, operations, '保存生成文本');
+    }).immediate();
   }
 }

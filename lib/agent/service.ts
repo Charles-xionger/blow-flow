@@ -14,6 +14,7 @@ export class AgentService {
         this.db.prepare('INSERT INTO agent_workers VALUES(?,?) ON CONFLICT(id) DO UPDATE SET lease_until=excluded.lease_until').run(this.workerId, Date.now() + this.leaseMs);
     }
     recover() {
+        if (!this.db.prepare("SELECT 1 FROM agent_tasks WHERE status IN ('running','queued','waiting') LIMIT 1").get()) return;
         this.db.transaction(() => {
             const rows = this.db.prepare("SELECT data FROM agent_tasks WHERE status IN ('running','queued','waiting')").all() as {data:string}[];
             for (const row of rows) {
@@ -223,6 +224,7 @@ export class AgentService {
         this.recover();
         this.heartbeat();
         this.lifecycle.forEach(h => h.tick?.());
+        if (!this.db.prepare("SELECT 1 FROM agent_tasks WHERE status='queued' LIMIT 1").get()) return false;
         const task = this.db.transaction(() => { const row = this.db.prepare("SELECT data FROM agent_tasks WHERE status='queued' ORDER BY rowid LIMIT 1").get() as {
             data: string;
         } | undefined; if (!row)

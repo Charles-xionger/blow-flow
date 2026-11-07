@@ -54,6 +54,13 @@ export class GenerationWorker {
   private claim(): TaskRecord | undefined {
     const db = this.service.db;
     const now = this.now();
+    // Read-only idle probe; all eligibility and lease checks still repeat under the claim lock.
+    const due = db.prepare(`SELECT 1 FROM generation_tasks WHERE status='queued'
+      OR (status='submitting' AND lease_until<=?)
+      OR (status='running' AND lease_until<=? AND (next_poll<=? OR deadline<=?))
+      OR (status='succeeded' AND save_status IN ('pending','saving') AND lease_until<=?) LIMIT 1`)
+      .get(now, now, now, now, now);
+    if (!due) return;
     return db.transaction(() => {
       // A crashed submitter might already have paid: never reclaim for submission.
       // Preparation has not called create; it may safely restart downloads/uploads.

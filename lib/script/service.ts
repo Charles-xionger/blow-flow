@@ -19,11 +19,19 @@ type Row = { id: string; request_id: string; canvas_id: string; node_id: string;
   output_node_id: string | null; output_saved: number; text: string; phase: ScriptPhase; revision: number; created_at: number; updated_at: number; error: string | null; lease: string | null; lease_until: number | null };
 const publicTask = (r: Row): ScriptTask => ({ id: r.id, requestId: r.request_id, canvasId: r.canvas_id, nodeId: r.node_id,
   input: JSON.parse(r.input), outputNodeId: r.output_node_id || undefined, outputSaved: !!r.output_saved, status: r.status, text: r.text, phase: r.phase, revision: r.revision, createdAt: r.created_at, updatedAt: r.updated_at, error: r.error || undefined });
+const initializedDatabases = new WeakSet<Database.Database>();
 export type ScriptStream = (input: TextGenerationInput) => AsyncIterable<string>;
 
 /** SQLite is authoritative. All executor writes are fenced by a renewable lease. */
 export class ScriptService {
   constructor(public db: Database.Database) {
+    if (initializedDatabases.has(db)) return;
+    const existingColumns = db.prepare('PRAGMA table_info(script_tasks)').all() as { name: string }[];
+    const existingIndexes = db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name IN ('script_one_active','script_canvas')").all();
+    if (['phase', 'output_node_id', 'output_saved'].every(name => existingColumns.some(column => column.name === name)) && existingIndexes.length === 2) {
+      initializedDatabases.add(db);
+      return;
+    }
     db.exec(`CREATE TABLE IF NOT EXISTS script_tasks (
       id TEXT PRIMARY KEY, request_id TEXT NOT NULL UNIQUE, canvas_id TEXT NOT NULL, node_id TEXT NOT NULL,
       input TEXT NOT NULL, status TEXT NOT NULL, text TEXT NOT NULL DEFAULT '', revision INTEGER NOT NULL DEFAULT 1,
@@ -36,10 +44,10 @@ export class ScriptService {
       if (!columns.some(column => column.name === 'output_node_id')) db.exec("ALTER TABLE script_tasks ADD COLUMN output_node_id TEXT");
       if (!columns.some(column => column.name === 'output_saved')) db.exec("ALTER TABLE script_tasks ADD COLUMN output_saved INTEGER NOT NULL DEFAULT 0");
     }).immediate();
+    initializedDatabases.add(db);
   }
-  get(id: string) { this.recoverExpired(); const row = this.row(id); if (!row) throw new ScriptError('脚本任务不存在', 404); return publicTask(row); }
+  get(id: string) { const row = this.row(id); if (!row) throw new ScriptError('脚本任务不存在', 404); return publicTask(row); }
   list(canvasId: string, nodeId?: string): ScriptTask[] {
-    this.recoverExpired();
     const rows = nodeId ? this.db.prepare('SELECT * FROM script_tasks WHERE canvas_id=? AND node_id=? ORDER BY created_at DESC, rowid DESC').all(canvasId, nodeId)
       : this.db.prepare('SELECT * FROM script_tasks WHERE canvas_id=? ORDER BY created_at DESC, rowid DESC').all(canvasId);
     return (rows as Row[]).map(publicTask);
@@ -96,7 +104,8 @@ export class ScriptService {
     return this.get(id);
   }
   recoverExpired() {
-    this.db.prepare("UPDATE script_tasks SET status=CASE WHEN status='stopping' THEN 'stopped' ELSE 'interrupted' END,error='后台执行中断，已保存正文保留；请主动重新生成',revision=revision+1,updated_at=?,lease=NULL,lease_until=NULL WHERE status IN ('running','stopping') AND (lease_until IS NULL OR lease_until<=?)").run(Date.now(), Date.now());
+    const expired = this.db.prepare("SELECT 1 FROM script_tasks WHERE status IN ('running','stopping') AND (lease_until IS NULL OR lease_until<=?) LIMIT 1").get(Date.now());
+    if (expired) this.db.prepare("UPDATE script_tasks SET status=CASE WHEN status='stopping' THEN 'stopped' ELSE 'interrupted' END,error='后台执行中断，已保存正文保留；请主动重新生成',revision=revision+1,updated_at=?,lease=NULL,lease_until=NULL WHERE status IN ('running','stopping') AND (lease_until IS NULL OR lease_until<=?)").run(Date.now(), Date.now());
     this.attachLegacyOutputs();
     this.saveFinishedOutputs();
   }
@@ -122,13 +131,16 @@ export class ScriptService {
   }
   private saveFinishedOutputs() {
     const rows = this.db.prepare("SELECT * FROM script_tasks WHERE output_node_id IS NOT NULL AND output_saved=0 AND status IN ('completed','failed','stopped','interrupted')").all() as Row[];
-    for (const row of rows) this.db.transaction(() => {
+    for (const row of rows) {
+      if (this.row(row.id)?.output_saved) continue;
       finishScriptOutput(publicTask(row));
-      this.db.prepare('UPDATE script_tasks SET output_saved=1,revision=revision+1 WHERE id=?').run(row.id);
-    }).immediate();
+      this.db.prepare('UPDATE script_tasks SET output_saved=1,revision=revision+1 WHERE id=? AND output_saved=0').run(row.id);
+    }
   }
   async runNext(stream: ScriptStream = streamText): Promise<boolean> {
     this.recoverExpired();
+    // An idle worker must not take the database writer slot just to discover an empty queue.
+    if (!this.db.prepare("SELECT 1 FROM script_tasks WHERE status='queued' LIMIT 1").get()) return false;
     const claimed = this.db.transaction(() => {
       const limit = Math.max(1, Math.min(20, Number(process.env.SCRIPT_CONCURRENCY) || 5));
       const count = this.db.prepare("SELECT count(*) AS count FROM script_tasks WHERE status IN ('running','stopping')").get() as { count: number };
@@ -205,8 +217,8 @@ export class ScriptService {
   finish(id: string, lease: string, status: ScriptStatus, error: string | null) {
     this.db.transaction(() => {
     this.db.prepare("UPDATE script_tasks SET status=?,error=?,revision=revision+1,updated_at=?,lease=NULL,lease_until=NULL WHERE id=? AND lease=? AND lease_until>? AND status='running'").run(status,error,Date.now(),id,lease,Date.now());
-      this.saveFinishedOutputs();
     }).immediate();
+    this.saveFinishedOutputs();
   }
   private row(id: string) { return this.db.prepare('SELECT * FROM script_tasks WHERE id=?').get(id) as Row | undefined; }
 }
