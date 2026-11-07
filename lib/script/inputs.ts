@@ -36,5 +36,5 @@ export function buildScriptInput(nodeId: string, graph: PromptGraph): ScriptInpu
 
 export function scriptPrompt(input: ScriptInput): string {
   let image = 0;
-  return [input.instruction, ...input.references.map((ref, index) => `参考 ${index + 1}「${ref.label}」${ref.type === 'text' ? ':\n' + ref.content : `（图片${++image}）`}`), `创作要求：\n${input.requirements}`].filter(Boolean).join('\n\n');
+  return [input.instruction, ...input.references.map((ref, index) => `参考 ${index + 1}「${ref.label}」${ref.type === 'text' ? ':\n' + ref.content : `（图片${++image}）`}`), input.requirements.trim() ? `创作要求：\n${input.requirements}` : ''].filter(Boolean).join('\n\n');
 }

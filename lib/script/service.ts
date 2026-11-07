@@ -70,7 +70,7 @@ export class ScriptService {
   }
   /** Extend input preparation here; serialized snapshots must never contain credentials. */
   validateInput(value: ScriptInput): ScriptInput {
-    if (!value || typeof value.requirements !== 'string' || !value.requirements.trim() || value.requirements.length > 100_000) throw new ScriptError('请填写有效的创作要求');
+    if (!value || typeof value.requirements !== 'string' || value.requirements.length > 100_000) throw new ScriptError('创作要求格式无效或超过 100000 字');
     if (typeof value.model !== 'string') throw new ScriptError('请选择语言模型');
     const model = getModelDefinition(value.model);
     if (!model || model.category !== 'TEXT' || !['ark','gemini'].includes(model.provider || '')) throw new ScriptError('请选择支持流式生成的语言模型');
@@ -79,6 +79,7 @@ export class ScriptService {
       if (!ref || typeof ref.nodeId !== 'string' || typeof ref.label !== 'string' || !['text','image'].includes(ref.type) || typeof ref.content !== 'string' || !ref.content.trim() || ref.content.length > 200_000) throw new ScriptError(`参考 ${index + 1} 内容为空或无效`);
       return { nodeId: ref.nodeId.slice(0,200), label: ref.label.slice(0,200), type: ref.type, content: ref.content };
     });
+    if (!value.requirements.trim() && !references.length) throw new ScriptError('请填写创作要求或连接参考文本、图片');
     const image = references.find(ref => ref.type === 'image');
     if (image && !model.vision) throw new ScriptError(`参考「${image.label}」是图片；模型 ${model.name} 不支持图片，请选择视觉模型`);
     return { model: model.id, requirements: value.requirements, instruction: typeof value.instruction === 'string' ? value.instruction.slice(0,100_000) : '', preset: typeof value.preset === 'string' ? value.preset.slice(0,100) : 'free', references };

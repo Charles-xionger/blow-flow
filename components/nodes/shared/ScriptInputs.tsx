@@ -45,7 +45,7 @@ export function ScriptInputs({ id, data, expanded, task }: { id: string; data: N
     {referenceError && <p role="alert" className="mb-2 text-xs text-red-300">{referenceError}</p>}
     {changed && <p role="status" className="mb-2 text-xs text-amber-300">参考已更新；本次生成使用原输入，下次生成使用最新内容。</p>}
     <div className={expanded ? 'min-h-32 flex-1 overflow-auto [&_[role=textbox]]:max-h-none [&_[role=textbox]]:min-h-64' : 'min-h-32 [&_[role=textbox]]:max-h-52'}>
-      <PromptEditor value={promptSegments(data.prompt)} upstream={upstream} placeholder="描述创作要求；输入 @ 引用参考节点…" onChange={prompt => update(id, { prompt })} />
+      <PromptEditor value={promptSegments(data.prompt)} upstream={upstream} placeholder={references.length ? '已有参考，可直接生成；补充要求选填…' : '描述创作要求，或连接参考文本、图片…'} onChange={prompt => update(id, { prompt })} />
     </div>
   </>;
 }
