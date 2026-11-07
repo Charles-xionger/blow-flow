@@ -44,7 +44,7 @@ const TextNode = (props: NodeProps<Node<NodeData>>) => {
       }
     >
       <div data-testid="text-content"
-        className={`h-full w-full overflow-y-auto whitespace-pre-wrap break-words p-4 text-sm leading-relaxed ${displayed ? "text-zinc-200" : "text-zinc-500"}`}>
+        className={`nowheel h-full w-full overflow-y-auto overscroll-contain whitespace-pre-wrap break-words p-4 text-sm leading-relaxed ${displayed ? "text-zinc-200" : "text-zinc-500"}`}>
         {data.textPurpose && <span className="mb-2 block text-xs text-violet-300">{textPurposes[data.textPurpose]}</span>}
         {task && <div role="status" className="relative mb-3 min-h-8 rounded-lg bg-white/5 p-2 text-xs text-violet-200">
           {generating && !displayed && <Particles/>}<span className="relative">{status}</span>
