@@ -78,7 +78,7 @@ function ScriptNode(props: NodeProps<Node<NodeData>>) {
       <Feather size={24} className="text-violet-300"/>
       <p className="text-sm font-medium text-zinc-200">{preset.label}</p>
       <p className="max-w-64 text-xs leading-6 text-zinc-500">{preset.description}</p>
-      <p className="text-xs text-zinc-500">每次生成新建文本节点，正文在文本节点中实时展示</p>
+      <p className="text-xs text-zinc-500">{preset.id === 'storyboard' ? '每个镜头新建一个文本节点，逐镜头实时展示' : '每次生成新建文本节点，正文在文本节点中实时展示'}</p>
       {task && <span role="status" className="rounded-lg bg-white/5 px-3 py-2 text-xs text-violet-200">{task.status === 'running' && task.phase ? scriptPhaseLabel[task.phase] : scriptStatusLabel[task.status]}</span>}
       {(task?.error || error) && <p role="alert" className="text-xs text-red-300">{task?.error || error}</p>}
     </div>

@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { canvasAutosave, useCanvasStore } from '@/store/useCanvasStore';
 import { createScriptTask, stopScriptTask, subscribeScriptTasks, ScriptSubmissionError } from '@/lib/script/client';
+import { scriptOutputIds } from '@/lib/script/shots';
 import { scriptActive, type CreateScriptTask, type ScriptInput, type ScriptTask } from '@/lib/script/types';
 
 function mergeTasks(previous: ScriptTask[], incoming: ScriptTask[]) {
@@ -22,6 +23,8 @@ export function useScriptTask(nodeId: string) {
   useEffect(() => {
     if (!canvasId) return;
     let closed = false;
+    let outputSnapshot = '';
+    let synchronizing = false;
     return subscribeWithCleanup();
     function subscribeWithCleanup() {
       const unsubscribe = subscribeScriptTasks(canvasId!, (all,polling) => {
@@ -29,6 +32,11 @@ export function useScriptTask(nodeId: string) {
         if (closed || state.canvasSession !== canvasSession) return;
         const tasks = all.filter(task => task.canvasId === canvasId && task.nodeId === nodeId);
         setSnapshot(previous => ({ session:canvasSession,tasks:mergeTasks(previous.session === canvasSession ? previous.tasks : [], tasks),polling }));
+        const nextOutputSnapshot = JSON.stringify(tasks.map(task => [task.id, scriptOutputIds(task).length, task.outputSaved]));
+        if (!synchronizing && nextOutputSnapshot !== outputSnapshot) {
+          synchronizing = true;
+          void canvasAutosave.flush().then(() => { outputSnapshot = nextOutputSnapshot; }).catch(() => {}).finally(() => { synchronizing = false; });
+        }
         const pending = state.nodes.find(node => node.id === nodeId)?.data.pendingScript;
         const recovered = pending && tasks.find(task => task.requestId === pending.requestId && pending.canvasId === canvasId && pending.nodeId === nodeId);
         if (recovered) state.updateNodeData(nodeId,{ pendingScript:undefined,scriptTaskId:recovered.id });

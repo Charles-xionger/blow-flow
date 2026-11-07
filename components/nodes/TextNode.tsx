@@ -3,6 +3,7 @@
 import { nodeContentEqual } from "@/lib/canvas/node-content";
 
 import dynamic from 'next/dynamic';
+import { scriptOutputText } from '@/lib/script/shots';
 import { useScriptOutput } from '@/hooks/useScriptOutput';
 import { scriptActive, scriptPhaseLabel, scriptStatusLabel } from '@/lib/script/types';
 import { memo, useMemo } from "react";
@@ -29,7 +30,7 @@ const TextNode = (props: NodeProps<Node<NodeData>>) => {
   const hasReferences = segments.some(segment => "ref" in segment);
   const content = useCanvasStore((state) => hasReferences ? expandPrompt(id, state) : promptText(segments));
 
-  const displayed = generating || (task && !task.outputSaved) ? task?.text || '' : content;
+  const displayed = generating || (task && !task.outputSaved) ? (task ? scriptOutputText(task, id) : '') : content;
   const status = task && (task.status === 'running' && task.phase ? scriptPhaseLabel[task.phase] : scriptStatusLabel[task.status]);
 
   return (

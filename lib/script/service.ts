@@ -1,9 +1,10 @@
 import type { CanvasNode } from '../../types';
 import { getWorkflowById } from '../db/workflows';
-import { createScriptOutput, finishScriptOutput } from './output';
+import { createScriptOutput, finishScriptOutput, ensureScriptShotOutputs } from './output';
 import { TextStreamError } from '../ai-services/text/stream-types';
 import { scriptPhaseLabel, type ScriptPhase } from './types';
 import { migrateScriptSnapshot } from '../canvas/script-migration';
+import { hasScriptShotHeading, splitScriptShots } from './shots';
 import { scriptPrompt } from './inputs';
 import { prepareScriptImages, ScriptPreflightError } from './preflight';
 import { randomUUID } from 'node:crypto';
@@ -82,7 +83,7 @@ export class ScriptService {
     if (!value.requirements.trim() && !references.length) throw new ScriptError('请填写创作要求或连接参考文本、图片');
     const image = references.find(ref => ref.type === 'image');
     if (image && !model.vision) throw new ScriptError(`参考「${image.label}」是图片；模型 ${model.name} 不支持图片，请选择视觉模型`);
-    return { model: model.id, requirements: value.requirements, instruction: typeof value.instruction === 'string' ? value.instruction.slice(0,100_000) : '', preset: typeof value.preset === 'string' ? value.preset.slice(0,100) : 'free', references };
+    return { ...(value.preset === 'storyboard' && value.outputMode === 'shots' ? { outputMode: 'shots' as const } : {}), model: model.id, requirements: value.requirements, instruction: typeof value.instruction === 'string' ? value.instruction.slice(0,100_000) : '', preset: typeof value.preset === 'string' ? value.preset.slice(0,100) : 'free', references };
   }
   nodeExists(canvasId: string, nodeId: string) {
     const row = this.db.prepare('SELECT data FROM workflows WHERE id=? AND deleted_at IS NULL').get(canvasId) as { data: string } | undefined;
@@ -145,6 +146,8 @@ export class ScriptService {
     if (!claimed) return false;
     const { task, lease } = claimed; const controller = new AbortController();
     let timedOut = false;
+    let streamedText = task.text;
+    let shotCount = splitScriptShots(streamedText).length;
     let phase: ScriptPhase = 'preparing';
     const onPhase = (next: ScriptPhase) => {
       if (next === phase) return;
@@ -170,10 +173,22 @@ export class ScriptService {
       for await (const delta of abortableStream(stream({ model: input.model, prompt: scriptPrompt(input), images, signal: controller.signal, onPhase }), controller.signal)) {
         controller.signal.throwIfAborted();
         if (!delta) continue;
-        const changed = this.db.prepare("UPDATE script_tasks SET text=text||?,revision=revision+1,updated_at=? WHERE id=? AND lease=? AND lease_until>? AND status='running'").run(delta, Date.now(), task.id, lease, Date.now());
+        streamedText += delta;
+        const nextShotCount = task.input.outputMode === 'shots' ? splitScriptShots(streamedText).length : 1;
+        const changed = this.db.transaction(() => {
+          const result = this.db.prepare("UPDATE script_tasks SET text=text||?,revision=revision+1,updated_at=? WHERE id=? AND lease=? AND lease_until>? AND status='running'").run(delta, Date.now(), task.id, lease, Date.now());
+          if (result.changes && nextShotCount > shotCount) ensureScriptShotOutputs({ ...task, text: streamedText });
+          return result;
+        }).immediate();
+        shotCount = nextShotCount;
         if (!changed.changes) { controller.abort(); break; }
       }
-      if (!controller.signal.aborted) this.finish(task.id, lease, this.get(task.id).text.trim() ? 'completed' : 'failed', this.get(task.id).text.trim() ? null : '模型未返回正文');
+      if (!controller.signal.aborted) {
+        const text = this.get(task.id).text;
+        const error = !text.trim() ? '模型未返回正文'
+          : input.outputMode === 'shots' && !hasScriptShotHeading(text) ? '模型未按逐镜头格式输出，原文已保留；请重新生成分镜。' : null;
+        this.finish(task.id, lease, error ? 'failed' : 'completed', error);
+      }
     } catch (error) {
       const message = timedOut ? `生成超过 180 秒，已停止；最后阶段：${scriptPhaseLabel[phase]}。已保存正文保留，未自动重试。`
         : error instanceof ScriptPreflightError || error instanceof TextStreamError ? error.message
