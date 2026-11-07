@@ -6,7 +6,7 @@ import type { ScriptInput } from './types';
 export const scriptPresets = [
   { id: 'free', label: '自由创作', description: '故事创意、文案与自由写作', instruction: '结合全部参考和创作要求完成文字创作。保留用户的创作意图，直接输出正文。' },
   { id: 'screenplay', label: '写剧本', description: '将想法写成场景、行动与对白', instruction: '结合全部参考创作完整剧本，清晰呈现人物、场景、行动和对白，保持情节与人物动机一致。直接输出可编辑的剧本文本。' },
-  { id: 'storyboard', label: '拆分镜', description: '按时长规划镜头，集中在分镜节点查看', instruction: '结合全部参考把故事拆成独立、连续的镜头，每个镜头分别描述场景、景别、构图、人物行动、镜头运动、对白、声音和建议时长。一场戏可包含多个镜头，保持叙事与人物特征连续。' },
+  { id: 'storyboard', label: '分镜与资产', description: '规划镜头，同时整理角色、场景、道具和视频提示词', instruction: '结合全部参考规划镜头，并整理每镜涉及的角色、场景与道具；同一资产跨镜头使用统一名称。每个镜头分别描述场景、景别、构图、人物行动、镜头运动、对白、声音和建议时长。一场戏可包含多个镜头，保持叙事与人物特征连续。' },
   { id: 'extract', label: '提取素材', description: '整理角色、场景和道具描述', instruction: '从全部参考中提取角色、场景和道具，分别整理名称、描述与创作特征；区分原文事实与补充建议。只输出可编辑文本，不创建素材或制作台。' },
 ] as const;
 

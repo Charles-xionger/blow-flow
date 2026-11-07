@@ -8,6 +8,7 @@ import { NodeShell, NodeToolbarButton } from './NodeShell';
 import { nodeContentEqual } from '@/lib/canvas/node-content';
 import { getModelsByCategory } from '@/lib/model-registry';
 import { scriptPresets, buildScriptInput } from '@/lib/script/inputs';
+import { defaultStoryboardLimits, storyboardLimitsProblem } from '@/lib/script/storyboard';
 import { ScriptInputs } from './shared/ScriptInputs';
 import { useCanvasStore } from '@/store/useCanvasStore';
 import { useScriptTask } from '@/hooks/useScriptTask';
@@ -26,7 +27,7 @@ function ScriptNode(props: NodeProps<Node<NodeData>>) {
     if (!element || expanded) return;
     const place = () => {
       element.style.transform = 'translateX(-50%)';
-      element.style.maxHeight = `${Math.max(120, (window.innerHeight - 32) / viewport.zoom)}px`;
+      element.style.maxHeight = `${Math.max(120, Math.min(720, (window.innerHeight - 32) / viewport.zoom))}px`;
       element.style.maxWidth = `${Math.max(120, (window.innerWidth - 32) / viewport.zoom)}px`;
       const rect = element.getBoundingClientRect();
       const dx = rect.left < 16 ? 16 - rect.left : rect.right > window.innerWidth - 16 ? window.innerWidth - 16 - rect.right : 0;
@@ -49,10 +50,11 @@ function ScriptNode(props: NodeProps<Node<NodeData>>) {
   const model = models.find(model => model.id === data.model || model.name === data.model)?.id || data.model || models[0].id;
   const active = scriptActive(activeTask?.status);
   const preset = scriptPresets.find(item => item.id === data.scriptPreset) || scriptPresets[0];
+  const configError = preset.id === 'storyboard' ? storyboardLimitsProblem(data.storyboard ?? defaultStoryboardLimits) : undefined;
   // Use the same transform property as viewport clamping; Tailwind's translate utility
   // uses the independent CSS translate property and would apply centering twice.
-  const consoleContent = <section ref={consoleRef} aria-label="脚本节点控制台" className={`nokey nodrag nopan nowheel z-70 cursor-auto select-text rounded-[22px] border border-white/10 bg-[#242426] p-4 text-zinc-200 shadow-2xl ${expanded ? 'fixed inset-4 z-[200] flex flex-col overflow-auto' : 'absolute overflow-auto left-1/2 top-full mt-3 w-[560px] max-w-[calc(100vw-32px)] [transform:translateX(-50%)]'}`}>
-      <div className="mb-3 flex items-center justify-between text-xs text-zinc-400"><span>脚本创作</span>
+  const consoleContent = <section ref={consoleRef} aria-label="脚本节点控制台" className={`nokey nodrag nopan nowheel z-70 cursor-auto select-text rounded-[22px] border border-white/10 bg-[#242426] p-4 text-zinc-200 shadow-2xl ${expanded ? 'fixed inset-4 z-[200] flex flex-col overflow-auto' : 'absolute overflow-auto left-1/2 top-full mt-3 w-[520px] max-w-[calc(100vw-32px)] [transform:translateX(-50%)]'}`}>
+      <div className="mb-3 flex items-center justify-between text-xs text-zinc-400"><span>{preset.id === 'storyboard' ? '分镜与资产创作' : '脚本创作'}</span>
         <button type="button" aria-label={expanded ? '收起输入区' : '展开输入区'} onClick={() => setExpanded(!expanded)} className="rounded-lg p-1.5 hover:bg-white/10">{expanded ? <Minimize2 size={15}/> : <Maximize2 size={15}/>}</button>
       </div>
       {!!data.legacyScriptArchive && <details className="mb-3 text-xs text-zinc-400">
@@ -61,14 +63,14 @@ function ScriptNode(props: NodeProps<Node<NodeData>>) {
         <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words select-text">{JSON.stringify(data.legacyScriptArchive, null, 2)}</pre>
       </details>}
       <ScriptInputs id={id} data={data} expanded={expanded} task={task}/>
-      <div className="mt-3 flex items-center gap-2">
+      <div className="sticky -bottom-4 z-10 -mx-4 mt-3 flex shrink-0 items-center gap-2 border-t border-white/10 bg-[#242426] px-4 py-3">
         <select aria-label="语言模型" value={model} onChange={event => update(id,{ model:event.target.value })} className="min-w-0 max-w-[70%] rounded-xl bg-[#303033] px-3 py-2 text-xs outline-none">
           {!models.some(item => item.id === model) && <option value={model}>不可用模型：{model}</option>}
           {models.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
         </select><div className="flex-1"/>
         {active ? <button type="button" disabled={stopping || activeTask?.status === 'stopping'} onClick={() => void stop()}
-          className="flex items-center gap-2 rounded-xl bg-zinc-600 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"><Square size={14}/>{stopping || activeTask?.status === 'stopping' ? '停止处理中' : '停止'}</button> : <button type="button" disabled={submitting} onClick={() => void start(() => buildScriptInput(id, useCanvasStore.getState()))}
-          className="flex items-center gap-2 rounded-xl bg-violet-500 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"><ArrowUp size={15}/>{submitting ? '提交中' : active ? '生成中' : data.pendingScript ? '恢复原请求' : preset.id === 'storyboard' ? '生成分镜' : '生成文本'}</button>}
+          className="flex items-center gap-2 rounded-xl bg-zinc-600 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"><Square size={14}/>{stopping || activeTask?.status === 'stopping' ? '停止处理中' : '停止'}</button> : <button type="button" disabled={submitting || (!!configError && !data.pendingScript)} onClick={() => void start(() => buildScriptInput(id, useCanvasStore.getState()))}
+          className="flex items-center gap-2 rounded-xl bg-violet-500 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"><ArrowUp size={15}/>{submitting ? '提交中' : active ? '生成中' : data.pendingScript ? '恢复原请求' : preset.id === 'storyboard' ? '生成分镜与资产' : '生成文本'}</button>}
       </div>
       {(error || task?.error) && <p role="alert" className="mt-3 text-xs text-red-300">{error || task?.error}</p>}
       {polling && <p role="status" className="mt-2 text-xs text-amber-300">实时连接暂不可用，每 10 秒同步已保存正文。</p>}

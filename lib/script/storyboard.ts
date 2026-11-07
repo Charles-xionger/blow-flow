@@ -2,6 +2,11 @@ import { hasScriptShotHeading, splitScriptShots } from './shots';
 
 export interface StoryboardLimits { duration: number; maxShots: number }
 export const defaultStoryboardLimits: StoryboardLimits = { duration: 60, maxShots: 5 };
+export function storyboardLimitsProblem(limits: StoryboardLimits): string | undefined {
+  if (!Number.isInteger(limits.duration) || limits.duration < 5 || limits.duration > 600) return '总时长须为 5–600 秒的整数';
+  if (!Number.isInteger(limits.maxShots) || limits.maxShots < 1 || limits.maxShots > 40) return '最多镜头数须为 1–40 的整数';
+  if (limits.duration > limits.maxShots * 15) return `${limits.duration} 秒至少需要 ${Math.ceil(limits.duration / 15)} 个镜头；当前 ${limits.maxShots} 镜最多承载 ${limits.maxShots * 15} 秒`;
+}
 export const shotFields = [
   ['duration', '时长'], ['visual', '画面描述'], ['size', '景别'], ['lighting', '光影氛围'],
   ['dialogue', '对白旁白'], ['sound', '音效'], ['camera', '运镜'],
@@ -39,7 +44,7 @@ export function serializeStoryboard(shots: StoryboardShot[]): string {
 export function storyboardInstruction(limits: StoryboardLimits): string {
   return `你是一位短片导演，请把故事压缩成能实际拍摄的短片分镜。以下制作约束优先于参考中的原镜头数量和旧任务指令：
 总时长必须为 ${limits.duration} 秒；最多 ${limits.maxShots} 个镜头；每个镜头 1–15 秒，所有镜头时长相加必须等于总时长。镜头数是上限，不是越多越好。
-先在内部规划起承转合，再写分镜。同一场景内连续的动作、对白和情绪变化尽量合并到一个镜头，仅在叙事转折、场景变化或确实需要换机位时切镜。不要逐句、逐个动作或逐行对白拆镜；篇幅过长时删减支线，不增加镜头。台词长度应符合镜头可用时长，保持人物外貌、服装和场景连续。
+先在内部规划起承转合，再写分镜。同一场景内连续的动作、对白和情绪变化尽量合并到一个镜头，仅在叙事转折、场景变化或确实需要换机位时切镜。同时整理每个镜头涉及的角色、场景和道具，跨镜头复用相同名称，让资产能按名称合并；不要把同一人物的不同动作当成不同角色。不要逐句、逐个动作或逐行对白拆镜；篇幅过长时删减支线，不增加镜头。台词长度应符合镜头可用时长，保持人物外貌、服装和场景连续。
 只输出镜头正文，不写说明、代码块或表格。每个镜头以独占一行的“## 镜头 001｜简短标题”开头并换行，编号连续。每镜必须逐行填写以下字段，不要使用 Markdown 加粗：
 时长：12秒（根据分配填写）
 画面描述：可拍摄的具体动作和构图

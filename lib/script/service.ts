@@ -4,7 +4,7 @@ import { createScriptOutput, finishScriptOutput, ensureScriptShotOutputs } from 
 import { TextStreamError } from '../ai-services/text/stream-types';
 import { scriptPhaseLabel, type ScriptPhase } from './types';
 import { migrateScriptSnapshot } from '../canvas/script-migration';
-import { defaultStoryboardLimits, parseStoryboard, storyboardProblem } from './storyboard';
+import { defaultStoryboardLimits, parseStoryboard, storyboardProblem, storyboardLimitsProblem } from './storyboard';
 import { hasScriptShotHeading, splitScriptShots } from './shots';
 import { scriptPrompt } from './inputs';
 import { prepareScriptImages, ScriptPreflightError } from './preflight';
@@ -94,7 +94,8 @@ export class ScriptService {
     if (image && !model.vision) throw new ScriptError(`参考「${image.label}」是图片；模型 ${model.name} 不支持图片，请选择视觉模型`);
     const board = value.preset === 'storyboard' && value.outputMode === 'board';
     const limits = value.storyboard ?? defaultStoryboardLimits;
-    if (board && (!Number.isInteger(limits.duration) || limits.duration < 5 || limits.duration > 600 || !Number.isInteger(limits.maxShots) || limits.maxShots < 1 || limits.maxShots > 40 || limits.duration > limits.maxShots * 15)) throw new ScriptError('请设置 5–600 秒总时长、1–40 个镜头，且镜头数量足以满足每镜最多 15 秒');
+    const limitsError = board ? storyboardLimitsProblem(limits) : undefined;
+    if (limitsError) throw new ScriptError(limitsError);
     return { ...(board ? { outputMode: 'board' as const, storyboard: { duration: limits.duration, maxShots: limits.maxShots } } : {}), ...(value.preset === 'storyboard' && value.outputMode === 'shots' ? { outputMode: 'shots' as const } : {}), model: model.id, requirements: value.requirements, instruction: typeof value.instruction === 'string' ? value.instruction.slice(0,100_000) : '', preset: typeof value.preset === 'string' ? value.preset.slice(0,100) : 'free', references };
   }
   nodeExists(canvasId: string, nodeId: string) {

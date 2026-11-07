@@ -11,6 +11,6 @@ export function registerScriptTools(service: AgentService) {
     inputSchema:{type:'object',properties:{nodeId:{type:'string'}},required:['nodeId'],additionalProperties:false},
     execute:(task,args) => {
       if (!getWorkflowById(task.projectId)?.nodes.some(node => node.id === args.nodeId && node.type === 'script')) throw new Error('Script node not found');
-      return { tasks:getScriptService().list(task.projectId,String(args.nodeId)).map(value => ({ ...value, outputNodeIds:scriptOutputIds(value) })),presets:scriptPresets };
+      return { tasks:getScriptService().list(task.projectId,String(args.nodeId)).map(value => ({ ...value, outputNodeIds:scriptOutputIds(value) })),presets:scriptPresets.filter(preset => preset.id !== 'extract') };
     } });
 }
