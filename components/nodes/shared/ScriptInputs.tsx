@@ -65,7 +65,7 @@ export function ScriptInputs({ id, data, expanded, task }: { id: string; data: N
       {limitsError ? <div className="mt-2 rounded-lg bg-amber-500/10 p-2 text-[11px] leading-5 text-amber-200"><p role="alert">{limitsError}</p>
         {Number.isInteger(limits.duration) && limits.duration >= 5 && limits.duration <= 600 && limits.maxShots < minimumShots && <button type="button" className="mt-1 underline underline-offset-4" onClick={() => update(id, { storyboard: { ...limits, maxShots: minimumShots } })}>调整为最多 {minimumShots} 镜</button>}
       </div> : <p className="mt-2 text-[11px] text-zinc-500">按 {minimumShots}–{limits.maxShots} 镜规划，共 {limits.duration} 秒；同时整理角色、场景和道具。</p>}
-      <p className="mt-2 text-[10px] text-zinc-600">输出一个分镜节点，资产图片按需创建，不自动生图。</p>
+      <p className="mt-2 text-[10px] text-zinc-600">结果直接显示在当前脚本节点，失败可继续；资产图片按需创建。</p>
     </div>}
 
     <details className="rounded-xl border border-white/10 px-3 py-2.5">

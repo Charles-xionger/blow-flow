@@ -81,6 +81,7 @@ export interface NodeData extends Record<string, unknown> {
   pendingScriptPublish?: import("@/lib/script/publishing-types").PublishScript;
   scriptPreset?: string;
   storyboard?: import('@/lib/script/storyboard').StoryboardLimits;
+  storyboardDraft?: { taskId: string; text: string };
   storyboardAsset?: { boardId: string; key: string };
   scriptInstruction?: string;
   scriptTaskId?: string;

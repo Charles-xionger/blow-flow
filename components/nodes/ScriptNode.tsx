@@ -1,4 +1,6 @@
 'use client';
+import dynamic from 'next/dynamic';
+import { canonicalJSON } from '@/lib/canvas/save-protocol';
 import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Maximize2, Minimize2, Feather, ArrowUp, Square } from 'lucide-react';
@@ -14,6 +16,7 @@ import { useCanvasStore } from '@/store/useCanvasStore';
 import { useScriptTask } from '@/hooks/useScriptTask';
 import { scriptActive, scriptStatusLabel, scriptPhaseLabel } from '@/lib/script/types';
 
+const StoryboardNode = dynamic(() => import('./StoryboardNode').then(module => module.StoryboardNode), { ssr: false });
 const models = getModelsByCategory('TEXT').filter(model => model.provider === 'ark' || model.provider === 'gemini');
 function ScriptNode(props: NodeProps<Node<NodeData>>) {
   const { id,data } = props;
@@ -50,6 +53,9 @@ function ScriptNode(props: NodeProps<Node<NodeData>>) {
   const model = models.find(model => model.id === data.model || model.name === data.model)?.id || data.model || models[0].id;
   const active = scriptActive(activeTask?.status);
   const preset = scriptPresets.find(item => item.id === data.scriptPreset) || scriptPresets[0];
+  const inputSnapshot = useCanvasStore(state => { try { return canonicalJSON(buildScriptInput(id, state)); } catch { return ''; } });
+  const matchingInput = !!task?.workflow && inputSnapshot === canonicalJSON(task.input);
+  const canResume = matchingInput && !!task && ['failed','stopped','interrupted'].includes(task.status);
   const configError = preset.id === 'storyboard' ? storyboardLimitsProblem(data.storyboard ?? defaultStoryboardLimits) : undefined;
   // Use the same transform property as viewport clamping; Tailwind's translate utility
   // uses the independent CSS translate property and would apply centering twice.
@@ -70,17 +76,27 @@ function ScriptNode(props: NodeProps<Node<NodeData>>) {
         </select><div className="flex-1"/>
         {active ? <button type="button" disabled={stopping || activeTask?.status === 'stopping'} onClick={() => void stop()}
           className="flex items-center gap-2 rounded-xl bg-zinc-600 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"><Square size={14}/>{stopping || activeTask?.status === 'stopping' ? '停止处理中' : '停止'}</button> : <button type="button" disabled={submitting || (!!configError && !data.pendingScript)} onClick={() => void start(() => buildScriptInput(id, useCanvasStore.getState()))}
-          className="flex items-center gap-2 rounded-xl bg-violet-500 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"><ArrowUp size={15}/>{submitting ? '提交中' : active ? '生成中' : data.pendingScript ? '恢复原请求' : preset.id === 'storyboard' ? '生成分镜与资产' : '生成文本'}</button>}
+          className="flex items-center gap-2 rounded-xl bg-violet-500 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"><ArrowUp size={15}/>{submitting ? '提交中' : active ? '生成中' : data.pendingScript ? '恢复原请求' : preset.id === 'storyboard' ? canResume ? '继续未完成步骤' : task?.workflow ? '重新生成' : '生成分镜与资产' : '生成文本'}</button>}
       </div>
       {(error || task?.error) && <p role="alert" className="mt-3 text-xs text-red-300">{error || task?.error}</p>}
       {polling && <p role="status" className="mt-2 text-xs text-amber-300">实时连接暂不可用，每 10 秒同步已保存正文。</p>}
     </section>;
+  if (preset.id === 'storyboard') {
+    const workflowTask = task?.workflow ? task : undefined;
+    const outputText = workflowTask && data.storyboardDraft?.taskId === workflowTask.id && workflowTask.status === 'completed' ? data.storyboardDraft.text : workflowTask?.text || '';
+    return <StoryboardNode {...props} text={outputText} task={workflowTask}
+      nodeConsole={expanded ? (!props.dragging ? createPortal(consoleContent, document.body) : null) : consoleContent}
+      extraToolbar={<NodeToolbarButton label="创作设置" icon={Maximize2} onClick={() => setExpanded(true)} />}
+      onConfigure={() => setExpanded(true)} continuing={submitting} canContinue={canResume}
+      onContinue={() => void start(() => buildScriptInput(id, useCanvasStore.getState()))}
+      onChangeText={text => { if (workflowTask) update(id, { storyboardDraft: { taskId: workflowTask.id, text } }); }} />;
+  }
   return <NodeShell {...props} toolbar={<NodeToolbarButton label="展开创作输入" icon={Maximize2} onClick={() => setExpanded(true)} />} console={expanded ? (!props.dragging ? createPortal(consoleContent, document.body) : null) : consoleContent}>
     <div className="flex h-full flex-col items-center justify-center gap-3 p-5 text-center">
       <Feather size={24} className="text-violet-300"/>
       <p className="text-sm font-medium text-zinc-200">{preset.label}</p>
       <p className="max-w-64 text-xs leading-6 text-zinc-500">{preset.description}</p>
-      <p className="text-xs text-zinc-500">{preset.id === 'storyboard' ? '生成一个分镜节点，打开查看镜头、资产与提示词' : '每次生成新建文本节点，正文在文本节点中实时展示'}</p>
+      <p className="text-xs text-zinc-500">每次生成新建文本节点，正文在文本节点中实时展示</p>
       {task && <span role="status" className="rounded-lg bg-white/5 px-3 py-2 text-xs text-violet-200">{task.status === 'running' && task.phase ? scriptPhaseLabel[task.phase] : scriptStatusLabel[task.status]}</span>}
       {(task?.error || error) && <p role="alert" className="text-xs text-red-300">{task?.error || error}</p>}
     </div>

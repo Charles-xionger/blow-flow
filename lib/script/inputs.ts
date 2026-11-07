@@ -32,7 +32,7 @@ export function buildScriptInput(nodeId: string, graph: PromptGraph): ScriptInpu
     }
   }
   return { model: data.model || 'deepseek-v4-pro-ga-260813', requirements: expandPrompt(nodeId, graph),
-    instruction: data.scriptInstruction ?? preset.instruction, preset: preset.id, references, ...(preset.id === 'storyboard' ? { outputMode: 'board' as const, storyboard: data.storyboard ?? defaultStoryboardLimits } : {}) };
+    instruction: data.scriptInstruction ?? preset.instruction, preset: preset.id, references, ...(preset.id === 'storyboard' ? { outputMode: 'workflow' as const, storyboard: data.storyboard ?? defaultStoryboardLimits } : {}) };
 }
 
 export function scriptPrompt(input: ScriptInput): string {

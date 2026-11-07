@@ -1,3 +1,7 @@
+import { newStoryboardWorkflow, type StoryboardWorkflow } from './pipeline/types';
+import { workflowText, WorkflowError } from './pipeline/outputs';
+import { runStoryboardWorkflow } from './pipeline/runner';
+import { abortableStream } from './abortable-stream';
 import type { CanvasNode } from '../../types';
 import { getWorkflowById } from '../db/workflows';
 import { createScriptOutput, finishScriptOutput, ensureScriptShotOutputs } from './output';
@@ -17,9 +21,9 @@ import type { CreateScriptTask, ScriptInput, ScriptTask, ScriptStatus } from './
 
 export class ScriptError extends Error { constructor(message: string, public status = 400) { super(message); } }
 type Row = { id: string; request_id: string; canvas_id: string; node_id: string; input: string; status: ScriptStatus;
-  output_node_id: string | null; output_saved: number; text: string; phase: ScriptPhase; revision: number; created_at: number; updated_at: number; error: string | null; lease: string | null; lease_until: number | null };
+  pipeline: string | null; output_node_id: string | null; output_saved: number; text: string; phase: ScriptPhase; revision: number; created_at: number; updated_at: number; error: string | null; lease: string | null; lease_until: number | null };
 const publicTask = (r: Row): ScriptTask => ({ id: r.id, requestId: r.request_id, canvasId: r.canvas_id, nodeId: r.node_id,
-  input: JSON.parse(r.input), outputNodeId: r.output_node_id || undefined, outputSaved: !!r.output_saved, status: r.status, text: r.text, phase: r.phase, revision: r.revision, createdAt: r.created_at, updatedAt: r.updated_at, error: r.error || undefined });
+  input: JSON.parse(r.input), workflow: r.pipeline ? JSON.parse(r.pipeline) : undefined, outputNodeId: r.output_node_id || undefined, outputSaved: !!r.output_saved, status: r.status, text: r.text, phase: r.phase, revision: r.revision, createdAt: r.created_at, updatedAt: r.updated_at, error: r.error || undefined });
 const initializedDatabases = new WeakSet<Database.Database>();
 export type ScriptStream = (input: TextGenerationInput) => AsyncIterable<string>;
 
@@ -29,7 +33,7 @@ export class ScriptService {
     if (initializedDatabases.has(db)) return;
     const existingColumns = db.prepare('PRAGMA table_info(script_tasks)').all() as { name: string }[];
     const existingIndexes = db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name IN ('script_one_active','script_canvas')").all();
-    if (['phase', 'output_node_id', 'output_saved'].every(name => existingColumns.some(column => column.name === name)) && existingIndexes.length === 2) {
+    if (['phase', 'output_node_id', 'output_saved', 'pipeline'].every(name => existingColumns.some(column => column.name === name)) && existingIndexes.length === 2 && db.prepare("SELECT 1 FROM sqlite_master WHERE name='script_requests'").get()) {
       initializedDatabases.add(db);
       return;
     }
@@ -39,8 +43,10 @@ export class ScriptService {
       created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, error TEXT, lease TEXT, lease_until INTEGER);
       CREATE UNIQUE INDEX IF NOT EXISTS script_one_active ON script_tasks(canvas_id,node_id) WHERE status IN ('queued','running','stopping');
       CREATE INDEX IF NOT EXISTS script_canvas ON script_tasks(canvas_id,created_at);`);
+    db.exec('CREATE TABLE IF NOT EXISTS script_requests(request_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, canvas_id TEXT NOT NULL, node_id TEXT NOT NULL, input TEXT NOT NULL)');
     db.transaction(() => {
       const columns = db.prepare('PRAGMA table_info(script_tasks)').all() as { name: string }[];
+      if (!columns.some(column => column.name === 'pipeline')) db.exec('ALTER TABLE script_tasks ADD COLUMN pipeline TEXT');
       if (!columns.some(column => column.name === 'phase')) db.exec("ALTER TABLE script_tasks ADD COLUMN phase TEXT NOT NULL DEFAULT 'preparing'");
       if (!columns.some(column => column.name === 'output_node_id')) db.exec("ALTER TABLE script_tasks ADD COLUMN output_node_id TEXT");
       if (!columns.some(column => column.name === 'output_saved')) db.exec("ALTER TABLE script_tasks ADD COLUMN output_saved INTEGER NOT NULL DEFAULT 0");
@@ -60,21 +66,39 @@ export class ScriptService {
     const input = this.validateInput(request.input);
     const serialized = JSON.stringify(input);
     return this.db.transaction(() => {
-      const prior = this.db.prepare('SELECT * FROM script_tasks WHERE request_id=?').get(request.requestId) as Row | undefined;
+      const alias = this.db.prepare('SELECT task_id,canvas_id,node_id,input FROM script_requests WHERE request_id=?').get(request.requestId) as { task_id: string; canvas_id: string; node_id: string; input: string } | undefined;
+      if (alias && (alias.canvas_id !== request.canvasId || alias.node_id !== request.nodeId || alias.input !== serialized)) throw new ScriptError('请求身份已用于其他输入', 409);
+      const prior = alias ? this.row(alias.task_id) : this.db.prepare('SELECT * FROM script_tasks WHERE request_id=?').get(request.requestId) as Row | undefined;
       if (prior) {
         if (prior.canvas_id !== request.canvasId || prior.node_id !== request.nodeId || prior.input !== serialized) throw new ScriptError('请求身份已用于其他输入', 409);
         return publicTask(prior);
       }
       try { validateTextConfiguration(input.model, input.references.some(ref => ref.type === 'image')); } catch (error) { throw new ScriptError(error instanceof Error ? error.message : '模型配置不可用'); }
       if (!this.nodeExists(request.canvasId, request.nodeId)) throw new ScriptError('请先保存脚本节点；节点可能已被删除', 409);
-      const active = this.db.prepare("SELECT id FROM script_tasks WHERE canvas_id=? AND node_id=? AND status IN ('queued','running','stopping')").get(request.canvasId, request.nodeId);
+      const active = this.db.prepare("SELECT * FROM script_tasks WHERE canvas_id=? AND node_id=? AND status IN ('queued','running','stopping')").get(request.canvasId, request.nodeId) as Row | undefined;
       if (active) throw new ScriptError('该节点已有活动任务', 409);
+      if (input.outputMode === 'workflow') {
+        const previous = this.db.prepare('SELECT * FROM script_tasks WHERE canvas_id=? AND node_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1').get(request.canvasId, request.nodeId) as Row | undefined;
+        if (previous?.pipeline && previous.input === serialized && ['failed','stopped','interrupted'].includes(previous.status)) {
+          const workflow: StoryboardWorkflow = JSON.parse(previous.pipeline);
+          for (const step of workflow.steps) if (step.status !== 'completed') { step.status = 'pending'; step.error = undefined; }
+          this.db.prepare('INSERT INTO script_requests VALUES(?,?,?,?,?)').run(request.requestId,previous.id,request.canvasId,request.nodeId,serialized);
+          this.db.prepare("UPDATE script_tasks SET request_id=?,status='queued',pipeline=?,error=NULL,phase='preparing',lease=NULL,lease_until=NULL,revision=revision+1,updated_at=? WHERE id=?")
+            .run(request.requestId,JSON.stringify(workflow),Date.now(),previous.id);
+          return publicTask(this.row(previous.id)!);
+        }
+      }
       const id = randomUUID(); const now = Date.now();
       this.db.prepare('INSERT INTO script_tasks(id,request_id,canvas_id,node_id,input,status,created_at,updated_at) VALUES(?,?,?,?,?,\'queued\',?,?)')
         .run(id, request.requestId, request.canvasId, request.nodeId, serialized, now, now);
       const task = publicTask(this.row(id)!);
-      const outputId = createScriptOutput(task);
-      this.db.prepare('UPDATE script_tasks SET output_node_id=? WHERE id=?').run(outputId,id);
+      if (input.outputMode === 'workflow') {
+        this.db.prepare('INSERT INTO script_requests VALUES(?,?,?,?,?)').run(request.requestId,id,request.canvasId,request.nodeId,serialized);
+        this.db.prepare('UPDATE script_tasks SET output_node_id=?,output_saved=1,pipeline=? WHERE id=?').run(request.nodeId,JSON.stringify(newStoryboardWorkflow()),id);
+      } else {
+        const outputId = createScriptOutput(task);
+        this.db.prepare('UPDATE script_tasks SET output_node_id=? WHERE id=?').run(outputId,id);
+      }
       return publicTask(this.row(id)!);
     }).immediate();
   }
@@ -92,11 +116,11 @@ export class ScriptService {
     if (!value.requirements.trim() && !references.length) throw new ScriptError('请填写创作要求或连接参考文本、图片');
     const image = references.find(ref => ref.type === 'image');
     if (image && !model.vision) throw new ScriptError(`参考「${image.label}」是图片；模型 ${model.name} 不支持图片，请选择视觉模型`);
-    const board = value.preset === 'storyboard' && value.outputMode === 'board';
+    const board = value.preset === 'storyboard' && ['board','workflow'].includes(value.outputMode || '');
     const limits = value.storyboard ?? defaultStoryboardLimits;
     const limitsError = board ? storyboardLimitsProblem(limits) : undefined;
     if (limitsError) throw new ScriptError(limitsError);
-    return { ...(board ? { outputMode: 'board' as const, storyboard: { duration: limits.duration, maxShots: limits.maxShots } } : {}), ...(value.preset === 'storyboard' && value.outputMode === 'shots' ? { outputMode: 'shots' as const } : {}), model: model.id, requirements: value.requirements, instruction: typeof value.instruction === 'string' ? value.instruction.slice(0,100_000) : '', preset: typeof value.preset === 'string' ? value.preset.slice(0,100) : 'free', references };
+    return { ...(board ? { outputMode: value.outputMode as 'board' | 'workflow', storyboard: { duration: limits.duration, maxShots: limits.maxShots } } : {}), ...(value.preset === 'storyboard' && value.outputMode === 'shots' ? { outputMode: 'shots' as const } : {}), model: model.id, requirements: value.requirements, instruction: typeof value.instruction === 'string' ? value.instruction.slice(0,100_000) : '', preset: typeof value.preset === 'string' ? value.preset.slice(0,100) : 'free', references };
   }
   nodeExists(canvasId: string, nodeId: string) {
     const row = this.db.prepare('SELECT data FROM workflows WHERE id=? AND deleted_at IS NULL').get(canvasId) as { data: string } | undefined;
@@ -110,7 +134,7 @@ export class ScriptService {
   }
   recoverExpired() {
     const expired = this.db.prepare("SELECT 1 FROM script_tasks WHERE status IN ('running','stopping') AND (lease_until IS NULL OR lease_until<=?) LIMIT 1").get(Date.now());
-    if (expired) this.db.prepare("UPDATE script_tasks SET status=CASE WHEN status='stopping' THEN 'stopped' ELSE 'interrupted' END,error='后台执行中断，已保存正文保留；请主动重新生成',revision=revision+1,updated_at=?,lease=NULL,lease_until=NULL WHERE status IN ('running','stopping') AND (lease_until IS NULL OR lease_until<=?)").run(Date.now(), Date.now());
+    if (expired) this.db.prepare("UPDATE script_tasks SET status=CASE WHEN status='stopping' THEN 'stopped' ELSE 'interrupted' END,error='后台执行中断，已保存内容保留；分镜流程可继续未完成步骤',revision=revision+1,updated_at=?,lease=NULL,lease_until=NULL WHERE status IN ('running','stopping') AND (lease_until IS NULL OR lease_until<=?)").run(Date.now(), Date.now());
     this.attachLegacyOutputs();
     this.saveFinishedOutputs();
   }
@@ -171,11 +195,12 @@ export class ScriptService {
       phase = next;
       this.db.prepare("UPDATE script_tasks SET phase=?,revision=revision+1,updated_at=? WHERE id=? AND lease=? AND lease_until>? AND status='running'").run(next,Date.now(),task.id,lease,Date.now());
     };
-    const timeout = setTimeout(() => { timedOut = true; controller.abort(new Error('生成超时')); }, 180_000);
+    const timeout = setTimeout(() => { timedOut = true; controller.abort(new Error('生成超时')); }, task.workflow ? 600_000 : 180_000);
     const cancellation = setInterval(() => {
       try {
         const row = this.row(task.id);
-        if (!row || row.status !== 'running' || row.lease !== lease || (row.lease_until || 0) <= Date.now()) controller.abort();
+        const deleted = task.workflow && (this.db.prepare('SELECT 1 FROM canvas_deleted_nodes WHERE canvas_id=? AND node_id=?').get(task.canvasId,task.nodeId) || this.db.prepare('SELECT 1 FROM workflows WHERE id=? AND deleted_at IS NOT NULL').get(task.canvasId));
+        if (deleted || !row || row.status !== 'running' || row.lease !== lease || (row.lease_until || 0) <= Date.now()) controller.abort();
       } catch { controller.abort(); }
     }, 250);
     const heartbeat = setInterval(() => {
@@ -187,29 +212,47 @@ export class ScriptService {
     try {
       const input = task.input;
       const images = await prepareScriptImages(input, controller.signal);
-      for await (const delta of abortableStream(stream({ model: input.model, prompt: scriptPrompt(input), images, signal: controller.signal, onPhase }), controller.signal)) {
+      if (task.workflow) {
+        await runStoryboardWorkflow({ input, images, signal: controller.signal, stream,
+          read: () => JSON.parse(this.row(task.id)!.pipeline!) as StoryboardWorkflow,
+          update: (change, allowStopping = false) => {
+            this.db.transaction(() => {
+              const row = this.row(task.id);
+              if (!row || row.lease !== lease || (row.lease_until || 0) <= Date.now() || !(row.status === 'running' || (allowStopping && row.status === 'stopping'))) throw new WorkflowError('流程执行已停止或被接管');
+              const workflow: StoryboardWorkflow = JSON.parse(row.pipeline!);
+              change(workflow);
+              this.db.prepare('UPDATE script_tasks SET pipeline=?,text=?,revision=revision+1,updated_at=? WHERE id=?').run(JSON.stringify(workflow),workflowText(workflow),Date.now(),task.id);
+            }).immediate();
+          },
+        });
         controller.signal.throwIfAborted();
-        if (!delta) continue;
-        streamedText += delta;
-        const nextShotCount = task.input.outputMode === 'shots' ? splitScriptShots(streamedText).length : 1;
-        const changed = this.db.transaction(() => {
-          const result = this.db.prepare("UPDATE script_tasks SET text=text||?,revision=revision+1,updated_at=? WHERE id=? AND lease=? AND lease_until>? AND status='running'").run(delta, Date.now(), task.id, lease, Date.now());
-          if (result.changes && nextShotCount > shotCount) ensureScriptShotOutputs({ ...task, text: streamedText });
-          return result;
-        }).immediate();
-        shotCount = nextShotCount;
-        if (!changed.changes) { controller.abort(); break; }
-      }
-      if (!controller.signal.aborted) {
-        const text = this.get(task.id).text;
-        const boardError = input.outputMode === 'board' ? storyboardProblem(parseStoryboard(text), input.storyboard ?? defaultStoryboardLimits) : undefined;
-        const error = boardError ? `分镜需要调整：${boardError}。已保留内容，可在分镜列表修改。` : !text.trim() ? '模型未返回正文'
-          : input.outputMode === 'shots' && !hasScriptShotHeading(text) ? '模型未按逐镜头格式输出，原文已保留；请重新生成分镜。' : null;
-        this.finish(task.id, lease, error ? 'failed' : 'completed', error);
+        this.finish(task.id,lease,'completed',null);
+      } else {
+        for await (const delta of abortableStream(stream({ model: input.model, prompt: scriptPrompt(input), images, signal: controller.signal, onPhase }), controller.signal)) {
+          controller.signal.throwIfAborted();
+          if (!delta) continue;
+          streamedText += delta;
+          const nextShotCount = task.input.outputMode === 'shots' ? splitScriptShots(streamedText).length : 1;
+          const changed = this.db.transaction(() => {
+            const result = this.db.prepare("UPDATE script_tasks SET text=text||?,revision=revision+1,updated_at=? WHERE id=? AND lease=? AND lease_until>? AND status='running'").run(delta, Date.now(), task.id, lease, Date.now());
+            if (result.changes && nextShotCount > shotCount) ensureScriptShotOutputs({ ...task, text: streamedText });
+            return result;
+          }).immediate();
+          shotCount = nextShotCount;
+          if (!changed.changes) { controller.abort(); break; }
+        }
+        if (!controller.signal.aborted) {
+          const text = this.get(task.id).text;
+          const boardError = input.outputMode === 'board' ? storyboardProblem(parseStoryboard(text), input.storyboard ?? defaultStoryboardLimits) : undefined;
+          const error = boardError ? `分镜需要调整：${boardError}。已保留内容，可在分镜列表修改。` : !text.trim() ? '模型未返回正文'
+            : input.outputMode === 'shots' && !hasScriptShotHeading(text) ? '模型未按逐镜头格式输出，原文已保留；请重新生成分镜。' : null;
+          this.finish(task.id, lease, error ? 'failed' : 'completed', error);
+        }
       }
     } catch (error) {
-      const message = timedOut ? `生成超过 180 秒，已停止；最后阶段：${scriptPhaseLabel[phase]}。已保存正文保留，未自动重试。`
-        : error instanceof ScriptPreflightError || error instanceof TextStreamError ? error.message
+      const storageBusy = error && typeof error === 'object' && 'code' in error && error.code === 'SQLITE_BUSY';
+      const message = storageBusy ? '本地存储暂忙，检查点已保留，请稍后继续。' : task.workflow && timedOut ? '本轮流程执行超过 10 分钟，检查点已保留，可继续未完成步骤。' : timedOut ? `生成超过 180 秒，已停止；最后阶段：${scriptPhaseLabel[phase]}。已保存正文保留，未自动重试。`
+        : error instanceof WorkflowError || error instanceof ScriptPreflightError || error instanceof TextStreamError ? error.message
         : '模型连接异常；已保存正文保留，未自动重试。';
       this.finish(task.id, lease, 'failed', message);
     } finally {
@@ -229,25 +272,3 @@ export class ScriptService {
   private row(id: string) { return this.db.prepare('SELECT * FROM script_tasks WHERE id=?').get(id) as Row | undefined; }
 }
 export const getScriptService = () => new ScriptService(getDatabase());
-
-/** A provider that ignores abort cannot retain an executor slot or deliver late deltas. */
-async function* abortableStream(source: AsyncIterable<string>, signal: AbortSignal) {
-  const iterator = source[Symbol.asyncIterator]();
-  let rejectAbort: (reason: unknown) => void = () => {};
-  const aborted = new Promise<never>((_, reject) => { rejectAbort = reject; });
-  const onAbort = () => rejectAbort(signal.reason);
-  signal.addEventListener('abort', onAbort, { once: true });
-  try {
-    signal.throwIfAborted();
-    while (true) {
-      const next = await Promise.race([iterator.next(), aborted]);
-      if (next.done) return;
-      signal.throwIfAborted();
-      yield next.value;
-    }
-  } finally {
-    signal.removeEventListener('abort', onAbort);
-    // Do not await a stuck adapter's return; the lease/status fence owns writes.
-    void iterator.return?.().catch(() => {});
-  }
-}
