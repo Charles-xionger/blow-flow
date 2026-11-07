@@ -6,7 +6,7 @@ import { validGenerationDimensions } from '../generation/dimensions';
 import { imageAspectRatios, imagePresetDimensions } from '../generation/image-dimensions';
 import { videoDimensions, videoRatios, videoResolutions } from '../generation/video';
 const strings = new Set(['label', 'customTitle', 'model', 'scriptInstruction', 'scriptPreset']);
-const fields = new Set([...strings, 'type', 'prompt', 'generationWidth', 'generationHeight', 'generationSizePreset', 'imageOptions', 'aspectRatio', 'videoResolution', 'videoAspectRatio', 'videoDuration', 'videoInstanceType', 'resolution', 'duration', 'count', 'promptOptimize']);
+const fields = new Set([...strings, 'type', 'prompt', 'storyboard', 'generationWidth', 'generationHeight', 'generationSizePreset', 'imageOptions', 'aspectRatio', 'videoResolution', 'videoAspectRatio', 'videoDuration', 'videoInstanceType', 'resolution', 'duration', 'count', 'promptOptimize']);
 export function validateCanvasParameters(previous: NodeData, patch: Partial<NodeData>, models: CanvasModel[]): Partial<NodeData> {
     if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new Error('Node data must be an object');
     for (const [key, value] of Object.entries(patch)) {
@@ -16,6 +16,10 @@ export function validateCanvasParameters(previous: NodeData, patch: Partial<Node
     if (patch.type !== undefined && !Object.values(NodeType).includes(patch.type)) throw new Error('Invalid node type');
     if (patch.prompt !== undefined && typeof patch.prompt !== 'string' && (!Array.isArray(patch.prompt) || !patch.prompt.every(segment => segment && Object.keys(segment).length === 1 && ('text' in segment ? typeof segment.text === 'string' : 'ref' in segment && typeof segment.ref === 'string')))) throw new Error('Invalid prompt');
     const data = { ...previous, ...patch };
+    if (patch.storyboard !== undefined) {
+        const limits = patch.storyboard;
+        if (data.type !== NodeType.SCRIPT || !limits || !Number.isInteger(limits.duration) || limits.duration < 5 || limits.duration > 600 || !Number.isInteger(limits.maxShots) || limits.maxShots < 1 || limits.maxShots > 40 || limits.duration > limits.maxShots * 15) throw new Error('Storyboard limits require a script node, 5–600 seconds, 1–40 shots and at most 15 seconds per shot');
+    }
     if (patch.scriptPreset !== undefined && !scriptPresets.some(preset => preset.id === patch.scriptPreset)) throw new Error('Invalid script preset');
     if ((patch.scriptPreset !== undefined || patch.scriptInstruction !== undefined) && data.type !== NodeType.SCRIPT) throw new Error('Script parameters require a script node');
     const parameterKeys = ['model', 'generationWidth', 'generationHeight', 'generationSizePreset', 'imageOptions', 'aspectRatio', 'videoResolution', 'videoAspectRatio', 'videoDuration', 'videoInstanceType', 'resolution', 'duration', 'count', 'promptOptimize'];

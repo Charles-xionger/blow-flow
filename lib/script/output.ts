@@ -21,6 +21,7 @@ export function createScriptOutput(task: ScriptTask): string {
   new CanvasAgentService().apply(task.canvasId,`script-output:${task.id}`, [
     {kind:'create',node:{id,type:NodeType.TEXT,position,
       ...(source.parentId ? {parentId:source.parentId} : {}),data:{type:NodeType.TEXT,label:'文本',customTitle:task.input.outputMode === 'shots' ? '镜头 001' : titles[task.input.preset] || '生成文本',prompt:[],
+        ...(task.input.outputMode === 'board' ? { storyboard: task.input.storyboard, customTitle: '分镜' } : {}),
         textPurpose:purposes[task.input.preset] || 'idea',scriptOutputTaskId:task.id,scriptOutputSource:source.id}}},
     {kind:'connect',edge:{id:`script-output-edge:${task.id}`,source:source.id,target:id}},
   ],'生成文本');

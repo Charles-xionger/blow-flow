@@ -4,6 +4,7 @@ import { createScriptOutput, finishScriptOutput, ensureScriptShotOutputs } from 
 import { TextStreamError } from '../ai-services/text/stream-types';
 import { scriptPhaseLabel, type ScriptPhase } from './types';
 import { migrateScriptSnapshot } from '../canvas/script-migration';
+import { defaultStoryboardLimits, parseStoryboard, storyboardProblem } from './storyboard';
 import { hasScriptShotHeading, splitScriptShots } from './shots';
 import { scriptPrompt } from './inputs';
 import { prepareScriptImages, ScriptPreflightError } from './preflight';
@@ -91,7 +92,10 @@ export class ScriptService {
     if (!value.requirements.trim() && !references.length) throw new ScriptError('请填写创作要求或连接参考文本、图片');
     const image = references.find(ref => ref.type === 'image');
     if (image && !model.vision) throw new ScriptError(`参考「${image.label}」是图片；模型 ${model.name} 不支持图片，请选择视觉模型`);
-    return { ...(value.preset === 'storyboard' && value.outputMode === 'shots' ? { outputMode: 'shots' as const } : {}), model: model.id, requirements: value.requirements, instruction: typeof value.instruction === 'string' ? value.instruction.slice(0,100_000) : '', preset: typeof value.preset === 'string' ? value.preset.slice(0,100) : 'free', references };
+    const board = value.preset === 'storyboard' && value.outputMode === 'board';
+    const limits = value.storyboard ?? defaultStoryboardLimits;
+    if (board && (!Number.isInteger(limits.duration) || limits.duration < 5 || limits.duration > 600 || !Number.isInteger(limits.maxShots) || limits.maxShots < 1 || limits.maxShots > 40 || limits.duration > limits.maxShots * 15)) throw new ScriptError('请设置 5–600 秒总时长、1–40 个镜头，且镜头数量足以满足每镜最多 15 秒');
+    return { ...(board ? { outputMode: 'board' as const, storyboard: { duration: limits.duration, maxShots: limits.maxShots } } : {}), ...(value.preset === 'storyboard' && value.outputMode === 'shots' ? { outputMode: 'shots' as const } : {}), model: model.id, requirements: value.requirements, instruction: typeof value.instruction === 'string' ? value.instruction.slice(0,100_000) : '', preset: typeof value.preset === 'string' ? value.preset.slice(0,100) : 'free', references };
   }
   nodeExists(canvasId: string, nodeId: string) {
     const row = this.db.prepare('SELECT data FROM workflows WHERE id=? AND deleted_at IS NULL').get(canvasId) as { data: string } | undefined;
@@ -197,7 +201,8 @@ export class ScriptService {
       }
       if (!controller.signal.aborted) {
         const text = this.get(task.id).text;
-        const error = !text.trim() ? '模型未返回正文'
+        const boardError = input.outputMode === 'board' ? storyboardProblem(parseStoryboard(text), input.storyboard ?? defaultStoryboardLimits) : undefined;
+        const error = boardError ? `分镜需要调整：${boardError}。已保留内容，可在分镜列表修改。` : !text.trim() ? '模型未返回正文'
           : input.outputMode === 'shots' && !hasScriptShotHeading(text) ? '模型未按逐镜头格式输出，原文已保留；请重新生成分镜。' : null;
         this.finish(task.id, lease, error ? 'failed' : 'completed', error);
       }

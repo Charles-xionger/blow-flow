@@ -3,7 +3,8 @@ export type ScriptPhase = 'preparing' | TextStreamPhase;
 export const scriptPhaseLabel: Record<ScriptPhase, string> = { preparing: '校验参考输入', connecting: '连接模型中', waiting: '模型已连接，等待输出', thinking: '模型思考中，等待正文', writing: '正文输出中' };
 export type ScriptStatus = 'queued' | 'running' | 'stopping' | 'stopped' | 'completed' | 'failed' | 'interrupted';
 export interface ScriptInput {
-  outputMode?: 'shots';
+  outputMode?: 'shots' | 'board';
+  storyboard?: import('./storyboard').StoryboardLimits;
   model: string;
   requirements: string;
   instruction: string;

@@ -31,6 +31,12 @@ export function ScriptInputs({ id, data, expanded, task }: { id: string; data: N
         <span className="mt-1 block text-[11px] leading-5 text-zinc-500">{item.description}</span>
       </button>)}
     </div>
+    {preset.id === 'storyboard' && <div className="mb-3 rounded-xl border border-white/10 bg-black/10 p-3">
+      <div className="flex gap-3 text-xs text-zinc-400">
+        <label className="flex-1">总时长（秒）<input aria-label="分镜总时长" type="number" min={5} max={600} value={data.storyboard?.duration ?? 60} onChange={e => update(id, { storyboard: { duration: Number(e.target.value), maxShots: data.storyboard?.maxShots ?? 5 } })} className="mt-2 w-full rounded-lg bg-white/5 p-2 text-zinc-200" /></label>
+        <label className="flex-1">最多镜头数<input aria-label="最多镜头数" type="number" min={1} max={40} value={data.storyboard?.maxShots ?? 5} onChange={e => update(id, { storyboard: { duration: data.storyboard?.duration ?? 60, maxShots: Number(e.target.value) } })} className="mt-2 w-full rounded-lg bg-white/5 p-2 text-zinc-200" /></label>
+      </div><p className="mt-2 text-[11px] text-zinc-500">每镜不超过 15 秒，连续动作合并描述。所有镜头集中在一个分镜节点。</p>
+    </div>}
     <button type="button" aria-expanded={instructions} onClick={() => setInstructions(!instructions)} className="mb-3 text-xs text-zinc-400 hover:text-zinc-200">{instructions ? '收起指令' : '查看／调整指令'}{data.scriptInstruction && data.scriptInstruction !== preset.instruction ? ' · 已自定义' : ''}</button>
     {instructions && <label className="mb-3 block text-xs text-zinc-400">本节点任务指令（切换任务将使用新预设指令）
       <textarea aria-label="任务指令" value={data.scriptInstruction ?? preset.instruction} onChange={e => update(id, { scriptInstruction: e.target.value })} className="mt-1 max-h-64 min-h-24 w-full resize-y rounded-xl bg-black/20 p-3 text-sm leading-6 text-zinc-200 outline-none" />

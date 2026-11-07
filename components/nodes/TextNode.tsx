@@ -17,6 +17,7 @@ import { NodeShell } from "./NodeShell";
 import { NodeConsole } from "./shared/NodeConsole";
 import { PromptEditor } from "./shared/PromptEditor";
 
+const StoryboardNode = dynamic(() => import('./StoryboardNode').then(module => module.StoryboardNode), { ssr: false });
 const Particles = dynamic(() => import('./shared/ScriptParticles'), { ssr:false });
 
 const TextNode = (props: NodeProps<Node<NodeData>>) => {
@@ -32,6 +33,8 @@ const TextNode = (props: NodeProps<Node<NodeData>>) => {
 
   const displayed = generating || (task && !task.outputSaved) ? (task ? scriptOutputText(task, id) : '') : content;
   const status = task && (task.status === 'running' && task.phase ? scriptPhaseLabel[task.phase] : scriptStatusLabel[task.status]);
+
+  if (data.storyboard) return <StoryboardNode {...props} text={displayed} task={task} />;
 
   return (
     <NodeShell {...props}
