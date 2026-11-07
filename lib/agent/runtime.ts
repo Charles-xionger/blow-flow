@@ -19,7 +19,7 @@ export function createPiRuntime(service: AgentService, options: {
         const config = agentModels().find(m => m.id === context.task.modelId);
         if (!config || !(options.apiKey || process.env[config.apiKeyEnv]))
             throw new Error('Agent model unavailable');
-        const { model, onPayload } = resolveAgentModel(config);
+        const { model, onPayload } = await resolveAgentModel(config);
         const mcp = await connectAgentMcp(service, context.task.id);
         const definitions = await mcp.client.listTools();
         const tools: AgentTool[] = definitions.tools.map(tool => ({ name: tool.name, label: tool.name, description: tool.description ?? '', parameters: Type.Unsafe(tool.inputSchema), execute: async (id, args) => {

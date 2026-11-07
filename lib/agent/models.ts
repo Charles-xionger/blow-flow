@@ -1,4 +1,4 @@
-import { getModels, type Api, type Model } from '@mariozechner/pi-ai';
+import type { Api, Model } from '@mariozechner/pi-ai';
 import { arkAgentModel, arkResponsesPayload } from '../ai-services/text/ark';
 import { arkTextModel } from '../ai-services/text/ark-models';
 import type { AgentModelConfig } from './config';
@@ -9,13 +9,15 @@ interface AgentModelBinding {
 }
 
 /** Resolve administrator config to the common Pi model/transport interface. */
-export function resolveAgentModel(config: AgentModelConfig): AgentModelBinding {
+export async function resolveAgentModel(config: AgentModelConfig): Promise<AgentModelBinding> {
   if (config.provider === 'ark' || arkTextModel(config.modelId)) {
     return {
       model: arkAgentModel(config.modelId, config.baseUrl),
       onPayload: payload => arkResponsesPayload(payload, config.webSearch ?? arkTextModel(config.modelId)?.webSearch ?? false),
     };
   }
+  // Pi exposes ESM imports only; keep this compatible with the tsx worker's CJS entry.
+  const { getModels } = await import('@mariozechner/pi-ai');
   const model = getModels('google').find(model => model.id === config.modelId);
   if (!model) throw new Error('Unknown Agent model');
   return { model: { ...model, ...(config.baseUrl ? { baseUrl: config.baseUrl } : {}) } };
