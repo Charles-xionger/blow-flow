@@ -16,20 +16,21 @@ async function mocks(page: Page) {
     return route.fulfill({ path: fixture(ext), contentType: { png: 'image/png', mp4: 'video/mp4', wav: 'audio/wav' }[ext] });
   });
 }
-async function open(page: Page, request: APIRequestContext, connected = false, data: Record<string, unknown> = {}) {
+async function open(page: Page, request: APIRequestContext, connected = false, data: Record<string, unknown> = {}, nodeType = 'imageToVideo', textInput = false) {
   await mocks(page);
   await page.setViewportSize({ width: 1280, height: 1100 });
   await page.addInitScript(() => localStorage.setItem('canvas-theme', 'dark'));
   const id = crypto.randomUUID();
   const response = await request.put(`/api/workflow/${id}`, { data: { id, requestId: crypto.randomUUID(), baseVersion: 0,
     snapshot: { name: 'H3 集成验收', nodes: [
-      { id: 'h3', type: 'imageToVideo', position: { x: 420, y: 60 }, data: { label: 'H3', type: 'imageToVideo', model: 'runninghub-h3',
+      { id: 'h3', type: nodeType, position: { x: 420, y: 60 }, data: { label: 'H3', type: nodeType, model: 'runninghub-h3',
         usesGenerationTasks: true, prompt: '人物走过田野', ...data } },
+      ...(textInput ? [{ id: 'story', type: 'text', position: { x: -200, y: 60 }, data: { type: 'text', label: '故事', prompt: '清晨，人物走过田野' } }] : []),
       ...(connected ? [
         { id: 'source-image', type: 'originalImage', position: { x: -100, y: 40 }, data: { type: 'originalImage', label: '角色图', imageSrc: assets + '/linked.png' } },
         { id: 'source-video', type: 'textToVideo', position: { x: -100, y: 420 }, data: { type: 'textToVideo', label: '动作视频', videoSrc: assets + '/linked.mp4' } },
       ] : [])
-    ], edges: connected ? ['image', 'video'].map(kind => ({ id: 'link-' + kind, source: 'source-' + kind, target: 'h3', sourceHandle: 'output', targetHandle: 'input' })) : [],
+    ], edges: connected ? ['image', 'video'].map(kind => ({ id: 'link-' + kind, source: 'source-' + kind, target: 'h3', sourceHandle: 'output', targetHandle: 'input' })) : textInput ? [{ id: 'text-link', source: 'story', target: 'h3', sourceHandle: 'output', targetHandle: 'input' }] : [],
     viewport: { x: 0, y: 0, zoom: 1 } } } });
   expect(response.ok()).toBeTruthy();
   await page.goto(`/?project=${id}`);
@@ -93,7 +94,7 @@ test('H3 combines canvas references and uploads, persists ordering and submits t
   await expect(page.locator('.react-flow__edge[data-id="link-video"]')).toHaveCount(0);
 });
 
-test('H3 restores a saved MP4 after refresh without submitting generation again', async ({ page, request }, testInfo) => {
+for (const nodeType of ['imageToVideo', 'textToVideo']) test(`${nodeType}: H3 restores a saved MP4 after refresh without submitting generation again`, async ({ page, request }, testInfo) => {
   let result: GenerationTask | undefined; let submits = 0;
   await page.route('**/api/generation/tasks', async route => {
     submits++;
@@ -104,7 +105,7 @@ test('H3 restores a saved MP4 after refresh without submitting generation again'
   });
   await page.route('**/api/generation/tasks/h3-task', route => route.fulfill({ json: result }));
   await page.route('**/api/generation/events', route => route.fulfill({ contentType: 'text/event-stream', body: `event: snapshot\ndata: ${JSON.stringify(result ? [result] : [])}\n\n` }));
-  const { read } = await open(page, request);
+  const { read } = await open(page, request, false, {}, nodeType);
   await page.getByRole('button', { name: '生成', exact: true }).click();
   await expect(page.getByTestId('video-preview').locator('video')).toHaveAttribute('src', assets + '/saved.mp4');
   await expect.poll(async () => (await read()).videoSrc).toBe(assets + '/saved.mp4');
@@ -180,4 +181,33 @@ test('H3 reference to a connected node with no material shows and sends its name
   });
   await page.getByRole('button', { name: '生成', exact: true }).click();
   await expect.poll(() => submitted?.input.prompt).toBe('让空图');
+});
+
+
+test('text-to-video selects H3, keeps text references and submits without reference media', async ({ page, request }) => {
+  const { read } = await open(page, request, false, { model: 'Sora 2', usesGenerationTasks: false, prompt: [{ text: '拍摄：' }, { ref: 'story' }] }, 'textToVideo', true);
+  const select = page.getByRole('combobox', { name: '视频模型' });
+  await select.selectOption('runninghub-h3');
+  await expect(page.getByRole('combobox', { name: '视频分辨率' })).toBeVisible();
+  await select.selectOption('Sora 2');
+  await expect(page.getByRole('combobox', { name: '视频时长' })).toBeVisible();
+  await select.selectOption('runninghub-h3');
+  await page.getByRole('combobox', { name: '视频分辨率' }).selectOption('480p');
+  await page.getByRole('combobox', { name: '视频画幅' }).selectOption('9:16');
+  await page.getByRole('combobox', { name: '视频目标时长' }).selectOption('10');
+  await expect.poll(async () => (await read()).model).toBe('runninghub-h3');
+  let submitted: CreateGeneration | undefined;
+  let legacyRequests = 0;
+  await page.route('**/api/generate/video', route => { legacyRequests++; return route.fulfill({ status: 400, json: { error: 'wrong endpoint' } }); });
+  await page.route('**/api/generation/tasks', route => {
+    submitted = route.request().postDataJSON();
+    return route.fulfill({ status: 400, json: { error: '测试捕获参数，未提交平台' } });
+  });
+  await page.getByRole('button', { name: '生成', exact: true }).click();
+  await expect.poll(() => submitted?.input.prompt).toBe('拍摄：清晨，人物走过田野');
+  expect(submitted?.modelId).toBe('runninghub-h3');
+  expect(submitted?.input.references).toEqual([]);
+  expect(submitted?.input.duration).toBe(10);
+  expect(submitted?.input.width).toBeLessThan(submitted!.input.height);
+  expect(legacyRequests).toBe(0);
 });

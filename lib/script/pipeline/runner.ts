@@ -39,6 +39,10 @@ export async function runStoryboardWorkflow(execution: Execution) {
     };
     try {
       for await (const delta of abortableStream(execution.stream({ model: input.model, prompt,
+        // Each step has a bounded JSON contract; provider-default deep thinking can
+        // exhaust the first-body deadline before producing any usable output.
+        thinking: 'disabled',
+        outputFormat: 'json',
         images: key === 'plan' || key === 'assets' ? execution.images : [], signal: combined,
         onPhase: next => {
           if (combined.aborted) return;

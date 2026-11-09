@@ -61,7 +61,7 @@ export function assemblePrompts(workflow: StoryboardWorkflow): Record<string, st
     const detail = workflow.details[shot.id];
     if (!detail) throw new WorkflowError('镜头尚未全部完成，不能组装提示词');
     const assets = workflow.assets?.filter(asset => asset.kind === 'characters' ? shot.characters.includes(asset.name) : asset.kind === 'scene' ? shot.scene === asset.name : shot.props.includes(asset.name)) ?? [];
-    return [shot.id, [`时长：${shot.duration} 秒。`, ...assets.map(asset => `${asset.name}：${asset.description}`),
+    return [shot.id, [`时长：${shot.duration} 秒。`, `故事与全局视觉风格：${workflow.plan!.summary}`, ...assets.map(asset => `${asset.name}：${asset.description}`),
       `画面：${detail.visual}`, `景别：${detail.size}`, `光影：${detail.lighting}`, `运镜：${detail.camera}`, `对白旁白：${detail.dialogue}`, `音效：${detail.sound}`].join('\n')];
   }));
 }

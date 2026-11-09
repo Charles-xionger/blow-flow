@@ -4,13 +4,16 @@ import { X, ZoomIn, ZoomOut } from "lucide-react";
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 
-export function ImagePreview({ src, alt = "图片", onClose }: {
-  src: string;
-  alt?: string;
-  onClose: () => void;
-}) {
+type ImagePreviewProps = { src: string; alt?: string; onClose: () => void };
+
+export function ImagePreview(props: ImagePreviewProps) {
+  return <ImagePreviewContent key={props.src} {...props} />;
+}
+
+function ImagePreviewContent({ src, alt = "图片", onClose }: ImagePreviewProps) {
   const [scale, setScale] = useState(1);
   const [failed, setFailed] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -37,11 +40,13 @@ export function ImagePreview({ src, alt = "图片", onClose }: {
   return createPortal(
     <div
       className="fixed inset-0 z-10000 flex items-center justify-center bg-black/90 backdrop-blur-sm"
-      onClick={() => onClose()}
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => { event.stopPropagation(); if (event.target === event.currentTarget) onClose(); }}
     >
       {/* 关闭按钮 */}
       <button
-        onClick={() => onClose()}
+        aria-label="关闭图片预览"
+        onClick={(event) => { event.stopPropagation(); onClose(); }}
         className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors z-10"
       >
         <X size={24} />
@@ -73,13 +78,15 @@ export function ImagePreview({ src, alt = "图片", onClose }: {
         onClick={(e) => e.stopPropagation()}
       >
         {/* Full viewing deliberately loads the original material. */}
+        {!loaded && !failed && <p role="status" className="p-6 text-sm text-white">正在加载原图…</p>}
         {failed && <p role="alert" className="p-6 text-sm text-white">原始素材已丢失或无法访问，节点的其他内容仍已保留。</p>}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
+          onLoad={() => setLoaded(true)}
           onError={() => setFailed(true)}
           src={src}
           alt={alt}
-          className="w-full h-full object-contain transition-transform duration-200"
+          className="block max-w-[90vw] max-h-[90vh] w-auto h-auto object-contain transition-transform duration-200"
           style={{ transform: `scale(${scale})` }}
         />
       </div>

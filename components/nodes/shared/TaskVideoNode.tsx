@@ -5,6 +5,7 @@ import { CanvasPreview } from "@/components/ui/canvas-preview";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   appendPromptText,
+  expandPrompt,
   promptIsEmpty,
   promptSegments,
   promptWithLabels,
@@ -17,6 +18,7 @@ import { canvasExperimentDisabled } from "@/lib/canvas/performance-experiment";
 import { Upload, ArrowUp, ArrowDown, X, Zap } from "lucide-react";
 import { NodeShell } from "../NodeShell";
 import { useCanvasStore } from "@/store/useCanvasStore";
+import { useUpstreamNodes } from "@/hooks/useUpstreamNodes";
 import type { NodeData } from "@/types";
 import type { PublicModel } from "@/lib/generation/types";
 import { validGenerationDimensions } from "@/lib/generation/dimensions";
@@ -58,6 +60,7 @@ export function TaskVideoNode({ node, model, models, task }: Props) {
   const update = useCanvasStore((s) => s.updateNodeData);
   const selectSources = useMemo(() => createVideoSourcesSelector(id, { includeGeometry: canvasExperimentDisabled('subscriptions') }), [id]);
   const sources = useCanvasStore(selectSources);
+  const textSources = useUpstreamNodes(id).filter(source => source.kind === 'text');
   const [uploading, setUploading] = useState(false);
   const uploadingRef = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -103,12 +106,17 @@ export function TaskVideoNode({ node, model, models, task }: Props) {
   );
   // A connected node with no material yet is not numbered, so a reference to it reads as its name.
   for (const source of sources)
-    if (!tags.has(source.id)) {
+    if (!tags.has(source.id) && !textSources.some(text => text.id === source.id)) {
       const name = source.name;
       tags.set(source.id, name);
       upstream.push({ id: source.id, kind: "image", label: name, name });
     }
-  const prompt = promptWithLabels(data.prompt, tags);
+  upstream.push(...textSources);
+  const prompt = useCanvasStore(state => {
+    const labels = new Map(tags);
+    for (const source of textSources) labels.set(source.id, expandPrompt(source.id, state));
+    return promptWithLabels(data.prompt, labels);
+  });
   const segments = promptSegments(data.prompt);
   const resolution = data.videoResolution || "720p";
   const ratio = data.videoAspectRatio || "16:9";

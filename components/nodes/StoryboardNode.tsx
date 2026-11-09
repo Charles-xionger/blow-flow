@@ -11,6 +11,7 @@ import { stopScriptTask } from '@/lib/script/client';
 import { scriptActive, scriptPhaseLabel, scriptStatusLabel, type ScriptTask } from '@/lib/script/types';
 import { defaultStoryboardLimits, parseStoryboard, serializeStoryboard, shotFields, shotSeconds, storyboardProblem, type StoryboardShot } from '@/lib/script/storyboard';
 import { workflowProgress, workflowStage } from '@/lib/script/pipeline/types';
+import { characterReferencePrompt, type CharacterReferenceView } from '@/lib/script/reference-art';
 import { NodeShell, NodeToolbarButton } from './NodeShell';
 
 const Particles = dynamic(() => import('./shared/ScriptParticles'), { ssr: false });
@@ -22,6 +23,7 @@ export function StoryboardNode({ text, task, nodeConsole, extraToolbar, onChange
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState(0);
   const [error, setError] = useState('');
+  const [referenceViews, setReferenceViews] = useState<Record<string, CharacterReferenceView>>({});
   const [now, setNow] = useState(0);
   const update = useCanvasStore(state => state.updateNodeData);
   const nodes = useCanvasStore(state => state.nodes);
@@ -62,8 +64,9 @@ export function StoryboardNode({ text, task, nodeConsole, extraToolbar, onChange
     const occupied = state.nodes.filter(node => !node.parentId && Math.abs(node.position.x - x) < 360);
     const y = Math.max(props.positionAbsoluteY, ...occupied.map(node => node.position.y + (node.data.displaySize?.height || 240) + 60));
     const nodeId = state.addNode(NodeType.TEXT_TO_IMAGE, { x, y });
-    state.updateNodeData(nodeId, { customTitle: asset.name, storyboardAsset: { boardId: id, key: asset.key },
-      prompt: [{ text: `为短片制作${asset.kind === 'characters' ? '角色设定图' : asset.kind === 'scene' ? '场景设定图' : '道具设定图'}：${asset.name}。保持与以下分镜的视觉设定一致：\n${asset.context}` }] });
+    state.updateNodeData(nodeId, { ...(asset.kind === 'characters' ? { aspectRatio: (referenceViews[asset.key] ?? 'headshot') === 'headshot' ? '3:4' : '16:9', resolution: '2k' as const } : {}), customTitle: asset.name, storyboardAsset: { boardId: id, key: asset.key },
+      prompt: [{ text: asset.kind === 'characters' ? characterReferencePrompt(asset.name, asset.context, referenceViews[asset.key] ?? 'headshot')
+        : `为短片制作${asset.kind === 'scene' ? '场景设定图' : '道具设定图'}：${asset.name}。保持与以下分镜的视觉设定一致：\n${asset.context}` }] });
     focus(nodeId);
   };
   return <>
@@ -114,7 +117,7 @@ export function StoryboardNode({ text, task, nodeConsole, extraToolbar, onChange
           : <div className="space-y-8">{(['characters', 'scene', 'props'] as const).map(kind => <section key={kind}><h3 className="mb-3 text-sm">{kind === 'characters' ? '角色' : kind === 'scene' ? '场景' : '道具'}</h3>
             <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">{assets.filter(asset => asset.kind === kind).map(asset => { const node = linked(asset.key); return <div key={asset.key} className="rounded-xl border border-white/10 p-3">
               <div className="mb-3 flex aspect-video items-center justify-center overflow-hidden rounded-lg bg-white/[0.03]">{node?.data.imageSrc ? <CanvasPreview src={node.data.imageSrc} alt={asset.name} className="h-full w-full object-contain" /> : <Film size={24} className="text-zinc-600" />}</div>
-              <h4 className="text-sm">{asset.name}</h4><p className="my-2 line-clamp-2 text-xs leading-5 text-zinc-500">{asset.context}</p><button disabled={locked} className={button} onClick={() => createAsset(asset)}>{node ? '打开图片节点' : '创建图片节点'}</button>
+              <h4 className="text-sm">{asset.name}</h4><p className="my-2 line-clamp-2 text-xs leading-5 text-zinc-500">{asset.context}</p>{kind === 'characters' && !node && <label className="mb-3 block text-xs text-zinc-400">人像模板<select aria-label={`${asset.name}人像模板`} disabled={locked} value={referenceViews[asset.key] ?? 'headshot'} onChange={event => setReferenceViews(current => ({ ...current, [asset.key]: event.target.value as CharacterReferenceView }))} className="mt-1 block w-full rounded bg-[#242424] p-2"><option value="headshot">真人大头照（建议 3:4 / 1:1）</option><option value="turnaround">真人三视图（建议 16:9 / 3:2）</option></select><span className="mt-1 block text-[11px]">同一角色固定人物描述；后续生成可挂参考图。</span></label>}<button disabled={locked} className={button} onClick={() => createAsset(asset)}>{node ? '打开图片节点' : '创建图片节点'}</button>
             </div>; })}</div>{!assets.some(asset => asset.kind === kind) && <p className="text-xs text-zinc-500">暂无{kind === 'characters' ? '角色' : kind === 'scene' ? '场景' : '道具'}信息</p>}
           </section>)}</div>}
         </div>

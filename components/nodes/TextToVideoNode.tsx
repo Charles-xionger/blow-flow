@@ -7,6 +7,9 @@ import type { Node, NodeProps } from "@xyflow/react";
 import { useUpstreamNodes } from "@/hooks/useUpstreamNodes";
 import { expandPrompt, promptIsEmpty, promptSegments } from "@/lib/canvas/prompt";
 import { getVideoModels } from "@/lib/model-registry";
+import { generationModels } from "@/lib/generation/client";
+import type { PublicModel } from "@/lib/generation/types";
+import { useGenerationTask } from "@/hooks/useGenerationTask";
 import { useCanvasStore } from "@/store/useCanvasStore";
 import type { NodeData } from "@/types";
 import { NodeShell } from "./NodeShell";
@@ -16,6 +19,7 @@ import { NodeConsole } from "./shared/NodeConsole";
 import { PromptEditor } from "./shared/PromptEditor";
 import { VideoStage } from "./shared/VideoStage";
 import { VideoToolbarActions } from "./shared/VideoToolbarActions";
+import { TaskVideoNode } from "./shared/TaskVideoNode";
 
 const durations = [
   { value: "5s", label: "5秒" },
@@ -34,6 +38,9 @@ const TextToVideoNode = (props: NodeProps<Node<NodeData>>) => {
   const { id, data } = props;
   const updateNodeData = useCanvasStore((state) => state.updateNodeData);
   const [videoModels, setVideoModels] = useState<Array<{ value: string; label: string }>>([]);
+  const [taskModels, setTaskModels] = useState<PublicModel[]>([]);
+  const task = useGenerationTask(id, data);
+  const taskModel = taskModels.find(model => model.id === data.model);
 
   const upstream = useUpstreamNodes(id);
   // Only the open console shows this, so closed nodes skip the expansion on every store change.
@@ -43,6 +50,9 @@ const TextToVideoNode = (props: NodeProps<Node<NodeData>>) => {
   // 加载视频模型列表
   useEffect(() => {
     setVideoModels(getVideoModels());
+    let active = true;
+    generationModels().then(models => { if (active) setTaskModels(models.filter(model => model.category === 'VIDEO')); }).catch(() => {});
+    return () => { active = false; };
   }, []);
 
   const handleGenerate = useCallback(async () => {
@@ -81,6 +91,14 @@ const TextToVideoNode = (props: NodeProps<Node<NodeData>>) => {
     }
   }, [id, data.model, data.aspectRatio, data.duration, data.promptOptimize]);
 
+  const modelOptions = [
+    ...taskModels.map(model => ({ id: model.id, label: model.name + (model.configured ? '' : '（未配置）'), task: true })),
+    ...videoModels.map(model => ({ id: model.value, label: model.label })),
+  ];
+  if (data.model && !modelOptions.some(model => model.id === data.model)) modelOptions.push({ id: data.model, label: data.model });
+  if (taskModel || data.usesGenerationTasks || data.model === 'runninghub-h3')
+    return <TaskVideoNode node={props} model={taskModel} models={modelOptions} task={task} />;
+
   return (
     <NodeShell {...props} stageTestId="video-preview"
       toolbar={<VideoToolbarActions src={data.isLoading ? undefined : data.videoSrc} />}
@@ -93,8 +111,8 @@ const TextToVideoNode = (props: NodeProps<Node<NodeData>>) => {
           }
           config={<>
             <select aria-label="视频模型" value={data.model || videoModels[0]?.value || ""}
-              onChange={event => updateNodeData(id, { model: event.target.value })} className={consoleSelectClass}>
-              {videoModels.map(model => <option key={model.value} value={model.value}>{model.label}</option>)}
+              onChange={event => updateNodeData(id, { model: event.target.value, usesGenerationTasks: taskModels.some(model => model.id === event.target.value) })} className={consoleSelectClass}>
+              {modelOptions.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
             </select>
             <select aria-label="视频时长" value={data.duration || "5s"}
               onChange={event => updateNodeData(id, { duration: event.target.value })} className={narrowConsoleSelectClass}>

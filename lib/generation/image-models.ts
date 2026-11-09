@@ -11,7 +11,8 @@ export function supportsImageNodeModel(model: PublicModel, nodeType: string): bo
 export function imageModelSelection(id: string, models: PublicModel[], previousRatio?: string): Partial<NodeData> {
   const model = models.find(model => model.id === id);
   const dimensions = model?.capabilities.dimensions;
-  const preset = model?.capabilities.image?.presets?.find(p => p.width === dimensions?.defaultWidth && p.height === dimensions?.defaultHeight);
-  return { model: id, usesGenerationTasks: !!model, generationWidth: dimensions?.defaultWidth, generationHeight: dimensions?.defaultHeight,
+  const defaultPreset = model?.capabilities.image?.presets?.find(p => p.width === dimensions?.defaultWidth && p.height === dimensions?.defaultHeight);
+  const preset = model?.capabilities.image?.presets?.find(p => p.ratio === previousRatio && p.size === defaultPreset?.size) ?? defaultPreset;
+  return { model: id, usesGenerationTasks: !!model, generationWidth: preset?.width ?? dimensions?.defaultWidth, generationHeight: preset?.height ?? dimensions?.defaultHeight,
     generationSizePreset: preset?.size.toLowerCase() as NodeData['generationSizePreset'], aspectRatio: preset?.ratio ?? previousRatio };
 }

@@ -23,3 +23,15 @@ test('custom dimensions align on commit, restore empty input and do not reinterp
   assert.equal(imageSizeSelection(1024, 1024, limits, 'custom').preset, 'custom');
   assert.equal(imageSizeSelection(1000, 1080, limits).label, '25:27');
 });
+
+test('switching a portrait node to Seedream preserves its composition in actual pixels', () => {
+  const { imageModelSelection } = require('../lib/generation/image-models.ts');
+  const { seedreamImageCapabilities } = require('../lib/generation/image-options.ts');
+  const model = { id: 'seedream', category: 'IMAGE', capabilities: { dimensions: { ...limits, defaultWidth: 2048, defaultHeight: 2048 }, image: seedreamImageCapabilities } };
+  for (const [ratio, width, height] of [['3:4', 1776, 2368], ['16:9', 2816, 1584]]) {
+    const result = imageModelSelection(model.id, [model], ratio);
+    assert.equal(result.aspectRatio, ratio);
+    assert.equal(result.generationWidth, width);
+    assert.equal(result.generationHeight, height);
+  }
+});

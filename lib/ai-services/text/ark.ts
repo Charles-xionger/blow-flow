@@ -71,7 +71,7 @@ export async function generateArkText(id: string, prompt: string, options: {
 
 /** Responses SSE adapter. Never treats a truncated transport as successful completion. */
 export async function* streamArkText(id: string, prompt: string, options: {
-  apiKey: string; baseUrl?: string; images?: string[]; webSearch?: boolean; signal?: AbortSignal; onPhase?: (phase: TextStreamPhase) => void;
+  apiKey: string; baseUrl?: string; images?: string[]; webSearch?: boolean; thinking?: 'disabled'; outputFormat?: 'json'; signal?: AbortSignal; onPhase?: (phase: TextStreamPhase) => void;
 }): AsyncGenerator<string> {
   const model = arkTextModel(id);
   if (!model) throw new Error('未知的 Ark 语言模型');
@@ -81,6 +81,8 @@ export async function* streamArkText(id: string, prompt: string, options: {
     method: 'POST', redirect: 'error', signal: options.signal,
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${options.apiKey}` },
     body: JSON.stringify({ model: model.id, stream: true,
+      ...(options.thinking ? { thinking: { type: options.thinking } } : {}),
+      ...(options.outputFormat === 'json' ? { text: { format: { type: 'json_object' } } } : {}),
       ...(options.webSearch ? { tools: [{ type: 'web_search', max_keyword: 3 }] } : {}),
       input: [{ role: 'user', content: [...(options.images ?? []).map(image_url => ({ type: 'input_image', image_url })), { type: 'input_text', text: prompt }] }] }),
   });

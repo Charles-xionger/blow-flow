@@ -11,6 +11,9 @@ export interface TextGenerationInput {
   prompt: string;
   images?: string[];
   webSearch?: boolean;
+  /** Fixed, bounded workflow steps can request a direct answer. */
+  thinking?: 'disabled';
+  outputFormat?: 'json';
   signal?: AbortSignal;
   onPhase?: (phase: TextStreamPhase) => void;
 }

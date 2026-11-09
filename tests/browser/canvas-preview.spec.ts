@@ -79,3 +79,30 @@ test('replacing an original never presents its previous preview while the replac
   release();
   await expect.poll(() => node.getByAltText('Uploaded image').evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(40);
 });
+
+test('first preview click on a generated image stays open while the uncached original loads', async ({ page, request }) => {
+  const id = crypto.randomUUID();
+  const src = 'https://preview-fixture.test/cold-generated.png';
+  const bytes = await sharp({ create: { width: 2048, height: 2048, channels: 3, background: 'tan' } }).png().toBuffer();
+  let release: () => void = () => {};
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  await page.route(src, async route => { await pending; await route.fulfill({ contentType: 'image/png', body: bytes }); });
+  await page.route('**/api/canvas-preview?**', route => route.fulfill({ contentType: 'image/png', body: bytes }));
+  await request.put(`/api/workflow/${id}`, { data: { id, requestId: crypto.randomUUID(), baseVersion: 0, snapshot: {
+    name: 'cold generated preview', nodes: [{ id: 'generated', type: 'textToImage', position: { x: 400, y: 180 }, data: { type: 'textToImage', label: '图片', model: 'BananaPro', imageSrc: src } }], edges: [], viewport: { x: 0, y: 0, zoom: 1 },
+  } } });
+  await page.goto(`/canvas?project=${id}`);
+  await page.locator('.react-flow__node[data-id="generated"]').click();
+  await page.getByRole('button', { name: '预览', exact: true }).click();
+  try {
+    await expect(page.getByRole('status').filter({ hasText: '正在加载原图' })).toBeVisible();
+  } finally { release(); }
+  const full = page.locator('body > div.fixed img');
+  await expect.poll(() => full.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(2048);
+  await expect(full).toBeVisible();
+  const bounds = (await full.boundingBox())!;
+  expect(bounds.width).toBeGreaterThan(100);
+  expect(bounds.height).toBeGreaterThan(100);
+  await page.keyboard.press('Escape');
+  await expect(full).toHaveCount(0);
+});
