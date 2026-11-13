@@ -24,7 +24,7 @@ checks run; use that time for read-only work.
 | Documentation or skill wording only | Validate changed references and skill metadata; no application test run |
 | Application or test-tooling code | Typecheck, lint affected code, and the full fast suite (`pnpm test`) |
 | Localized browser behavior | Above checks plus the affected browser cases/files |
-| Shared canvas state, persistence/save protocol, migrations, common node UI, routing, browser fixtures/server/data isolation, or uncertain browser impact | Above checks plus the full browser suite (`pnpm test:browser`) |
+| Shared canvas state, persistence/save protocol, migrations, common node UI, routing, browser fixtures/server/data isolation, or uncertain browser impact | Above checks plus the full browser suite (`pnpm test:browser:full`) |
 
 Changes confined to test reporting or selection tooling need real-runner checks
 for both passing and failing outcomes plus a representative browser run. Escalate
@@ -33,6 +33,12 @@ to the full browser suite if startup, fixtures or isolation behavior also change
 A full fast run and a full browser run are distinct checks. A passing full fast
 suite does not imply browser coverage. Full browser regression belongs at the
 final boundary, not inside every red-green cycle.
+
+`pnpm test:browser` is the representative local suite (36 browser cases).
+Use `pnpm --filter @blow-flow/web exec playwright test <spec-file>` or `--grep`
+for a narrower behavior change. `pnpm test:browser:full` runs all browser cases
+and remains the CI and broad-change final gate. Do not describe a representative
+run as a full browser pass.
 
 After a failure, fix it and rerun failed cases plus cases affected by the fix.
 Repeat the full browser suite when the fix has broad or uncertain impact. Report

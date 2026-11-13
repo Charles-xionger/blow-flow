@@ -52,11 +52,15 @@ There are intentionally no domain migrations yet.
     pnpm test
     TEST_DATABASE_URL='postgres://.../disposable_test_db' pnpm test:integration
     pnpm test:e2e
+    pnpm test:browser
+    pnpm test:browser:full
     pnpm eval
 
 - test: Go race tests, existing Web unit/service tests and eval gate tests.
 - test:integration: real PostgreSQL + Goose + GORM, isolated temporary schema.
   An absent TEST_DATABASE_URL fails. Use a disposable database, never production.
+- test:browser: representative local Playwright suite (36 cases).
+- test:browser:full: all Playwright cases.
 - test:e2e: builds and starts a real Gin process, then runs the full Playwright canvas suite.
   The browser harness owns temporary SQLite, ports 3217/3218 and fake providers.
 - eval: offline, synthetic dataset, no LLM requests or external writes.
