@@ -171,7 +171,7 @@ export default function Workspace() {
 
   return <div className={styles.workspace}>
     <header className={styles.header}>
-      <Link href="/workspace" className={styles.brand} aria-label="AI Flow 工作空间"><span className={styles.brandMark}><BrandMark /></span>AI <span className={styles.brandLight}>Flow</span></Link>
+      <Link href="/workspace" className={styles.brand} aria-label="Blow Flow 工作空间"><span className={styles.brandMark}><BrandMark /></span>Blow <span className={styles.brandLight}>Flow</span></Link>
       <nav aria-label="主导航" className={styles.navigation}>
         <button disabled title="主页即将推出"><Home size={17} />主页<span className={styles.soon}>即将推出</span></button>
         <Link href="/workspace" aria-current="page"><Grid2X2 size={17} />工作空间</Link>

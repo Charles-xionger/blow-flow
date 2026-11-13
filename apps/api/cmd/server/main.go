@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	"ai-flow/api/internal/database"
-	"ai-flow/api/internal/httpserver"
-	"ai-flow/api/internal/telemetry"
+	"blow-flow/api/internal/database"
+	"blow-flow/api/internal/httpserver"
+	"blow-flow/api/internal/telemetry"
 	"github.com/getsentry/sentry-go"
 )
 

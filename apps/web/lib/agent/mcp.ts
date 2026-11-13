@@ -16,7 +16,7 @@ export function registerReadTools(service: AgentService) {
 /** In-process MCP transport: no listening port or external project selector. */
 export async function connectAgentMcp(service: AgentService, taskId: string) {
     const run = service.task(taskId);
-    const server = new Server({ name: 'ai-flow-internal', version: '1.0.0' }, { capabilities: { tools: {} } });
+    const server = new Server({ name: 'blow-flow-internal', version: '1.0.0' }, { capabilities: { tools: {} } });
     server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [...service.toolDefinitions(), questionDefinition] }));
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (!service.isExecuting(run)) throw new Error('Task paused');
@@ -38,7 +38,7 @@ export async function connectAgentMcp(service: AgentService, taskId: string) {
             return { content: [{ type: 'text', text: visual.context ?? '' }, visual.image] };
         return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     });
-    const client = new Client({ name: 'ai-flow-agent', version: '1.0.0' });
+    const client = new Client({ name: 'blow-flow-agent', version: '1.0.0' });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await server.connect(serverTransport);
     await client.connect(clientTransport);

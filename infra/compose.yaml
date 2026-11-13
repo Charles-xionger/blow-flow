@@ -1,4 +1,4 @@
-name: ai-flow
+name: blow-flow
 services:
   postgres:
     image: postgres:17-alpine
@@ -17,3 +17,4 @@ services:
       retries: 30
 volumes:
   postgres-data:
+    name: ai-flow_postgres-data

@@ -1,5 +1,5 @@
 {
-  "name": "ai-flow",
+  "name": "blow-flow",
   "private": true,
   "packageManager": "pnpm@10.18.3",
   "engines": {
@@ -7,30 +7,30 @@
     "pnpm": ">=10 <11"
   },
   "scripts": {
-    "dev": "pnpm --filter @ai-flow/web dev",
+    "dev": "pnpm --filter @blow-flow/web dev",
     "dev:all": "turbo run dev:all --parallel",
-    "dev:api": "pnpm --filter @ai-flow/api dev",
-    "dev:stop": "pnpm --filter @ai-flow/web dev:stop",
+    "dev:api": "pnpm --filter @blow-flow/api dev",
+    "dev:stop": "pnpm --filter @blow-flow/web dev:stop",
     "build": "turbo run build",
-    "start": "pnpm --filter @ai-flow/web start",
+    "start": "pnpm --filter @blow-flow/web start",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "test:unit": "turbo run test",
-    "test:integration": "pnpm --filter @ai-flow/api test:integration",
-    "test:browser": "pnpm --filter @ai-flow/web test:browser",
-    "test:e2e": "pnpm --filter @ai-flow/api test:e2e && pnpm test:browser",
-    "eval": "pnpm --filter @ai-flow/evals eval",
-    "eval:publish": "pnpm --filter @ai-flow/evals eval:publish",
+    "test:integration": "pnpm --filter @blow-flow/api test:integration",
+    "test:browser": "pnpm --filter @blow-flow/web test:browser",
+    "test:e2e": "pnpm --filter @blow-flow/api test:e2e && pnpm test:browser",
+    "eval": "pnpm --filter @blow-flow/evals eval",
+    "eval:publish": "pnpm --filter @blow-flow/evals eval:publish",
     "db:up": "docker compose -f infra/compose.yaml up -d --wait postgres",
     "db:down": "docker compose -f infra/compose.yaml down",
-    "db:migrate": "pnpm --filter @ai-flow/api db:migrate",
-    "generation:worker": "pnpm --filter @ai-flow/web generation:worker",
-    "agent:worker": "pnpm --filter @ai-flow/web agent:worker",
-    "script:worker": "pnpm --filter @ai-flow/web script:worker",
+    "db:migrate": "pnpm --filter @blow-flow/api db:migrate",
+    "generation:worker": "pnpm --filter @blow-flow/web generation:worker",
+    "agent:worker": "pnpm --filter @blow-flow/web agent:worker",
+    "script:worker": "pnpm --filter @blow-flow/web script:worker",
     "prepare": "git config core.hooksPath .githooks || true",
     "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm test:integration && pnpm test:e2e && pnpm eval",
-    "test:db": "pnpm --filter @ai-flow/web test:db"
+    "test:db": "pnpm --filter @blow-flow/web test:db"
   },
   "devDependencies": {
     "turbo": "2.8.20"

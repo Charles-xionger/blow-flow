@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"ai-flow/api/internal/database"
+	"blow-flow/api/internal/database"
 	"github.com/pressly/goose/v3"
 )
 

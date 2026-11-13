@@ -1,4 +1,4 @@
-# AI Flow
+# Blow Flow
 
 AI creative canvas. pnpm Workspace + Turborepo manages the repository; Next.js
 serves the existing product and Gin is the foundation for gradual Go migration.
@@ -14,6 +14,9 @@ serves the existing product and Gin is the foundation for gradual Go migration.
 
 No business data is moved in phase 1. Existing SQLite files stay under root data/.
 The production replacement is PostgreSQL; SQLite is transitional legacy storage.
+Existing browser storage keys, PostgreSQL database credentials, and the Docker
+volume keep their original `ai-flow` identifiers so existing local data remains
+accessible after the product rename.
 
 ## Requirements and setup
 

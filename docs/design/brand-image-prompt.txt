@@ -1,8 +1,8 @@
 Generator: built-in image_gen
-Source: public/brand/ai-flow-source.png
-UI asset: public/brand/ai-flow-mark.png
+Source: public/brand/blow-flow-source.png
+UI asset: public/brand/blow-flow-mark.png
 Favicon: app/favicon.ico (16, 32, 48, 64, 256 pixels)
 Transparent background: true
 
 Prompt:
-Use case: logo-brand. Create ONE final production app brand symbol for AI Flow, an AI image and video creative canvas. Pure symbol, no letters or words. A bold elegant abstract flowing loop made from two broad interlocking curved ribbons, conveying creative flow and connection, compact memorable silhouette. Electric blue and azure palette, restrained two-tone shading, flat vector-like precision, clean rounded contours, wide open negative space, minimal details readable at 16px favicon size. Center the symbol, filling about 85% of a square canvas. Transparent background, no tile, no border, no shadow, no glow, no sparkles, no stars, no mockup, no presentation sheet, no typography. Deliver a single isolated polished logo mark.
+Use case: logo-brand. Create ONE final production app brand symbol for Blow Flow, an AI image and video creative canvas. Pure symbol, no letters or words. A bold elegant abstract flowing loop made from two broad interlocking curved ribbons, conveying creative flow and connection, compact memorable silhouette. Electric blue and azure palette, restrained two-tone shading, flat vector-like precision, clean rounded contours, wide open negative space, minimal details readable at 16px favicon size. Center the symbol, filling about 85% of a square canvas. Transparent background, no tile, no border, no shadow, no glow, no sparkles, no stars, no mockup, no presentation sheet, no typography. Deliver a single isolated polished logo mark.

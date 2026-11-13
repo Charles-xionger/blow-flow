@@ -1,5 +1,5 @@
 {
-  "name": "@ai-flow/api",
+  "name": "@blow-flow/api",
   "private": true,
   "scripts": {
     "dev": "go run ./cmd/server",

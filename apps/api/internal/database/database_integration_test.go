@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"ai-flow/api/internal/httpserver"
+	"blow-flow/api/internal/httpserver"
 	"github.com/pressly/goose/v3"
 	"gorm.io/gorm"
 )

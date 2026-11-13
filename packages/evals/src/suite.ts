@@ -1,4 +1,4 @@
-import { parseStepJSON, validatePlan } from '@ai-flow/web/storyboard-validation';
+import { parseStepJSON, validatePlan } from '@blow-flow/web/storyboard-validation';
 
 const shot = { title: '出发', duration: 10, action: '主角走出家门', characters: ['主角'], scene: '街道', props: [] };
 export const dataset = [

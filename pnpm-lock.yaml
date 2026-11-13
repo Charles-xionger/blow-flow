@@ -212,7 +212,7 @@ importers:
 
   packages/evals:
     dependencies:
-      '@ai-flow/web':
+      '@blow-flow/web':
         specifier: workspace:*
         version: link:../../apps/web
       '@langfuse/client':

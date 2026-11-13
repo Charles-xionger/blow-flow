@@ -237,7 +237,7 @@ if [[ ! -f "$LF_DIR/docker-compose.yml" ]] || confirm "已有 $LF_DIR/docker-com
   curl -fsSL https://raw.githubusercontent.com/langfuse/langfuse/main/docker-compose.yml -o "$LF_DIR/docker-compose.yml"
   printf '  %s✓ downloaded%s official docker-compose.yml → %s\n' "$GREEN" "$RESET" "$LF_DIR"
 fi
-# ai-flow's Next dev server owns :3000, so Langfuse web moves to $LF_PORT.
+# blow-flow's Next dev server owns :3000, so Langfuse web moves to $LF_PORT.
 cat > "$LF_DIR/docker-compose.override.yml" <<YAML
 services:
   langfuse-web:
@@ -257,10 +257,10 @@ write_env NEXTAUTH_URL "$LF_URL"
 keep_or_generate NEXTAUTH_SECRET "$(openssl rand -base64 32)"
 keep_or_generate SALT "$(openssl rand -base64 32)"
 keep_or_generate ENCRYPTION_KEY "$(openssl rand -hex 32)"
-write_env LANGFUSE_INIT_ORG_ID "ai-flow"
-write_env LANGFUSE_INIT_ORG_NAME "ai-flow"
-write_env LANGFUSE_INIT_PROJECT_ID "ai-flow-local"
-write_env LANGFUSE_INIT_PROJECT_NAME "ai-flow"
+write_env LANGFUSE_INIT_ORG_ID "blow-flow"
+write_env LANGFUSE_INIT_ORG_NAME "blow-flow"
+write_env LANGFUSE_INIT_PROJECT_ID "blow-flow-local"
+write_env LANGFUSE_INIT_PROJECT_NAME "blow-flow"
 keep_or_generate LANGFUSE_INIT_PROJECT_PUBLIC_KEY "pk-lf-$(openssl rand -hex 16)"
 keep_or_generate LANGFUSE_INIT_PROJECT_SECRET_KEY "sk-lf-$(openssl rand -hex 16)"
 printf '\n'
@@ -312,7 +312,7 @@ if [[ "$status" != "200" ]]; then
   warn "预置 key 校验失败（HTTP $status）。通常是 Langfuse 之前已初始化过，预置值没有生效。"
   say "在网页里新建一组 key："
   open_url "$LF_URL"
-  step "登录后进入 ai-flow 项目 → 左下 Settings → API Keys → Create new API keys。"
+  step "登录后进入 blow-flow 项目 → 左下 Settings → API Keys → Create new API keys。"
   step "复制 Public Key（pk-lf- 开头）。"
   ask public_key "粘贴 Public Key："
   step "复制 Secret Key（sk-lf- 开头，只显示一次）。"
@@ -332,7 +332,7 @@ pause
 stage "登录确认"
 open_url "$LF_URL"
 step "用第 3 步设置的邮箱和密码登录。"
-step "确认能看到 ai-flow 组织下的 ai-flow 项目（Tracing 现在是空的，接入后才有数据）。"
+step "确认能看到 blow-flow 组织下的 blow-flow 项目（Tracing 现在是空的，接入后才有数据）。"
 pause "看到项目后按 Enter"
 
 finish

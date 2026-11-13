@@ -99,7 +99,7 @@ GEMINI_API_KEY=your_api_key_here
 
 #### 2. 在系统中配置 Imagen 模型
 
-打开 AI Flow 应用，点击右上角 **API 设置** 按钮：
+打开 Blow Flow 应用，点击右上角 **API 设置** 按钮：
 
 ##### 配置 Imagen 3（标准版）
 

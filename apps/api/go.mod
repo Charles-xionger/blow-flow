@@ -1,4 +1,4 @@
-module ai-flow/api
+module blow-flow/api
 
 go 1.24.0
 

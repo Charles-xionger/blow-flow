@@ -1,5 +1,5 @@
 {
-  "name": "@ai-flow/evals",
+  "name": "@blow-flow/evals",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,7 +10,7 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@ai-flow/web": "workspace:*",
+    "@blow-flow/web": "workspace:*",
     "@langfuse/client": "6.0.1",
     "@langfuse/otel": "6.0.1",
     "@langfuse/tracing": "6.0.1",
