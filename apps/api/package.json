@@ -1,0 +1,15 @@
+{
+  "name": "@ai-flow/api",
+  "private": true,
+  "scripts": {
+    "dev": "go run ./cmd/server",
+    "dev:all": "go run ./cmd/server",
+    "build": "go build -o bin/api ./cmd/server",
+    "typecheck": "go vet ./...",
+    "lint": "node ../../scripts/go-format.mjs",
+    "test": "go test -race -count=1 ./...",
+    "test:integration": "go test -race -count=1 -tags=integration ./internal/database",
+    "test:e2e": "node --test tests/server.test.mjs",
+    "db:migrate": "go run ./cmd/migrate"
+  }
+}

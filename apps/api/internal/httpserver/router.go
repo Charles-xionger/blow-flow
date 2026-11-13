@@ -1,0 +1,53 @@
+package httpserver
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"net/http"
+	"time"
+
+	sentrygin "github.com/getsentry/sentry-go/gin"
+	"github.com/gin-gonic/gin"
+)
+
+type Ping func(context.Context) error
+
+func New(ping Ping) *gin.Engine {
+	gin.SetMode(gin.ReleaseMode)
+	r := gin.New()
+	_ = r.SetTrustedProxies(nil)
+	r.Use(func(c *gin.Context) {
+		var id [16]byte
+		if _, err := rand.Read(id[:]); err != nil {
+			c.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		requestID := hex.EncodeToString(id[:])
+		c.Set("request_id", requestID)
+		c.Header("X-Request-ID", requestID)
+		c.Next()
+	})
+	// Recovery does not print request headers or panic values to stderr.
+	r.Use(gin.CustomRecoveryWithWriter(nil, func(c *gin.Context, _ any) {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "internal_error", "requestId": c.GetString("request_id")})
+	}))
+	r.Use(sentrygin.New(sentrygin.Options{Repanic: true}))
+	r.Use(func(c *gin.Context) {
+		if hub := sentrygin.GetHubFromContext(c); hub != nil {
+			hub.Scope().SetTag("request_id", c.GetString("request_id"))
+		}
+		c.Next()
+	})
+	r.GET("/health/live", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
+	r.GET("/health/ready", func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+		defer cancel()
+		if ping == nil || ping(ctx) != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "ready"})
+	})
+	return r
+}

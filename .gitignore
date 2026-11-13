@@ -60,3 +60,16 @@ next-env.d.ts
 
 # Local Langfuse (scripts/setup-langfuse.sh): compose files and generated secrets
 .langfuse/
+
+# Monorepo build and local runtime output
+**/node_modules/
+**/.turbo/
+**/.next*/
+**/coverage/
+**/test-results/
+**/playwright-report/
+**/bin/
+**/data/*.db*
+!**/.env.example
+packages/evals/results/
+**/.langfuse/

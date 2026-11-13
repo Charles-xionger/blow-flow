@@ -1,8 +1,21 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
 allowBuilds:
+  '@google/genai': false
+  '@tsparticles/engine': false
   better-sqlite3: true
+  esbuild: true
   protobufjs: true
   sharp: true
   unrs-resolver: true
-  "@google/genai": false
-  esbuild: true
-  "@tsparticles/engine": false
+
+onlyBuiltDependencies:
+  - '@google/genai'
+  - '@tsparticles/engine'
+  - better-sqlite3
+  - esbuild
+  - protobufjs
+  - sharp
+  - unrs-resolver

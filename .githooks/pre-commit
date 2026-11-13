@@ -1,6 +1,5 @@
 #!/bin/sh
-# Fast guardrail: typecheck the working tree, lint staged sources. Full tests run in CI.
+# Both languages use the same workspace checks; tests run in CI.
 set -e
 pnpm -s typecheck
-git diff --cached --name-only -z --diff-filter=ACMR -- '*.ts' '*.tsx' '*.js' '*.cjs' '*.mjs' \
-  | xargs -0 -r pnpm -s exec eslint --no-warn-ignored
+pnpm -s lint

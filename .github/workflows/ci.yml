@@ -3,19 +3,106 @@ on:
   push:
     branches: [main]
   pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
-  check:
+  checks:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 12.16.1
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: pnpm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/api/go.mod
+          cache-dependency-path: apps/api/go.sum
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm test
+      - run: pnpm eval
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: offline-evaluation
+          path: packages/evals/results/
+          if-no-files-found: warn
+  postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: ai_flow
+          POSTGRES_PASSWORD: fixture
+          POSTGRES_DB: ai_flow_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ai_flow -d ai_flow_test"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+    env:
+      TEST_DATABASE_URL: postgres://ai_flow:fixture@127.0.0.1:5432/ai_flow_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/api/go.mod
+          cache-dependency-path: apps/api/go.sum
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:integration
+  e2e:
+    needs: [checks, postgres]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/api/go.mod
+          cache-dependency-path: apps/api/go.sum
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @ai-flow/web exec playwright install --with-deps chromium
+      - run: pnpm test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-failures
+          path: |
+            apps/web/test-results/
+            apps/web/playwright-report/
+          retention-days: 7
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/api/go.mod
+          cache-dependency-path: apps/api/go.sum
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
