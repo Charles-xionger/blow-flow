@@ -13,11 +13,9 @@ import {
   Save,
   Sun,
   Moon,
-  Settings as SettingsIcon,
   Trash2,
   ArrowLeft,
 } from "lucide-react";
-import { SettingsModal } from "@/components/settings/SettingsModal";
 import { BrandMark } from "@/components/ui/brand-mark";
 import { toast } from "sonner";
 
@@ -37,7 +35,6 @@ export const TopBar = memo(function TopBar() {
 
   const [isEditingProjectName, setIsEditingProjectName] = useState(false);
   const [projectNameDraft, setProjectNameDraft] = useState("");
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [isLeaving, setIsLeaving] = useState(false);
@@ -353,27 +350,8 @@ export const TopBar = memo(function TopBar() {
             <Trash2 size={15} />
             <span>清空</span>
           </button>
-
-          {/* API 设置 */}
-          <button
-            onClick={() => setIsSettingsOpen(true)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium transition-all ${
-              isDark
-                ? "text-gray-400 hover:text-white hover:bg-white/5"
-                : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
-            }`}
-          >
-            <SettingsIcon size={15} />
-            <span>API 设置</span>
-          </button>
         </div>
       </div>
-
-      {/* 设置模态框 */}
-      <SettingsModal
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-      />
     </>
   );
 });
