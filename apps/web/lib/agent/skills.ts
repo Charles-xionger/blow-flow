@@ -1,5 +1,6 @@
 import { parseDocument } from 'yaml';
 import { getDatabase } from '../db';
+import { currentLocalOwner, type SkillOwnerScope } from '../auth/current-user';
 
 export type SkillSummary = {
     id: string;
@@ -57,10 +58,10 @@ function toSkillSummary(id: SkillId): SkillSummary {
     };
 }
 
-export function listSkills(): SkillSummary[] {
+export function listSkills(scope: SkillOwnerScope = currentLocalOwner): SkillSummary[] {
     const builtIn = (Object.keys(skills) as SkillId[]).map(toSkillSummary);
-    const uploaded = getDatabase().prepare('SELECT name, description FROM user_skills ORDER BY created_at, name').all() as UserSkillRow[];
-    const resources = getDatabase().prepare('SELECT skill_name, path FROM user_skill_resources ORDER BY path').all() as { skill_name: string; path: string }[];
+    const uploaded = getDatabase().prepare('SELECT name, description FROM user_skills WHERE owner_id = ? ORDER BY created_at, name').all(scope.ownerId) as UserSkillRow[];
+    const resources = getDatabase().prepare('SELECT skill_name, path FROM user_skill_resources WHERE owner_id = ? ORDER BY path').all(scope.ownerId) as { skill_name: string; path: string }[];
     return [...builtIn, ...uploaded.map(skill => ({
         id: skill.name,
         name: skill.name,
@@ -71,21 +72,21 @@ export function listSkills(): SkillSummary[] {
     }))];
 }
 
-export function getSkill(id: string): SkillDetail {
+export function getSkill(id: string, scope: SkillOwnerScope = currentLocalOwner): SkillDetail {
     const skill = builtInSkill(id);
     if (skill) return { ...toSkillSummary(id as SkillId), instructions: skill.instructions };
-    const uploaded = getDatabase().prepare('SELECT name, description, instructions FROM user_skills WHERE name = ?').get(id) as UserSkillRow | undefined;
+    const uploaded = getDatabase().prepare('SELECT name, description, instructions FROM user_skills WHERE owner_id = ? AND name = ?').get(scope.ownerId, id) as UserSkillRow | undefined;
     if (!uploaded) throw new Error(`Unknown skill: 创作技能 ${id} 不再可用`);
-    const resources = getDatabase().prepare('SELECT path FROM user_skill_resources WHERE skill_name = ? ORDER BY path').all(id) as ResourceRow[];
+    const resources = getDatabase().prepare('SELECT path FROM user_skill_resources WHERE owner_id = ? AND skill_name = ? ORDER BY path').all(scope.ownerId, id) as ResourceRow[];
     return { id: uploaded.name, name: uploaded.name, description: uploaded.description,
         source: '用户上传', readOnly: false, resources: resources.map(resource => resource.path), instructions: uploaded.instructions };
 }
 
-export function discoverSkills() {
-    return listSkills().map(({ id, description }) => ({ id, description }));
+export function discoverSkills(scope: SkillOwnerScope = currentLocalOwner) {
+    return listSkills(scope).map(({ id, description }) => ({ id, description }));
 }
 
-export function readSkill(id: string, resource?: string) {
+export function readSkill(id: string, resource?: string, scope: SkillOwnerScope = currentLocalOwner) {
     const skill = builtInSkill(id);
     if (skill) {
         if (!resource) return skill.instructions;
@@ -94,20 +95,20 @@ export function readSkill(id: string, resource?: string) {
         return value;
     }
     if (resource) {
-        const uploaded = getDatabase().prepare('SELECT content FROM user_skill_resources WHERE skill_name = ? AND path = ?').get(id, resource) as ResourceRow | undefined;
+        const uploaded = getDatabase().prepare('SELECT content FROM user_skill_resources WHERE owner_id = ? AND skill_name = ? AND path = ?').get(scope.ownerId, id, resource) as ResourceRow | undefined;
         if (!uploaded?.content) throw new Error(`Unknown skill resource: 创作技能 ${id} 或资源 ${resource} 不再可用`);
         return Buffer.from(uploaded.content).toString('utf8');
     }
-    return getSkill(id).instructions;
+    return getSkill(id, scope).instructions;
 }
 
-export function deleteSkill(id: string) {
+export function deleteSkill(id: string, scope: SkillOwnerScope = currentLocalOwner) {
     if (builtInSkill(id)) throw new SkillUploadError('内置创作技能不能删除', 403);
     const db = getDatabase();
     db.transaction(() => {
         // Do not depend on a connection-wide SQLite foreign_keys setting for resource cleanup.
-        db.prepare('DELETE FROM user_skill_resources WHERE skill_name = ?').run(id);
-        const result = db.prepare('DELETE FROM user_skills WHERE name = ?').run(id);
+        db.prepare('DELETE FROM user_skill_resources WHERE owner_id = ? AND skill_name = ?').run(scope.ownerId, id);
+        const result = db.prepare('DELETE FROM user_skills WHERE owner_id = ? AND name = ?').run(scope.ownerId, id);
         if (!result.changes) throw new SkillUploadError(`创作技能 ${id} 不再可用`, 404);
     }).immediate();
 }
@@ -116,7 +117,7 @@ export const skillFileLimit = 5 * 1024 * 1024;
 export const skillUploadLimit = 20 * 1024 * 1024;
 const skillName = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
-export function uploadSkillMarkdown(input: { fileName: string; content: string; size: number; totalSize: number; resources?: Map<string, Buffer> }): SkillSummary {
+export function uploadSkillMarkdown(input: { fileName: string; content: string; size: number; totalSize: number; resources?: Map<string, Buffer> }, scope: SkillOwnerScope = currentLocalOwner): SkillSummary {
     if (input.totalSize > skillUploadLimit) throw new SkillUploadError('整个上传不能超过 20 MB', 413);
     if (input.size > skillFileLimit) throw new SkillUploadError('SKILL.md 不能超过 5 MB', 413);
     if (input.fileName !== 'SKILL.md') throw new SkillUploadError('文件名必须是 SKILL.md');
@@ -141,10 +142,10 @@ export function uploadSkillMarkdown(input: { fileName: string; content: string; 
     const db = getDatabase();
     try {
         db.transaction(() => {
-            db.prepare('INSERT INTO user_skills (name, description, instructions, created_at) VALUES (?, ?, ?, ?)')
-                .run(name, description.trim(), instructions, Date.now());
-            const insertResource = db.prepare('INSERT INTO user_skill_resources (skill_name, path, content) VALUES (?, ?, ?)');
-            for (const [resourcePath, content] of input.resources ?? []) insertResource.run(name, resourcePath, content);
+            db.prepare('INSERT INTO user_skills (owner_id, name, description, instructions, created_at) VALUES (?, ?, ?, ?, ?)')
+                .run(scope.ownerId, name, description.trim(), instructions, Date.now());
+            const insertResource = db.prepare('INSERT INTO user_skill_resources (owner_id, skill_name, path, content) VALUES (?, ?, ?, ?)');
+            for (const [resourcePath, content] of input.resources ?? []) insertResource.run(scope.ownerId, name, resourcePath, content);
         }).immediate();
     } catch (error) {
         if (error instanceof Error && /UNIQUE constraint failed/.test(error.message)) throw new SkillUploadError(`创作技能 ${name} 已存在`, 409);
