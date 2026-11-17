@@ -4,7 +4,7 @@
 
 **Blocked by:** 02: 上传 SKILL.md 并供创作助手调用
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] ZIP 支持根目录直接包含 `SKILL.md`，或仅外包一层目录后包含 `SKILL.md`。
 - [ ] 每个包必须且只能解析出一个 `SKILL.md`；缺失、多个或更深层的入口均以明确错误拒绝。
