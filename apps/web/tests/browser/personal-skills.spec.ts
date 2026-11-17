@@ -41,6 +41,13 @@ test('uploading SKILL.md gives progress feedback and adds a reusable personal sk
     await uploadMayFinish;
     await route.continue();
   });
+  await dropzone.evaluate(element => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([new Uint8Array(20 * 1024 * 1024 + 1)], 'SKILL.md', { type: 'text/markdown' }));
+    element.dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer: transfer }));
+  });
+  await expect(page.getByRole('status')).toContainText('单个文件不能超过 20 MB');
+  await expect(page.getByLabel('已选择文件')).toHaveCount(0);
 
   await dropzone.evaluate(element => {
     const transfer = new DataTransfer();
@@ -51,8 +58,16 @@ test('uploading SKILL.md gives progress feedback and adds a reusable personal sk
   });
   await expect(page.getByLabel('已选择文件')).toContainText('SKILL.md');
   await expect(page.getByRole('button', { name: '移除 SKILL.md' })).toBeVisible();
+  await page.getByRole('button', { name: '移除 SKILL.md' }).click();
+  await expect(page.getByLabel('已选择文件')).toHaveCount(0);
+  await page.getByLabel('选择 SKILL.md 或 ZIP').setInputFiles({
+    name: 'SKILL.md',
+    mimeType: 'text/markdown',
+    buffer: Buffer.from('---\nname: sound-designer\ndescription: Build a purposeful soundscape.\n---\n\nUse layered ambience and motivated effects.'),
+  });
   await page.getByRole('button', { name: '上传技能' }).click();
   await expect(page.getByRole('button', { name: '上传中…' })).toBeDisabled();
+  await expect(page.getByRole('progressbar', { name: '技能上传进度' })).toBeVisible();
   releaseUpload();
 
   await expect(page.getByRole('status')).toContainText('sound-designer 上传成功');

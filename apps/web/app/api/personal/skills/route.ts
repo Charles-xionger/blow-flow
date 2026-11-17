@@ -11,8 +11,7 @@ export async function GET() {
   return NextResponse.json({ data: listSkills(currentLocalOwner) });
 }
 
-async function readUpload(request: NextRequest) {
-  const limits = getSkillUploadLimits();
+async function readUpload(request: NextRequest, limits: ReturnType<typeof getSkillUploadLimits>) {
   const requestBodyLimit = limits.packageBytes + multipartOverheadLimit;
   const reader = request.body?.getReader();
   if (!reader) throw new SkillUploadError('请选择一个 SKILL.md 文件');
@@ -41,7 +40,7 @@ export async function POST(request: NextRequest) {
     if (Number.isFinite(declaredSize) && declaredSize > requestBodyLimit) {
       throw new SkillUploadError(`技能包不能超过 ${formatSkillUploadLimit(limits.packageMb)}`, 413);
     }
-    const form = await readUpload(request);
+    const form = await readUpload(request, limits);
     if ([...form.keys()].some(key => key !== 'file') || [...form.entries()].length !== 1) {
       throw new SkillUploadError('只允许上传一个文件');
     }

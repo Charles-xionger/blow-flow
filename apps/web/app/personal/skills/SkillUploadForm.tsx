@@ -3,7 +3,7 @@
 import { FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { FileArchive, Loader2, UploadCloud, X } from 'lucide-react';
-import { useDropzone, type FileRejection } from 'react-dropzone';
+import { useDropzone, type FileError, type FileRejection } from 'react-dropzone';
 import styles from './skills.module.css';
 
 type UploadResponse = { success: boolean; data?: { id: string }; error?: string };
@@ -27,9 +27,17 @@ export function SkillUploadForm({ limits }: { limits: Limits }) {
   }
 
   function reject(rejections: FileRejection[]) {
-    const tooLarge = rejections.some(rejection => rejection.errors.some(error => error.code === 'file-too-large'));
+    const rejection = rejections[0];
+    const tooLarge = rejection?.errors.some(error => error.code === 'file-too-large' || error.code === 'skill-file-too-large');
+    const zip = rejection?.file.name.toLowerCase().endsWith('.zip');
+    const limit = zip ? packageLimit : limits.fileMb;
     setFile(undefined);
-    setFeedback({ kind: 'error', text: tooLarge ? `技能包不能超过 ${packageLimit} MB` : '请选择 SKILL.md 或 ZIP 文件' });
+    setFeedback({ kind: 'error', text: tooLarge ? `${zip ? '技能包' : '单个文件'}不能超过 ${limit} MB` : '请选择 SKILL.md 或 ZIP 文件' });
+  }
+
+  function validate(file: File): FileError | null {
+    if (file.name.toLowerCase().endsWith('.zip') || file.size <= limits.fileMb * 1024 * 1024) return null;
+    return { code: 'skill-file-too-large', message: `单个文件不能超过 ${limits.fileMb} MB` };
   }
 
   const { getRootProps, getInputProps, isDragActive, isDragReject } = useDropzone({
@@ -43,6 +51,7 @@ export function SkillUploadForm({ limits }: { limits: Limits }) {
     maxSize: Math.floor(limits.packageMb * 1024 * 1024),
     multiple: false,
     disabled: uploading,
+    validator: validate,
     onDropAccepted: accept,
     onDropRejected: reject,
   });
