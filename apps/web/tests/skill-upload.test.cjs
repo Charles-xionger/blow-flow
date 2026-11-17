@@ -47,8 +47,6 @@ test('upload API rejects invalid frontmatter, duplicates, and size limits withou
     [await upload('---\nname: no-description\n---\nbody'), 400, /description 不能为空/],
     [await upload('---\nname: screenplay\ndescription: duplicate built-in\n---\nbody'), 409, /已存在/],
     [await upload('---\nname: color-script\ndescription: duplicate upload\n---\nreplacement'), 409, /已存在/],
-    [await upload('---\nname: too-large\ndescription: too large\n---\n' + 'x'.repeat(5 * 1024 * 1024)), 413, /5 MB/],
-    [await upload('---\nname: total-too-large\ndescription: too large\n---\nbody', 'SKILL.md', { 'content-length': String(20 * 1024 * 1024 + 64 * 1024 + 1) }), 413, /20 MB/],
     [await upload('---\nname: wrong-file\ndescription: wrong file\n---\nbody', 'skill.md'), 400, /文件名必须是 SKILL.md/],
     [await upload('---\nname: empty-body\ndescription: no instructions\n---\n'), 400, /正文不能为空/],
   ];
@@ -56,47 +54,52 @@ test('upload API rejects invalid frontmatter, duplicates, and size limits withou
     assert.equal(response.status, status);
     assert.match((await response.json()).error, message);
   }
-  assert.deepEqual(discoverSkills().filter(skill => ['no-description', 'too-large', 'total-too-large', 'wrong-file'].includes(skill.id)), []);
+  process.env.SKILL_UPLOAD_FILE_MB = '1';
+  const tooLarge = await upload('---\nname: too-large\ndescription: too large\n---\n' + 'x'.repeat(1024 * 1024));
+  delete process.env.SKILL_UPLOAD_FILE_MB;
+  assert.equal(tooLarge.status, 413);
+  assert.match((await tooLarge.json()).error, /1 MB/);
+  assert.deepEqual(discoverSkills().filter(skill => ['no-description', 'too-large', 'wrong-file'].includes(skill.id)), []);
   assert.equal(readSkill('color-script'), 'Use motivated palette changes.');
 });
 
-test('upload API enforces the whole request limit without relying on Content-Length', async () => {
+test('upload API enforces the configured package limit without relying on Content-Length', async () => {
+  process.env.SKILL_UPLOAD_PACKAGE_MB = '1';
   const markdown = '---\nname: hidden-overflow\ndescription: must not be registered\n---\nbody';
   const form = new FormData();
   form.append('file', new File([markdown], 'SKILL.md', { type: 'text/markdown' }));
-  form.append('padding', 'x'.repeat(20 * 1024 * 1024 + 64 * 1024));
+  form.append('padding', 'x'.repeat(1024 * 1024 + 64 * 1024));
 
   const response = await POST(new Request('http://localhost/api/personal/skills', { method: 'POST', body: form }));
+  delete process.env.SKILL_UPLOAD_PACKAGE_MB;
 
   assert.equal(response.status, 413);
-  assert.match((await response.json()).error, /20 MB/);
+  assert.match((await response.json()).error, /1 MB/);
   assert.equal(discoverSkills().some(skill => skill.id === 'hidden-overflow'), false);
 });
 
-test('upload API accepts a ZIP at the package limit despite multipart framing overhead', async () => {
+test('upload API accepts a ZIP larger than the former 20 MB package limit', async () => {
   const zip = new JSZip();
-  zip.file('SKILL.md', '---\nname: near-package-limit\ndescription: Nearly fills the package limit.\n---\n\nKeep the package bytes.');
-  for (let index = 0; index < 4; index++) zip.file(`resource-${index}.bin`, Buffer.alloc(0));
+  zip.file('SKILL.md', '---\nname: larger-package\ndescription: Exceeds the former package limit.\n---\n\nKeep the package bytes.');
+  for (let index = 0; index < 5; index++) zip.file(`resource-${index}.bin`, Buffer.alloc(0));
   const emptyArchive = await zip.generateAsync({ type: 'uint8array', compression: 'STORE' });
-  const rawBudget = 20 * 1024 * 1024 - emptyArchive.byteLength - 64;
-  const resourceSize = Math.floor(rawBudget / 4);
-  let remainder = rawBudget - resourceSize * 4;
-  for (let index = 0; index < 4; index++) {
+  const rawBudget = 21 * 1024 * 1024 - emptyArchive.byteLength - 64;
+  const resourceSize = Math.floor(rawBudget / 5);
+  let remainder = rawBudget - resourceSize * 5;
+  for (let index = 0; index < 5; index++) {
     const size = resourceSize + (remainder-- > 0 ? 1 : 0);
     zip.file(`resource-${index}.bin`, crypto.randomBytes(size));
   }
   const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'STORE' });
-  assert.ok(bytes.byteLength <= 20 * 1024 * 1024);
+  assert.ok(bytes.byteLength > 20 * 1024 * 1024);
 
   const form = new FormData();
   form.append('file', new File([bytes], 'near-limit.zip', { type: 'application/zip' }));
   const request = new Request('http://localhost/api/personal/skills', { method: 'POST', body: form });
-  assert.ok((await request.clone().arrayBuffer()).byteLength > 20 * 1024 * 1024);
-
   const response = await POST(request);
 
   assert.equal(response.status, 201, JSON.stringify(await response.clone().json()));
-  assert.equal(readSkill('near-package-limit'), 'Keep the package bytes.');
+  assert.equal(readSkill('larger-package'), 'Keep the package bytes.');
 });
 
 test('upload API rejects multipart fields other than the single file', async () => {
@@ -166,16 +169,26 @@ test('ZIP uploads reject symlinks, too many files, oversized files, and expanded
   assert.equal(tooMany.status, 413);
   assert.match((await tooMany.json()).error, /200 个文件/);
 
+  const formerlyTooLarge = await zipUpload([
+    ['SKILL.md', '---\nname: six-megabyte-file\ndescription: accepted by the new default\n---\nbody'],
+    ['large.txt', 'x'.repeat(6 * 1024 * 1024)],
+  ]);
+  assert.equal(formerlyTooLarge.status, 201, JSON.stringify(await formerlyTooLarge.clone().json()));
+
+  process.env.SKILL_UPLOAD_FILE_MB = '5';
   const tooLarge = await zipUpload([
-    ['SKILL.md', '---\nname: large-file\ndescription: large\n---\nbody'],
+    ['SKILL.md', '---\nname: large-file\ndescription: limited by configuration\n---\nbody'],
     ['large.txt', 'x'.repeat(5 * 1024 * 1024 + 1)],
   ]);
+  delete process.env.SKILL_UPLOAD_FILE_MB;
   assert.equal(tooLarge.status, 413);
   assert.match((await tooLarge.json()).error, /单个文件不能超过 5 MB/);
 
   const expanded = [['SKILL.md', '---\nname: expanded-archive\ndescription: expanded\n---\nbody']];
   for (let index = 0; index < 5; index++) expanded.push([`large-${index}.txt`, 'x'.repeat(5 * 1024 * 1024)]);
+  process.env.SKILL_UPLOAD_EXPANDED_MB = '20';
   const tooExpanded = await zipUpload(expanded);
+  delete process.env.SKILL_UPLOAD_EXPANDED_MB;
   assert.equal(tooExpanded.status, 413);
   assert.match((await tooExpanded.json()).error, /解压后不能超过 20 MB/);
 

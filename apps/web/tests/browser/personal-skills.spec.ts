@@ -33,6 +33,8 @@ test('personal space opens the read-only built-in creative skill library', async
 
 test('uploading SKILL.md gives progress feedback and adds a reusable personal skill', async ({ page }) => {
   await page.goto('/personal/skills');
+  const dropzone = page.getByRole('button', { name: '选择或拖放技能包' });
+  await expect(dropzone).toContainText('拖放 SKILL.md 或 ZIP');
   let releaseUpload!: () => void;
   const uploadMayFinish = new Promise<void>(resolve => { releaseUpload = resolve; });
   await page.route('**/api/personal/skills', async route => {
@@ -40,11 +42,15 @@ test('uploading SKILL.md gives progress feedback and adds a reusable personal sk
     await route.continue();
   });
 
-  await page.getByLabel('选择 SKILL.md').setInputFiles({
-    name: 'SKILL.md',
-    mimeType: 'text/markdown',
-    buffer: Buffer.from('---\nname: sound-designer\ndescription: Build a purposeful soundscape.\n---\n\nUse layered ambience and motivated effects.'),
+  await dropzone.evaluate(element => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([
+      '---\nname: sound-designer\ndescription: Build a purposeful soundscape.\n---\n\nUse layered ambience and motivated effects.',
+    ], 'SKILL.md', { type: 'text/markdown' }));
+    element.dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer: transfer }));
   });
+  await expect(page.getByLabel('已选择文件')).toContainText('SKILL.md');
+  await expect(page.getByRole('button', { name: '移除 SKILL.md' })).toBeVisible();
   await page.getByRole('button', { name: '上传技能' }).click();
   await expect(page.getByRole('button', { name: '上传中…' })).toBeDisabled();
   releaseUpload();
@@ -58,7 +64,7 @@ test('uploading SKILL.md gives progress feedback and adds a reusable personal sk
   await page.reload();
   await expect(page.getByRole('link', { name: /sound-designer/ })).toBeVisible();
 
-  await page.getByLabel('选择 SKILL.md').setInputFiles({
+  await page.getByLabel('选择 SKILL.md 或 ZIP').setInputFiles({
     name: 'SKILL.md', mimeType: 'text/markdown', buffer: Buffer.from('missing frontmatter'),
   });
   await page.getByRole('button', { name: '上传技能' }).click();

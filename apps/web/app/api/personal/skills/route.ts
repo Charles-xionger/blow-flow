@@ -1,17 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { deleteSkill, listSkills, SkillUploadError, skillUploadLimit, uploadSkillMarkdown } from '@/lib/agent/skills';
+import { deleteSkill, listSkills, SkillUploadError, uploadSkillMarkdown } from '@/lib/agent/skills';
 import { parseSkillArchive } from '@/lib/agent/skill-archive';
+import { formatSkillUploadLimit, getSkillUploadLimits } from '@/lib/agent/skill-upload-limits';
 import { currentLocalOwner } from '@/lib/auth/current-user';
 
 export const runtime = 'nodejs';
 const multipartOverheadLimit = 64 * 1024;
-const requestBodyLimit = skillUploadLimit + multipartOverheadLimit;
 
 export async function GET() {
   return NextResponse.json({ data: listSkills(currentLocalOwner) });
 }
 
 async function readUpload(request: NextRequest) {
+  const limits = getSkillUploadLimits();
+  const requestBodyLimit = limits.packageBytes + multipartOverheadLimit;
   const reader = request.body?.getReader();
   if (!reader) throw new SkillUploadError('请选择一个 SKILL.md 文件');
   const chunks: Uint8Array[] = [];
@@ -22,7 +24,7 @@ async function readUpload(request: NextRequest) {
     size += value.byteLength;
     if (size > requestBodyLimit) {
       await reader.cancel();
-      throw new SkillUploadError('整个上传不能超过 20 MB', 413);
+      throw new SkillUploadError(`技能包不能超过 ${formatSkillUploadLimit(limits.packageMb)}`, 413);
     }
     chunks.push(value);
   }
@@ -33,9 +35,11 @@ async function readUpload(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const limits = getSkillUploadLimits();
+    const requestBodyLimit = limits.packageBytes + multipartOverheadLimit;
     const declaredSize = Number(request.headers.get('content-length'));
     if (Number.isFinite(declaredSize) && declaredSize > requestBodyLimit) {
-      throw new SkillUploadError('整个上传不能超过 20 MB', 413);
+      throw new SkillUploadError(`技能包不能超过 ${formatSkillUploadLimit(limits.packageMb)}`, 413);
     }
     const form = await readUpload(request);
     if ([...form.keys()].some(key => key !== 'file') || [...form.entries()].length !== 1) {

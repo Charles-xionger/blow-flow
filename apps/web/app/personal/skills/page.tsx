@@ -6,6 +6,7 @@ import { getSkill, listSkills } from '@/lib/agent/skills';
 import { SkillUploadForm } from './SkillUploadForm';
 import { SkillDeleteButton } from './SkillDeleteButton';
 import { currentLocalOwner } from '@/lib/auth/current-user';
+import { getSkillUploadLimits } from '@/lib/agent/skill-upload-limits';
 import styles from './skills.module.css';
 
 type Props = { searchParams: Promise<{ skill?: string }> };
@@ -14,6 +15,7 @@ export default async function PersonalSkillsPage({ searchParams }: Props) {
   const skills = listSkills(currentLocalOwner);
   const requested = (await searchParams).skill;
   const selected = getSkill(skills.some(skill => skill.id === requested) ? requested! : skills[0].id, currentLocalOwner);
+  const { packageMb, fileMb, expandedMb } = getSkillUploadLimits();
 
   return <div className={styles.page}>
     <header className={styles.header}>
@@ -23,7 +25,7 @@ export default async function PersonalSkillsPage({ searchParams }: Props) {
     </header>
     <main className={styles.main}>
       <div className={styles.intro}><p>PERSONAL SKILLS</p><h1>个人技能库</h1><span>跨所有项目使用和管理你的创作技能。</span></div>
-      <SkillUploadForm />
+      <SkillUploadForm limits={{ packageMb, fileMb, expandedMb }} />
       <div className={styles.layout}>
         <section aria-label="创作技能" className={styles.list}>
           <div className={styles.listTitle}><h2>创作技能</h2><span>{skills.length} 项</span></div>

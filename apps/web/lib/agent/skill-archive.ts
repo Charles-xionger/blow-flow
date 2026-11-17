@@ -1,5 +1,6 @@
 import { inflateRawSync } from 'node:zlib';
-import { SkillUploadError, skillFileLimit, skillUploadLimit } from './skills';
+import { SkillUploadError } from './skills';
+import { formatSkillUploadLimit, getSkillUploadLimits } from './skill-upload-limits';
 
 const maximumFiles = 200;
 const centralSignature = 0x02014b50;
@@ -42,6 +43,7 @@ function findEnd(buffer: Buffer) {
 }
 
 function inspectArchive(buffer: Buffer): ArchiveEntry[] {
+    const limits = getSkillUploadLimits();
     const end = findEnd(buffer);
     const disk = buffer.readUInt16LE(end + 4);
     const centralDisk = buffer.readUInt16LE(end + 6);
@@ -87,8 +89,8 @@ function inspectArchive(buffer: Buffer): ArchiveEntry[] {
         if (unixType && unixType !== 0o100000 && !(directory && unixType === 0o040000)) {
             throw new SkillUploadError('ZIP 不能包含特殊文件条目');
         }
-        if (!directory && (compressedSize > skillFileLimit || size > skillFileLimit)) {
-            throw new SkillUploadError('ZIP 中单个文件不能超过 5 MB', 413);
+        if (!directory && (compressedSize > limits.fileBytes || size > limits.fileBytes)) {
+            throw new SkillUploadError(`ZIP 中单个文件不能超过 ${formatSkillUploadLimit(limits.fileMb)}`, 413);
         }
         entries.push({ name, compressedSize, size, crc, compression, flags, localOffset, directory });
         offset = next;
@@ -96,11 +98,11 @@ function inspectArchive(buffer: Buffer): ArchiveEntry[] {
     if (offset !== centralOffset + centralSize) throw new SkillUploadError('ZIP 中央目录格式无效');
     const files = entries.filter(entry => !entry.directory);
     if (files.length > maximumFiles) throw new SkillUploadError('ZIP 最多包含 200 个文件', 413);
-    if (files.reduce((sum, entry) => sum + entry.compressedSize, 0) > skillUploadLimit) {
-        throw new SkillUploadError('ZIP 压缩内容不能超过 20 MB', 413);
+    if (files.reduce((sum, entry) => sum + entry.compressedSize, 0) > limits.packageBytes) {
+        throw new SkillUploadError(`ZIP 压缩内容不能超过 ${formatSkillUploadLimit(limits.packageMb)}`, 413);
     }
-    if (files.reduce((sum, entry) => sum + entry.size, 0) > skillUploadLimit) {
-        throw new SkillUploadError('ZIP 解压后不能超过 20 MB', 413);
+    if (files.reduce((sum, entry) => sum + entry.size, 0) > limits.expandedBytes) {
+        throw new SkillUploadError(`ZIP 解压后不能超过 ${formatSkillUploadLimit(limits.expandedMb)}`, 413);
     }
     return files;
 }
@@ -115,6 +117,7 @@ function crc32(buffer: Buffer) {
 }
 
 function extractEntry(archive: Buffer, entry: ArchiveEntry) {
+    const limits = getSkillUploadLimits();
     const offset = entry.localOffset;
     if (offset + 30 > archive.length || archive.readUInt32LE(offset) !== localSignature) throw new SkillUploadError('ZIP 本地条目格式无效');
     const localFlags = archive.readUInt16LE(offset + 6);
@@ -129,18 +132,19 @@ function extractEntry(archive: Buffer, entry: ArchiveEntry) {
     const compressed = archive.subarray(dataOffset, end);
     let content: Buffer;
     try {
-        content = entry.compression === 0 ? Buffer.from(compressed) : inflateRawSync(compressed, { maxOutputLength: skillFileLimit + 1 });
+        content = entry.compression === 0 ? Buffer.from(compressed) : inflateRawSync(compressed, { maxOutputLength: limits.fileBytes + 1 });
     } catch {
         throw new SkillUploadError(`ZIP 条目无法安全解压：${entry.name}`);
     }
-    if (content.length !== entry.size || content.length > skillFileLimit || crc32(content) !== entry.crc) {
+    if (content.length !== entry.size || content.length > limits.fileBytes || crc32(content) !== entry.crc) {
         throw new SkillUploadError(`ZIP 条目校验失败：${entry.name}`);
     }
     return content;
 }
 
 export function parseSkillArchive(archive: Buffer): SkillArchive {
-    if (archive.length > skillUploadLimit) throw new SkillUploadError('ZIP 包不能超过 20 MB', 413);
+    const limits = getSkillUploadLimits();
+    if (archive.length > limits.packageBytes) throw new SkillUploadError(`ZIP 包不能超过 ${formatSkillUploadLimit(limits.packageMb)}`, 413);
     const entries = inspectArchive(archive);
     const skillEntries = entries.filter(entry => entry.name.split('/').at(-1) === 'SKILL.md');
     if (!skillEntries.length) throw new SkillUploadError('ZIP 必须包含一个 SKILL.md');
@@ -158,7 +162,7 @@ export function parseSkillArchive(archive: Buffer): SkillArchive {
     for (const entry of entries) {
         const content = extractEntry(archive, entry);
         total += content.length;
-        if (total > skillUploadLimit) throw new SkillUploadError('ZIP 解压后不能超过 20 MB', 413);
+        if (total > limits.expandedBytes) throw new SkillUploadError(`ZIP 解压后不能超过 ${formatSkillUploadLimit(limits.expandedMb)}`, 413);
         extracted.set(wrapper ? entry.name.slice(wrapper.length + 1) : entry.name, content);
     }
     const markdownBuffer = extracted.get('SKILL.md');

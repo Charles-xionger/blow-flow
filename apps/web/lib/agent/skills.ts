@@ -1,6 +1,7 @@
 import { parseDocument } from 'yaml';
 import { getDatabase } from '../db';
 import { currentLocalOwner, type SkillOwnerScope } from '../auth/current-user';
+import { formatSkillUploadLimit, getSkillUploadLimits } from './skill-upload-limits';
 
 export type SkillSummary = {
     id: string;
@@ -113,13 +114,12 @@ export function deleteSkill(id: string, scope: SkillOwnerScope = currentLocalOwn
     }).immediate();
 }
 
-export const skillFileLimit = 5 * 1024 * 1024;
-export const skillUploadLimit = 20 * 1024 * 1024;
 const skillName = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export function uploadSkillMarkdown(input: { fileName: string; content: string; size: number; totalSize: number; resources?: Map<string, Buffer> }, scope: SkillOwnerScope = currentLocalOwner): SkillSummary {
-    if (input.totalSize > skillUploadLimit) throw new SkillUploadError('整个上传不能超过 20 MB', 413);
-    if (input.size > skillFileLimit) throw new SkillUploadError('SKILL.md 不能超过 5 MB', 413);
+    const limits = getSkillUploadLimits();
+    if (input.totalSize > limits.packageBytes) throw new SkillUploadError(`技能包不能超过 ${formatSkillUploadLimit(limits.packageMb)}`, 413);
+    if (input.size > limits.fileBytes) throw new SkillUploadError(`SKILL.md 不能超过 ${formatSkillUploadLimit(limits.fileMb)}`, 413);
     if (input.fileName !== 'SKILL.md') throw new SkillUploadError('文件名必须是 SKILL.md');
 
     const match = input.content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
