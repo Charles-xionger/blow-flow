@@ -31,13 +31,17 @@ const skills = {
 
 type SkillId = keyof typeof skills;
 
-type UserSkillRow = { name: string; description: string; instructions?: string };
+type UserSkillRow = { name: string; description: string; instructions: string };
 
 export class SkillUploadError extends Error {
     constructor(message: string, public status = 400) {
         super(message);
         this.name = 'SkillUploadError';
     }
+}
+
+function builtInSkill(id: string) {
+    return Object.prototype.hasOwnProperty.call(skills, id) ? skills[id as SkillId] : undefined;
 }
 
 function toSkillSummary(id: SkillId): SkillSummary {
@@ -66,10 +70,10 @@ export function listSkills(): SkillSummary[] {
 }
 
 export function getSkill(id: string): SkillDetail {
-    const skill = skills[id as SkillId];
+    const skill = builtInSkill(id);
     if (skill) return { ...toSkillSummary(id as SkillId), instructions: skill.instructions };
     const uploaded = getDatabase().prepare('SELECT name, description, instructions FROM user_skills WHERE name = ?').get(id) as UserSkillRow | undefined;
-    if (!uploaded?.instructions) throw new Error('Unknown skill');
+    if (!uploaded) throw new Error('Unknown skill');
     return { id: uploaded.name, name: uploaded.name, description: uploaded.description,
         source: '用户上传', readOnly: false, resources: [], instructions: uploaded.instructions };
 }
@@ -79,7 +83,7 @@ export function discoverSkills() {
 }
 
 export function readSkill(id: string, resource?: string) {
-    const skill = skills[id as SkillId];
+    const skill = builtInSkill(id);
     if (skill) {
         if (!resource) return skill.instructions;
         const value = (skill.resources as Record<string, string>)[resource];
@@ -90,8 +94,8 @@ export function readSkill(id: string, resource?: string) {
     return getSkill(id).instructions;
 }
 
-const skillFileLimit = 5 * 1024 * 1024;
-const skillUploadLimit = 20 * 1024 * 1024;
+export const skillFileLimit = 5 * 1024 * 1024;
+export const skillUploadLimit = 20 * 1024 * 1024;
 const skillName = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export function uploadSkillMarkdown(input: { fileName: string; content: string; size: number; totalSize: number }): SkillSummary {
@@ -112,9 +116,10 @@ export function uploadSkillMarkdown(input: { fileName: string; content: string; 
     }
     if (typeof description !== 'string' || !description.trim()) throw new SkillUploadError('YAML frontmatter 的 description 不能为空');
     if (description.trim().length > 1024) throw new SkillUploadError('description 不能超过 1024 个字符');
-    if (skills[name as SkillId]) throw new SkillUploadError(`创作技能 ${name} 已存在`, 409);
+    if (builtInSkill(name)) throw new SkillUploadError(`创作技能 ${name} 已存在`, 409);
 
     const instructions = input.content.slice(match[0].length).trim();
+    if (!instructions) throw new SkillUploadError('SKILL.md 正文不能为空');
     const db = getDatabase();
     try {
         db.prepare('INSERT INTO user_skills (name, description, instructions, created_at) VALUES (?, ?, ?, ?)')

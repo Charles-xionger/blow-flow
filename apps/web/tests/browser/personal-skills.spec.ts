@@ -57,4 +57,10 @@ test('uploading SKILL.md gives progress feedback and adds a reusable personal sk
 
   await page.reload();
   await expect(page.getByRole('link', { name: /sound-designer/ })).toBeVisible();
+
+  await page.getByLabel('选择 SKILL.md').setInputFiles({
+    name: 'SKILL.md', mimeType: 'text/markdown', buffer: Buffer.from('missing frontmatter'),
+  });
+  await page.getByRole('button', { name: '上传技能' }).click();
+  await expect(page.getByRole('status')).toContainText('YAML frontmatter');
 });

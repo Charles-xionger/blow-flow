@@ -50,6 +50,7 @@ test('upload API rejects invalid frontmatter, duplicates, and size limits withou
     [await upload('---\nname: too-large\ndescription: too large\n---\n' + 'x'.repeat(5 * 1024 * 1024)), 413, /5 MB/],
     [await upload('---\nname: total-too-large\ndescription: too large\n---\nbody', 'SKILL.md', { 'content-length': String(20 * 1024 * 1024 + 1) }), 413, /20 MB/],
     [await upload('---\nname: wrong-file\ndescription: wrong file\n---\nbody', 'skill.md'), 400, /文件名必须是 SKILL.md/],
+    [await upload('---\nname: empty-body\ndescription: no instructions\n---\n'), 400, /正文不能为空/],
   ];
   for (const [response, status, message] of cases) {
     assert.equal(response.status, status);
@@ -57,4 +58,17 @@ test('upload API rejects invalid frontmatter, duplicates, and size limits withou
   }
   assert.deepEqual(discoverSkills().filter(skill => ['no-description', 'too-large', 'total-too-large', 'wrong-file'].includes(skill.id)), []);
   assert.equal(require('../lib/agent/skills.ts').readSkill('color-script'), 'Use motivated palette changes.');
+});
+
+test('upload API enforces the whole request limit without relying on Content-Length', async () => {
+  const markdown = '---\nname: hidden-overflow\ndescription: must not be registered\n---\nbody';
+  const form = new FormData();
+  form.append('file', new File([markdown], 'SKILL.md', { type: 'text/markdown' }));
+  form.append('padding', 'x'.repeat(20 * 1024 * 1024));
+
+  const response = await POST(new Request('http://localhost/api/personal/skills', { method: 'POST', body: form }));
+
+  assert.equal(response.status, 413);
+  assert.match((await response.json()).error, /20 MB/);
+  assert.equal(discoverSkills().some(skill => skill.id === 'hidden-overflow'), false);
 });

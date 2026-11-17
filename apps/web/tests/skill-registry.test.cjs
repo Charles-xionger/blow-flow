@@ -70,3 +70,11 @@ test('uploaded skill metadata and instructions survive reopening the database', 
   assert.equal(summary.description, 'Plan expressive lighting for a scene.');
   assert.equal(readSkill('lighting-director'), '# Lighting Director\n\nShape the key, fill, and rim light.');
 });
+
+test('a legal skill name that matches an object prototype property can be uploaded', () => {
+  const markdown = '---\nname: constructor\ndescription: Build constructor scenes.\n---\n\nKeep the structure visible.';
+
+  uploadSkillMarkdown({ fileName: 'SKILL.md', content: markdown, size: Buffer.byteLength(markdown), totalSize: Buffer.byteLength(markdown) });
+
+  assert.equal(readSkill('constructor'), 'Keep the structure visible.');
+});
