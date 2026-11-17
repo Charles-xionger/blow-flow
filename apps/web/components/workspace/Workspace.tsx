@@ -7,6 +7,7 @@ import { BrandMark } from "@/components/ui/brand-mark";
 import { ArrowDownUp, ArrowLeft, ChevronRight, Folder, FolderOpen, FolderPlus, Grid2X2, Home, ImageIcon, LayoutGrid, List, Loader2, MoreHorizontal, Plus, RotateCcw, Search, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { WorkspaceActionDialog } from "./WorkspaceActionDialog";
+import { PersonalSpaceMenu } from "./PersonalSpaceMenu";
 import { workspaceActionDialog, type ActionDialog, type WorkspaceAction } from "./action-dialog";
 import type { ProjectFolder, ProjectSummary, WorkspaceCommand, WorkspaceData } from "@/lib/workspace/types";
 import { createWorkspaceProject, runWorkspaceCommand } from "@/lib/workspace/client";
@@ -176,7 +177,7 @@ export default function Workspace() {
         <button disabled title="主页即将推出"><Home size={17} />主页<span className={styles.soon}>即将推出</span></button>
         <Link href="/workspace" aria-current="page"><Grid2X2 size={17} />工作空间</Link>
       </nav>
-      <div className={styles.personal}><span className={styles.avatar}>P</span><span>个人空间</span></div>
+      <PersonalSpaceMenu />
     </header>
 
     <main className={styles.main}>
