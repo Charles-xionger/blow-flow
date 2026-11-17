@@ -23,6 +23,7 @@ var (
 	ErrEmailUnverified   = errors.New("email is not verified")
 	ErrAccountDisabled   = errors.New("account is disabled")
 	ErrForbidden         = errors.New("operation is forbidden")
+	ErrMFARequired       = errors.New("multi-factor authentication is required")
 	ErrRecentMFARequired = errors.New("recent multi-factor authentication is required")
 	ErrCannotDisableSelf = errors.New("administrator cannot disable own account")
 	ErrInvalidArgument   = errors.New("invalid argument")

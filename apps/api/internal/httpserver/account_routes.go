@@ -146,6 +146,8 @@ func writeAccountError(c *gin.Context, err error) {
 		status, code = http.StatusForbidden, "account_disabled"
 	case errors.Is(err, account.ErrForbidden):
 		status, code = http.StatusForbidden, "forbidden"
+	case errors.Is(err, account.ErrMFARequired):
+		status, code = http.StatusForbidden, "mfa_required"
 	case errors.Is(err, account.ErrRecentMFARequired):
 		status, code = http.StatusForbidden, "recent_mfa_required"
 	case errors.Is(err, account.ErrCannotDisableSelf):

@@ -44,6 +44,9 @@ func (s *Service) Resolve(ctx context.Context, identity Identity) (User, error) 
 	if user.Status == StatusDisabled {
 		return User{}, ErrAccountDisabled
 	}
+	if user.Role == RoleAdmin && !identity.MFA {
+		return User{}, ErrMFARequired
+	}
 	return user, nil
 }
 

@@ -56,7 +56,7 @@ func TestResolveBootstrapsOnlyConfiguredInitialAdministrator(t *testing.T) {
 
 	for _, subject := range []string{"member-subject", "owner-subject"} {
 		_, err := service.Resolve(context.Background(), Identity{
-			Issuer: "https://identity.example", Subject: subject, Email: subject + "@example.com", EmailVerified: true,
+			Issuer: "https://identity.example", Subject: subject, Email: subject + "@example.com", EmailVerified: true, MFA: true,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -75,6 +75,17 @@ func TestResolveBootstrapsOnlyConfiguredInitialAdministrator(t *testing.T) {
 	}
 	if policies[2].MayBecomeInitialAdministrator {
 		t.Fatal("matching subject from another issuer could become administrator")
+	}
+}
+
+func TestAdministratorAuthenticationRequiresMFA(t *testing.T) {
+	repo := repositoryStub{resolve: func(context.Context, Identity, IdentityProvisioning) (User, error) {
+		return User{ID: "admin-1", Role: RoleAdmin, Status: StatusActive}, nil
+	}}
+	service := NewService(repo, InitialAdministrator{}, time.Now)
+	_, err := service.Resolve(context.Background(), Identity{Issuer: "https://identity.example", Subject: "admin", Email: "admin@example.com", EmailVerified: true})
+	if !errors.Is(err, ErrMFARequired) {
+		t.Fatalf("Resolve() error = %v, want ErrMFARequired", err)
 	}
 }
 
