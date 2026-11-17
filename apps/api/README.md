@@ -29,8 +29,22 @@ or create a second generation-task writer during the transition.
 - `OIDC_ISSUER`: exact issuer used for discovery and token validation.
 - `OIDC_AUDIENCE`: required access-token audience for this API.
 - `INITIAL_ADMIN_SUBJECT`: optional external subject promoted to `admin` only
-  when its local account is first created.
+  when its local account is first created, its issuer matches `OIDC_ISSUER`, and
+  no administrator exists yet. Changing this value cannot create a second
+  initial administrator.
+
+The admin client must request a hosted-provider MFA step-up before sensitive
+operations. The API independently requires the `mfa` authentication-method
+claim and an `auth_time` no more than ten minutes old.
 
 Migrations are a separate deployment step (`pnpm db:migrate`); API startup never
 runs DDL. Without complete database and OIDC configuration, health remains
 available but readiness is false and account routes fail closed.
+
+## Deliberately incomplete in this slice
+
+The protected historical-resource import, project/task ownership enforcement,
+hosted-provider session revocation, generation authorization, and audit events
+for admin login, sensitive-content access and task operations are not yet
+implemented. They must arrive with the complete owning domain rather than by
+dual-writing legacy SQLite and PostgreSQL.

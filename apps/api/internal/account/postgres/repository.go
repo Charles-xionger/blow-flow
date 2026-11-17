@@ -36,7 +36,7 @@ type userRow struct {
 	UpdatedAt time.Time
 }
 
-func (r *Repository) ResolveIdentity(ctx context.Context, identity account.Identity, bootstrap account.Role) (account.User, error) {
+func (r *Repository) ResolveIdentity(ctx context.Context, identity account.Identity, provisioning account.IdentityProvisioning) (account.User, error) {
 	var resolved account.User
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		lockKey, err := json.Marshal([]string{identity.Issuer, identity.Subject})
@@ -67,6 +67,19 @@ func (r *Repository) ResolveIdentity(ctx context.Context, identity account.Ident
 		}
 
 		now := r.now().UTC()
+		role := account.RoleUser
+		if provisioning.MayBecomeInitialAdministrator {
+			if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtextextended('blow-flow:initial-administrator', 0))").Error; err != nil {
+				return err
+			}
+			var administratorCount int64
+			if err := tx.Model(&roleModel{}).Where("role = ?", account.RoleAdmin).Count(&administratorCount).Error; err != nil {
+				return err
+			}
+			if administratorCount == 0 {
+				role = account.RoleAdmin
+			}
+		}
 		userID, err := newUUID()
 		if err != nil {
 			return err
@@ -78,17 +91,16 @@ func (r *Repository) ResolveIdentity(ctx context.Context, identity account.Ident
 		if err := tx.Create(&identityModel{Issuer: identity.Issuer, Subject: identity.Subject, UserID: userID, CreatedAt: now, LastSeenAt: now}).Error; err != nil {
 			return err
 		}
-		if err := tx.Create(&roleModel{UserID: userID, Role: string(bootstrap), CreatedAt: now}).Error; err != nil {
+		if err := tx.Create(&roleModel{UserID: userID, Role: string(role), CreatedAt: now}).Error; err != nil {
 			return err
 		}
-		resolved = account.User{ID: userID, Email: user.Email, Status: account.StatusActive, Role: bootstrap, CreatedAt: now, UpdatedAt: now}
+		resolved = account.User{ID: userID, Email: user.Email, Status: account.StatusActive, Role: role, CreatedAt: now, UpdatedAt: now}
 		return nil
 	})
 	return resolved, err
 }
 
 func (r *Repository) ListUsers(ctx context.Context, query account.ListUsersQuery) (account.UserPage, error) {
-	query.Limit = normalizeLimit(query.Limit)
 	db := r.db.WithContext(ctx).Table("users u").
 		Select("u.id, u.email, u.status, ur.role, u.created_at, u.updated_at").
 		Joins("JOIN user_roles ur ON ur.user_id = u.id").
@@ -155,7 +167,6 @@ func (r *Repository) ChangeStatus(ctx context.Context, change account.StatusChan
 }
 
 func (r *Repository) ListAuditEvents(ctx context.Context, query account.ListAuditQuery) (account.AuditPage, error) {
-	query.Limit = normalizeLimit(query.Limit)
 	db := r.db.WithContext(ctx).Model(&auditModel{}).Order("occurred_at DESC, id DESC")
 	if query.Cursor != "" {
 		cursor, err := decodeCursor(query.Cursor)
@@ -275,14 +286,4 @@ func newUUID() (string, error) {
 	value[8] = (value[8] & 0x3f) | 0x80
 	hexValue := hex.EncodeToString(value[:])
 	return hexValue[0:8] + "-" + hexValue[8:12] + "-" + hexValue[12:16] + "-" + hexValue[16:20] + "-" + hexValue[20:32], nil
-}
-
-func normalizeLimit(limit int) int {
-	if limit < 1 {
-		return 50
-	}
-	if limit > 100 {
-		return 100
-	}
-	return limit
 }

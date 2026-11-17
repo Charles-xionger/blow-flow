@@ -37,6 +37,15 @@ type Identity struct {
 	AuthenticatedAt time.Time
 }
 
+type InitialAdministrator struct {
+	Issuer  string
+	Subject string
+}
+
+type IdentityProvisioning struct {
+	MayBecomeInitialAdministrator bool
+}
+
 type AuthProof struct {
 	MFA             bool
 	AuthenticatedAt time.Time

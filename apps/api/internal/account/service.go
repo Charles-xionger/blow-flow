@@ -9,23 +9,23 @@ import (
 const recentAuthenticationWindow = 10 * time.Minute
 
 type Repository interface {
-	ResolveIdentity(context.Context, Identity, Role) (User, error)
+	ResolveIdentity(context.Context, Identity, IdentityProvisioning) (User, error)
 	ListUsers(context.Context, ListUsersQuery) (UserPage, error)
 	ChangeStatus(context.Context, StatusChange) (User, error)
 	ListAuditEvents(context.Context, ListAuditQuery) (AuditPage, error)
 }
 
 type Service struct {
-	repository          Repository
-	initialAdminSubject string
-	now                 func() time.Time
+	repository           Repository
+	initialAdministrator InitialAdministrator
+	now                  func() time.Time
 }
 
-func NewService(repository Repository, initialAdminSubject string, now func() time.Time) *Service {
+func NewService(repository Repository, initialAdministrator InitialAdministrator, now func() time.Time) *Service {
 	if now == nil {
 		now = time.Now
 	}
-	return &Service{repository: repository, initialAdminSubject: initialAdminSubject, now: now}
+	return &Service{repository: repository, initialAdministrator: initialAdministrator, now: now}
 }
 
 func (s *Service) Resolve(ctx context.Context, identity Identity) (User, error) {
@@ -35,11 +35,9 @@ func (s *Service) Resolve(ctx context.Context, identity Identity) (User, error) 
 	if !identity.EmailVerified {
 		return User{}, ErrEmailUnverified
 	}
-	bootstrap := RoleUser
-	if s.initialAdminSubject != "" && identity.Subject == s.initialAdminSubject {
-		bootstrap = RoleAdmin
-	}
-	user, err := s.repository.ResolveIdentity(ctx, identity, bootstrap)
+	provisioning := IdentityProvisioning{MayBecomeInitialAdministrator: s.initialAdministrator.Issuer != "" &&
+		identity.Issuer == s.initialAdministrator.Issuer && identity.Subject == s.initialAdministrator.Subject}
+	user, err := s.repository.ResolveIdentity(ctx, identity, provisioning)
 	if err != nil {
 		return User{}, err
 	}

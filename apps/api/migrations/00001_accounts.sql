@@ -37,8 +37,5 @@ CREATE INDEX users_created_at_id_idx ON users (created_at DESC, id DESC);
 CREATE INDEX audit_events_occurred_at_id_idx ON audit_events (occurred_at DESC, id DESC);
 CREATE INDEX audit_events_actor_id_idx ON audit_events (actor_id, occurred_at DESC);
 
--- +goose Down
-DROP TABLE audit_events;
-DROP TABLE user_roles;
-DROP TABLE user_identities;
-DROP TABLE users;
+-- This migration is intentionally irreversible. Restore account and audit data
+-- from a verified PostgreSQL backup instead of dropping authoritative tables.

@@ -9,3 +9,8 @@ Run DATABASE_URL=... pnpm db:migrate as a deployment job, never in API/worker
 startup. Do not use GORM AutoMigrate in production. Use expand/backfill/contract
 for live changes; destructive rollback requires a separate data recovery plan.
 The integration test exercises Goose with a disposable fixture schema.
+
+Account migrations are forward-only. Before applying them outside disposable
+environments, take and verify a PostgreSQL backup. Rollback means restoring that
+backup in the declared recovery window; it never means dropping account or audit
+tables through Goose.

@@ -49,7 +49,7 @@ func run() error {
 				}
 				identityVerifier = verifier
 				repository := accountpostgres.New(db, time.Now)
-				accounts = account.NewService(repository, os.Getenv("INITIAL_ADMIN_SUBJECT"), time.Now)
+				accounts = account.NewService(repository, account.InitialAdministrator{Issuer: issuer, Subject: os.Getenv("INITIAL_ADMIN_SUBJECT")}, time.Now)
 				ping = func(ctx context.Context) error { return database.Check(ctx, pool) }
 			} else {
 				slog.Warn("account API unavailable: OIDC_ISSUER and OIDC_AUDIENCE are required")

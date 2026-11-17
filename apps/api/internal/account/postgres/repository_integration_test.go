@@ -67,7 +67,7 @@ func TestAccountRepositoryOwnsIdentityStatusAndAuditTransaction(t *testing.T) {
 		wait.Add(1)
 		go func(index int) {
 			defer wait.Done()
-			users[index], errs[index] = repository.ResolveIdentity(context.Background(), identity, account.RoleAdmin)
+			users[index], errs[index] = repository.ResolveIdentity(context.Background(), identity, account.IdentityProvisioning{MayBecomeInitialAdministrator: true})
 		}(i)
 	}
 	wait.Wait()
@@ -83,9 +83,16 @@ func TestAccountRepositoryOwnsIdentityStatusAndAuditTransaction(t *testing.T) {
 		t.Fatalf("email = %q", users[0].Email)
 	}
 
-	member, err := repository.ResolveIdentity(context.Background(), account.Identity{Issuer: identity.Issuer, Subject: "member-subject", Email: "member@example.com", EmailVerified: true}, account.RoleUser)
+	member, err := repository.ResolveIdentity(context.Background(), account.Identity{Issuer: identity.Issuer, Subject: "member-subject", Email: "member@example.com", EmailVerified: true}, account.IdentityProvisioning{})
 	if err != nil {
 		t.Fatal(err)
+	}
+	secondCandidate, err := repository.ResolveIdentity(context.Background(), account.Identity{Issuer: identity.Issuer, Subject: "second-admin", Email: "second@example.com", EmailVerified: true}, account.IdentityProvisioning{MayBecomeInitialAdministrator: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secondCandidate.Role != account.RoleUser {
+		t.Fatalf("second initial-administrator candidate role = %q", secondCandidate.Role)
 	}
 	changed, err := repository.ChangeStatus(context.Background(), account.StatusChange{ActorID: users[0].ID, TargetID: member.ID, Status: account.StatusDisabled, Reason: "abuse", At: now.Add(time.Minute)})
 	if err != nil {

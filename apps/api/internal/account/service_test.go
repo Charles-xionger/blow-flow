@@ -8,14 +8,14 @@ import (
 )
 
 type repositoryStub struct {
-	resolve func(context.Context, Identity, Role) (User, error)
+	resolve func(context.Context, Identity, IdentityProvisioning) (User, error)
 	list    func(context.Context, ListUsersQuery) (UserPage, error)
 	status  func(context.Context, StatusChange) (User, error)
 	audit   func(context.Context, ListAuditQuery) (AuditPage, error)
 }
 
-func (r repositoryStub) ResolveIdentity(ctx context.Context, identity Identity, bootstrap Role) (User, error) {
-	return r.resolve(ctx, identity, bootstrap)
+func (r repositoryStub) ResolveIdentity(ctx context.Context, identity Identity, provisioning IdentityProvisioning) (User, error) {
+	return r.resolve(ctx, identity, provisioning)
 }
 func (r repositoryStub) ListUsers(ctx context.Context, query ListUsersQuery) (UserPage, error) {
 	return r.list(ctx, query)
@@ -29,10 +29,10 @@ func (r repositoryStub) ListAuditEvents(ctx context.Context, query ListAuditQuer
 
 func TestResolveRejectsUnverifiedIdentity(t *testing.T) {
 	called := false
-	service := NewService(repositoryStub{resolve: func(context.Context, Identity, Role) (User, error) {
+	service := NewService(repositoryStub{resolve: func(context.Context, Identity, IdentityProvisioning) (User, error) {
 		called = true
 		return User{}, nil
-	}}, "owner-subject", time.Now)
+	}}, InitialAdministrator{Issuer: "https://identity.example", Subject: "owner-subject"}, time.Now)
 
 	_, err := service.Resolve(context.Background(), Identity{
 		Issuer: "https://identity.example", Subject: "person-1", Email: "person@example.com",
@@ -47,12 +47,12 @@ func TestResolveRejectsUnverifiedIdentity(t *testing.T) {
 }
 
 func TestResolveBootstrapsOnlyConfiguredInitialAdministrator(t *testing.T) {
-	var roles []Role
-	repo := repositoryStub{resolve: func(_ context.Context, _ Identity, role Role) (User, error) {
-		roles = append(roles, role)
-		return User{ID: "user-1", Role: role, Status: StatusActive}, nil
+	var policies []IdentityProvisioning
+	repo := repositoryStub{resolve: func(_ context.Context, _ Identity, provisioning IdentityProvisioning) (User, error) {
+		policies = append(policies, provisioning)
+		return User{ID: "user-1", Status: StatusActive}, nil
 	}}
-	service := NewService(repo, "owner-subject", time.Now)
+	service := NewService(repo, InitialAdministrator{Issuer: "https://identity.example", Subject: "owner-subject"}, time.Now)
 
 	for _, subject := range []string{"member-subject", "owner-subject"} {
 		_, err := service.Resolve(context.Background(), Identity{
@@ -63,11 +63,18 @@ func TestResolveBootstrapsOnlyConfiguredInitialAdministrator(t *testing.T) {
 		}
 	}
 
-	want := []Role{RoleUser, RoleAdmin}
+	want := []bool{false, true}
 	for i := range want {
-		if roles[i] != want[i] {
-			t.Fatalf("role[%d] = %q, want %q", i, roles[i], want[i])
+		if policies[i].MayBecomeInitialAdministrator != want[i] {
+			t.Fatalf("policy[%d] = %+v, want initial-admin=%v", i, policies[i], want[i])
 		}
+	}
+	_, err := service.Resolve(context.Background(), Identity{Issuer: "https://other-issuer.example", Subject: "owner-subject", Email: "owner@example.com", EmailVerified: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if policies[2].MayBecomeInitialAdministrator {
+		t.Fatal("matching subject from another issuer could become administrator")
 	}
 }
 
@@ -81,7 +88,7 @@ func TestDisableUserRequiresAdministratorMFAAndRecentAuthentication(t *testing.T
 		}
 		return User{ID: change.TargetID, Status: change.Status}, nil
 	}}
-	service := NewService(repo, "", func() time.Time { return now })
+	service := NewService(repo, InitialAdministrator{}, func() time.Time { return now })
 	admin := User{ID: "admin-1", Role: RoleAdmin, Status: StatusActive}
 
 	proofs := []AuthProof{

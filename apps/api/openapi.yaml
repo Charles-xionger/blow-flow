@@ -24,6 +24,8 @@ paths:
                   user: { $ref: "#/components/schemas/User" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
   /admin/users:
     get:
       operationId: listUsers
@@ -48,6 +50,10 @@ paths:
                     items: { $ref: "#/components/schemas/User" }
                   nextCursor: { type: string }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
   /admin/users/{userId}/status:
     patch:
       operationId: changeUserStatus
@@ -80,8 +86,11 @@ paths:
                 properties:
                   user: { $ref: "#/components/schemas/User" }
         "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
   /admin/audit-events:
     get:
       operationId: listAuditEvents
@@ -103,6 +112,10 @@ paths:
                     items: { $ref: "#/components/schemas/AuditEvent" }
                   nextCursor: { type: string }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
 components:
   securitySchemes:
     bearerAuth:
@@ -167,6 +180,16 @@ components:
           schema: { $ref: "#/components/schemas/Error" }
     NotFound:
       description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    ServiceUnavailable:
+      description: Account dependencies are not configured or unavailable
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
