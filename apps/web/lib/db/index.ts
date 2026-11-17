@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
 import { projectCover } from "../workspace/cover";
+import { currentLocalOwnerId } from "../auth/current-user";
 
 let db: Database.Database | null = null;
 
@@ -118,21 +119,7 @@ function initializeTables(db: Database.Database) {
     );
   `);
 
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS user_skills (
-      name TEXT PRIMARY KEY,
-      description TEXT NOT NULL,
-      instructions TEXT NOT NULL,
-      created_at INTEGER NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS user_skill_resources (
-      skill_name TEXT NOT NULL,
-      path TEXT NOT NULL,
-      content BLOB NOT NULL,
-      PRIMARY KEY (skill_name, path),
-      FOREIGN KEY (skill_name) REFERENCES user_skills(name) ON DELETE CASCADE
-    );
-  `);
+  initializeSkillTables(db);
 
   // characters 表
   db.exec(`
@@ -152,6 +139,57 @@ function initializeTables(db: Database.Database) {
   `);
 
   console.log("[DB] Database initialized");
+}
+
+function createOwnedSkillTables(db: Database.Database) {
+  db.exec(`
+    CREATE TABLE user_skills (
+      owner_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL,
+      instructions TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (owner_id, name)
+    );
+    CREATE TABLE user_skill_resources (
+      owner_id TEXT NOT NULL,
+      skill_name TEXT NOT NULL,
+      path TEXT NOT NULL,
+      content BLOB NOT NULL,
+      PRIMARY KEY (owner_id, skill_name, path),
+      FOREIGN KEY (owner_id, skill_name) REFERENCES user_skills(owner_id, name) ON DELETE CASCADE
+    );
+  `);
+}
+
+function initializeSkillTables(db: Database.Database) {
+  const existing = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'user_skills'").get();
+  if (!existing) {
+    createOwnedSkillTables(db);
+    return;
+  }
+  const columns = db.prepare('PRAGMA table_info(user_skills)').all() as { name: string }[];
+  if (columns.some(column => column.name === 'owner_id')) return;
+
+  db.transaction(() => {
+    db.exec(`
+      ALTER TABLE user_skill_resources RENAME TO legacy_user_skill_resources;
+      ALTER TABLE user_skills RENAME TO legacy_user_skills;
+    `);
+    createOwnedSkillTables(db);
+    db.prepare(`
+      INSERT INTO user_skills (owner_id, name, description, instructions, created_at)
+      SELECT ?, name, description, instructions, created_at FROM legacy_user_skills
+    `).run(currentLocalOwnerId);
+    db.prepare(`
+      INSERT INTO user_skill_resources (owner_id, skill_name, path, content)
+      SELECT ?, skill_name, path, content FROM legacy_user_skill_resources
+    `).run(currentLocalOwnerId);
+    db.exec(`
+      DROP TABLE legacy_user_skill_resources;
+      DROP TABLE legacy_user_skills;
+    `);
+  }).immediate();
 }
 
 // 关闭数据库连接（优雅退出时调用）

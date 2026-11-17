@@ -1,18 +1,9 @@
-require('../scripts/register-typescript.cjs');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-registry-'));
-process.env.DATABASE_PATH = path.join(directory, 'skills.db');
-const { listSkills, getSkill, discoverSkills, readSkill, uploadSkillMarkdown, deleteSkill } = require('../lib/agent/skills.ts');
-const { closeDatabase } = require('../lib/db/index.ts');
-
-test.after(() => {
-  closeDatabase();
-  fs.rmSync(directory, { recursive: true, force: true });
-});
+const { createSkillTestFixture, skillUploadInput } = require('./helpers/skill-test-fixture.cjs');
+const fixture = createSkillTestFixture(test, 'skill-registry');
+const { listSkills, getSkill, discoverSkills, readSkill, uploadSkillMarkdown, deleteSkill } = fixture.requireApp('lib/agent/skills.ts');
+const { closeDatabase } = fixture.requireApp('lib/db/index.ts');
 
 test('personal skill library and Agent read the same built-in skill registry', () => {
   assert.deepEqual(listSkills(), [
@@ -45,7 +36,7 @@ test('personal skill library and Agent read the same built-in skill registry', (
 test('a valid SKILL.md is immediately discoverable while instructions stay behind read_skill', () => {
   const markdown = `---\nname: lighting-director\ndescription: Plan expressive lighting for a scene.\n---\n\n# Lighting Director\n\nShape the key, fill, and rim light.`;
 
-  const uploaded = uploadSkillMarkdown({ fileName: 'SKILL.md', content: markdown, size: Buffer.byteLength(markdown), totalSize: Buffer.byteLength(markdown) });
+  const uploaded = uploadSkillMarkdown(skillUploadInput(markdown));
 
   assert.deepEqual(uploaded, {
     id: 'lighting-director',
@@ -74,17 +65,14 @@ test('uploaded skill metadata and instructions survive reopening the database', 
 test('a legal skill name that matches an object prototype property can be uploaded', () => {
   const markdown = '---\nname: constructor\ndescription: Build constructor scenes.\n---\n\nKeep the structure visible.';
 
-  uploadSkillMarkdown({ fileName: 'SKILL.md', content: markdown, size: Buffer.byteLength(markdown), totalSize: Buffer.byteLength(markdown) });
+  uploadSkillMarkdown(skillUploadInput(markdown));
 
   assert.equal(readSkill('constructor'), 'Keep the structure visible.');
 });
 
 test('deleting an uploaded skill removes its resources and permits an independent same-name upload', () => {
   const original = '---\nname: disposable-skill\ndescription: Original version.\n---\n\nOriginal instructions.';
-  uploadSkillMarkdown({
-    fileName: 'SKILL.md', content: original, size: Buffer.byteLength(original), totalSize: Buffer.byteLength(original),
-    resources: new Map([['references/original.md', Buffer.from('Original resource.')]]),
-  });
+  uploadSkillMarkdown(skillUploadInput(original, new Map([['references/original.md', Buffer.from('Original resource.')]])));
 
   deleteSkill('disposable-skill');
 
@@ -93,7 +81,7 @@ test('deleting an uploaded skill removes its resources and permits an independen
   assert.throws(() => readSkill('disposable-skill', 'references/original.md'), /不再可用/);
 
   const replacement = '---\nname: disposable-skill\ndescription: Replacement version.\n---\n\nReplacement instructions.';
-  uploadSkillMarkdown({ fileName: 'SKILL.md', content: replacement, size: Buffer.byteLength(replacement), totalSize: Buffer.byteLength(replacement) });
+  uploadSkillMarkdown(skillUploadInput(replacement));
   assert.equal(readSkill('disposable-skill'), 'Replacement instructions.');
   assert.throws(() => readSkill('disposable-skill', 'references/original.md'), /不再可用/);
 });
@@ -101,4 +89,26 @@ test('deleting an uploaded skill removes its resources and permits an independen
 test('built-in skills cannot be deleted through the registry', () => {
   assert.throws(() => deleteSkill('screenplay'), /内置创作技能不能删除/);
   assert.match(readSkill('screenplay'), /人物、场景、动作与对白/);
+});
+
+test('personal creative skills are isolated by owner across every registry operation', () => {
+  const firstOwner = { ownerId: 'test-owner-first' };
+  const secondOwner = { ownerId: 'test-owner-second' };
+  const first = '---\nname: shared-name\ndescription: First owner version.\n---\n\nFirst owner instructions.';
+  const second = '---\nname: shared-name\ndescription: Second owner version.\n---\n\nSecond owner instructions.';
+
+  uploadSkillMarkdown(skillUploadInput(first, new Map([['reference.txt', Buffer.from('first resource')]])), firstOwner);
+  uploadSkillMarkdown(skillUploadInput(second, new Map([['reference.txt', Buffer.from('second resource')]])), secondOwner);
+
+  assert.equal(getSkill('shared-name', firstOwner).description, 'First owner version.');
+  assert.equal(getSkill('shared-name', secondOwner).description, 'Second owner version.');
+  assert.equal(readSkill('shared-name', undefined, firstOwner), 'First owner instructions.');
+  assert.equal(readSkill('shared-name', 'reference.txt', secondOwner), 'second resource');
+  assert.equal(listSkills(firstOwner).filter(skill => skill.id === 'shared-name').length, 1);
+  assert.equal(discoverSkills(secondOwner).find(skill => skill.id === 'shared-name').description, 'Second owner version.');
+
+  deleteSkill('shared-name', firstOwner);
+
+  assert.throws(() => readSkill('shared-name', undefined, firstOwner), /不再可用/);
+  assert.equal(readSkill('shared-name', undefined, secondOwner), 'Second owner instructions.');
 });

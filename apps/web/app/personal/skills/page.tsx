@@ -5,14 +5,15 @@ import { PersonalSpaceMenu } from '@/components/workspace/PersonalSpaceMenu';
 import { getSkill, listSkills } from '@/lib/agent/skills';
 import { SkillUploadForm } from './SkillUploadForm';
 import { SkillDeleteButton } from './SkillDeleteButton';
+import { currentLocalOwner } from '@/lib/auth/current-user';
 import styles from './skills.module.css';
 
 type Props = { searchParams: Promise<{ skill?: string }> };
 
 export default async function PersonalSkillsPage({ searchParams }: Props) {
-  const skills = listSkills();
+  const skills = listSkills(currentLocalOwner);
   const requested = (await searchParams).skill;
-  const selected = getSkill(skills.some(skill => skill.id === requested) ? requested! : skills[0].id);
+  const selected = getSkill(skills.some(skill => skill.id === requested) ? requested! : skills[0].id, currentLocalOwner);
 
   return <div className={styles.page}>
     <header className={styles.header}>

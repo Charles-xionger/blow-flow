@@ -1,21 +1,11 @@
-require('../scripts/register-typescript.cjs');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const Module = require('node:module');
+const crypto = require('node:crypto');
 const JSZip = require('jszip');
-process.env.DATABASE_PATH = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'skill-upload-')), 'skills.db');
-
-const originalLoad = Module._load;
-Module._load = function (id, parent, isMain) {
-  if (id.startsWith('@/')) id = path.resolve(__dirname, '..', id.slice(2));
-  return originalLoad.call(this, id, parent, isMain);
-};
-const { POST } = require('../app/api/personal/skills/route.ts');
-const { discoverSkills, getSkill, readSkill } = require('../lib/agent/skills.ts');
-Module._load = originalLoad;
+const { createSkillTestFixture } = require('./helpers/skill-test-fixture.cjs');
+const fixture = createSkillTestFixture(test, 'skill-upload');
+const { POST } = fixture.requireApp('app/api/personal/skills/route.ts');
+const { discoverSkills, getSkill, readSkill } = fixture.requireApp('lib/agent/skills.ts');
 
 async function zipUpload(entries, name = 'skill.zip', options) {
   const zip = new JSZip();
@@ -58,7 +48,7 @@ test('upload API rejects invalid frontmatter, duplicates, and size limits withou
     [await upload('---\nname: screenplay\ndescription: duplicate built-in\n---\nbody'), 409, /已存在/],
     [await upload('---\nname: color-script\ndescription: duplicate upload\n---\nreplacement'), 409, /已存在/],
     [await upload('---\nname: too-large\ndescription: too large\n---\n' + 'x'.repeat(5 * 1024 * 1024)), 413, /5 MB/],
-    [await upload('---\nname: total-too-large\ndescription: too large\n---\nbody', 'SKILL.md', { 'content-length': String(20 * 1024 * 1024 + 1) }), 413, /20 MB/],
+    [await upload('---\nname: total-too-large\ndescription: too large\n---\nbody', 'SKILL.md', { 'content-length': String(20 * 1024 * 1024 + 64 * 1024 + 1) }), 413, /20 MB/],
     [await upload('---\nname: wrong-file\ndescription: wrong file\n---\nbody', 'skill.md'), 400, /文件名必须是 SKILL.md/],
     [await upload('---\nname: empty-body\ndescription: no instructions\n---\n'), 400, /正文不能为空/],
   ];
@@ -67,20 +57,59 @@ test('upload API rejects invalid frontmatter, duplicates, and size limits withou
     assert.match((await response.json()).error, message);
   }
   assert.deepEqual(discoverSkills().filter(skill => ['no-description', 'too-large', 'total-too-large', 'wrong-file'].includes(skill.id)), []);
-  assert.equal(require('../lib/agent/skills.ts').readSkill('color-script'), 'Use motivated palette changes.');
+  assert.equal(readSkill('color-script'), 'Use motivated palette changes.');
 });
 
 test('upload API enforces the whole request limit without relying on Content-Length', async () => {
   const markdown = '---\nname: hidden-overflow\ndescription: must not be registered\n---\nbody';
   const form = new FormData();
   form.append('file', new File([markdown], 'SKILL.md', { type: 'text/markdown' }));
-  form.append('padding', 'x'.repeat(20 * 1024 * 1024));
+  form.append('padding', 'x'.repeat(20 * 1024 * 1024 + 64 * 1024));
 
   const response = await POST(new Request('http://localhost/api/personal/skills', { method: 'POST', body: form }));
 
   assert.equal(response.status, 413);
   assert.match((await response.json()).error, /20 MB/);
   assert.equal(discoverSkills().some(skill => skill.id === 'hidden-overflow'), false);
+});
+
+test('upload API accepts a ZIP at the package limit despite multipart framing overhead', async () => {
+  const zip = new JSZip();
+  zip.file('SKILL.md', '---\nname: near-package-limit\ndescription: Nearly fills the package limit.\n---\n\nKeep the package bytes.');
+  for (let index = 0; index < 4; index++) zip.file(`resource-${index}.bin`, Buffer.alloc(0));
+  const emptyArchive = await zip.generateAsync({ type: 'uint8array', compression: 'STORE' });
+  const rawBudget = 20 * 1024 * 1024 - emptyArchive.byteLength - 64;
+  const resourceSize = Math.floor(rawBudget / 4);
+  let remainder = rawBudget - resourceSize * 4;
+  for (let index = 0; index < 4; index++) {
+    const size = resourceSize + (remainder-- > 0 ? 1 : 0);
+    zip.file(`resource-${index}.bin`, crypto.randomBytes(size));
+  }
+  const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'STORE' });
+  assert.ok(bytes.byteLength <= 20 * 1024 * 1024);
+
+  const form = new FormData();
+  form.append('file', new File([bytes], 'near-limit.zip', { type: 'application/zip' }));
+  const request = new Request('http://localhost/api/personal/skills', { method: 'POST', body: form });
+  assert.ok((await request.clone().arrayBuffer()).byteLength > 20 * 1024 * 1024);
+
+  const response = await POST(request);
+
+  assert.equal(response.status, 201, JSON.stringify(await response.clone().json()));
+  assert.equal(readSkill('near-package-limit'), 'Keep the package bytes.');
+});
+
+test('upload API rejects multipart fields other than the single file', async () => {
+  const markdown = '---\nname: extra-field\ndescription: Must not register.\n---\nbody';
+  const form = new FormData();
+  form.append('file', new File([markdown], 'SKILL.md', { type: 'text/markdown' }));
+  form.append('metadata', 'unexpected');
+
+  const response = await POST(new Request('http://localhost/api/personal/skills', { method: 'POST', body: form }));
+
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /只允许上传一个文件/);
+  assert.equal(discoverSkills().some(skill => skill.id === 'extra-field'), false);
 });
 
 test('ZIP uploads support a root entry and one wrapper directory while resources stay on demand', async () => {

@@ -1,22 +1,12 @@
-require('../scripts/register-typescript.cjs');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-task-history-'));
-process.env.DATABASE_PATH = path.join(directory, 'skills.db');
-const { AgentService } = require('../lib/agent/service.ts');
-const { registerReadTools } = require('../lib/agent/mcp.ts');
-const { saveWorkflow } = require('../lib/db/workflows.ts');
-const { closeDatabase, getDatabase } = require('../lib/db/index.ts');
-const { deleteSkill, uploadSkillMarkdown } = require('../lib/agent/skills.ts');
-
-test.after(() => {
-  closeDatabase();
-  fs.rmSync(directory, { recursive: true, force: true });
-});
+const { createSkillTestFixture, skillUploadInput } = require('./helpers/skill-test-fixture.cjs');
+const fixture = createSkillTestFixture(test, 'skill-task-history');
+const { AgentService } = fixture.requireApp('lib/agent/service.ts');
+const { registerReadTools } = fixture.requireApp('lib/agent/mcp.ts');
+const { saveWorkflow } = fixture.requireApp('lib/db/workflows.ts');
+const { getDatabase } = fixture.requireApp('lib/db/index.ts');
+const { deleteSkill, uploadSkillMarkdown } = fixture.requireApp('lib/agent/skills.ts');
 
 function project(id) {
   saveWorkflow({
@@ -27,10 +17,7 @@ function project(id) {
 
 function upload(instructions, resource) {
   const markdown = `---\nname: durable-skill\ndescription: A durable task skill.\n---\n\n${instructions}`;
-  uploadSkillMarkdown({
-    fileName: 'SKILL.md', content: markdown, size: Buffer.byteLength(markdown), totalSize: Buffer.byteLength(markdown),
-    resources: resource ? new Map([['references/guide.md', Buffer.from(resource)]]) : undefined,
-  });
+  uploadSkillMarkdown(skillUploadInput(markdown, resource ? new Map([['references/guide.md', Buffer.from(resource)]]) : undefined));
 }
 
 test('task steps retain read snapshots while deletion fences unread content and same-name uploads', async () => {
