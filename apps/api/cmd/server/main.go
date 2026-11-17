@@ -42,7 +42,10 @@ func run() error {
 			issuer, audience := os.Getenv("OIDC_ISSUER"), os.Getenv("OIDC_AUDIENCE")
 			if issuer != "" && audience != "" {
 				providerContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				verifier, verifyErr := oidcauth.New(providerContext, issuer, audience)
+				verifier, verifyErr := oidcauth.New(providerContext, issuer, audience, oidcauth.Profile{
+					MFAAuthenticationMethod: os.Getenv("OIDC_MFA_AMR"),
+					MFAAssuranceContext:     os.Getenv("OIDC_ADMIN_ACR"),
+				})
 				cancel()
 				if verifyErr != nil {
 					return verifyErr

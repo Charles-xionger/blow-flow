@@ -43,16 +43,15 @@ func registerAccountRoutes(router *gin.Engine, dependencies Dependencies) {
 		}
 		c.JSON(http.StatusOK, page)
 	})
-	admin.PATCH("/users/:id/status", func(c *gin.Context) {
+	admin.POST("/users/:id/disable", func(c *gin.Context) {
 		var body struct {
-			Status account.Status `json:"status"`
-			Reason string         `json:"reason"`
+			Reason string `json:"reason"`
 		}
 		if err := decodeJSON(c, &body); err != nil {
 			writeAccountError(c, account.ErrInvalidArgument)
 			return
 		}
-		user, err := dependencies.Accounts.ChangeStatus(c.Request.Context(), currentUser(c), currentProof(c), c.Param("id"), body.Status, body.Reason)
+		user, err := dependencies.Accounts.DisableUser(c.Request.Context(), currentUser(c), currentProof(c), c.Param("id"), body.Reason)
 		if err != nil {
 			writeAccountError(c, err)
 			return
@@ -149,6 +148,8 @@ func writeAccountError(c *gin.Context, err error) {
 		status, code = http.StatusForbidden, "forbidden"
 	case errors.Is(err, account.ErrRecentMFARequired):
 		status, code = http.StatusForbidden, "recent_mfa_required"
+	case errors.Is(err, account.ErrCannotDisableSelf):
+		status, code = http.StatusConflict, "cannot_disable_self"
 	case errors.Is(err, account.ErrInvalidArgument):
 		status, code = http.StatusBadRequest, "invalid_request"
 	case errors.Is(err, account.ErrNotFound):

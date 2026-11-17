@@ -27,13 +27,18 @@ or create a second generation-task writer during the transition.
 
 - `DATABASE_URL`: PostgreSQL connection used by the API.
 - `OIDC_ISSUER`: exact issuer used for discovery and token validation.
-- `OIDC_AUDIENCE`: required access-token audience for this API.
+- `OIDC_AUDIENCE`: required JWT access-token audience for this API.
+- `OIDC_MFA_AMR` / `OIDC_ADMIN_ACR`: selected provider profile values that
+  prove MFA through the token's `amr` or `acr` claims; at least one is required.
 - `INITIAL_ADMIN_SUBJECT`: optional external subject promoted to `admin` only
   when its local account is first created, its issuer matches `OIDC_ISSUER`, and
   no administrator exists yet. Changing this value cannot create a second
   initial administrator.
 
-The admin client must request a hosted-provider MFA step-up before sensitive
+This slice intentionally supports the selected provider's signed JWT access-token
+profile, including `email`, `email_verified`, `auth_time`, and configured
+`amr`/`acr` claims. Opaque OAuth tokens require a future introspection adapter;
+they are not accepted implicitly. The admin client must request an MFA step-up before sensitive
 operations. The API independently requires the `mfa` authentication-method
 claim and an `auth_time` no more than ten minutes old.
 

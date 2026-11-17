@@ -94,7 +94,7 @@ func TestAccountRepositoryOwnsIdentityStatusAndAuditTransaction(t *testing.T) {
 	if secondCandidate.Role != account.RoleUser {
 		t.Fatalf("second initial-administrator candidate role = %q", secondCandidate.Role)
 	}
-	changed, err := repository.ChangeStatus(context.Background(), account.StatusChange{ActorID: users[0].ID, TargetID: member.ID, Status: account.StatusDisabled, Reason: "abuse", At: now.Add(time.Minute)})
+	changed, err := repository.DisableUser(context.Background(), account.DisableUser{ActorID: users[0].ID, TargetID: member.ID, Reason: "abuse", At: now.Add(time.Minute)})
 	if err != nil {
 		t.Fatal(err)
 	}

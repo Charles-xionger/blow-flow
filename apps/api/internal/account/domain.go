@@ -24,6 +24,7 @@ var (
 	ErrAccountDisabled   = errors.New("account is disabled")
 	ErrForbidden         = errors.New("operation is forbidden")
 	ErrRecentMFARequired = errors.New("recent multi-factor authentication is required")
+	ErrCannotDisableSelf = errors.New("administrator cannot disable own account")
 	ErrInvalidArgument   = errors.New("invalid argument")
 	ErrNotFound          = errors.New("resource not found")
 )
@@ -71,10 +72,9 @@ type UserPage struct {
 	NextCursor string `json:"nextCursor,omitempty"`
 }
 
-type StatusChange struct {
+type DisableUser struct {
 	ActorID  string
 	TargetID string
-	Status   Status
 	Reason   string
 	At       time.Time
 }

@@ -131,7 +131,7 @@ func (r *Repository) ListUsers(ctx context.Context, query account.ListUsersQuery
 	return page, nil
 }
 
-func (r *Repository) ChangeStatus(ctx context.Context, change account.StatusChange) (account.User, error) {
+func (r *Repository) DisableUser(ctx context.Context, change account.DisableUser) (account.User, error) {
 	var changed account.User
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var user userModel
@@ -141,10 +141,10 @@ func (r *Repository) ChangeStatus(ctx context.Context, change account.StatusChan
 			}
 			return err
 		}
-		if err := tx.Model(&user).Updates(map[string]any{"status": change.Status, "updated_at": change.At}).Error; err != nil {
+		if err := tx.Model(&user).Updates(map[string]any{"status": account.StatusDisabled, "updated_at": change.At}).Error; err != nil {
 			return err
 		}
-		metadata, err := json.Marshal(map[string]any{"previousStatus": user.Status, "status": change.Status, "reason": change.Reason})
+		metadata, err := json.Marshal(map[string]any{"previousStatus": user.Status, "status": account.StatusDisabled, "reason": change.Reason})
 		if err != nil {
 			return err
 		}

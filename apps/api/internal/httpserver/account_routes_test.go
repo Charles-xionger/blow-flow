@@ -22,9 +22,9 @@ func (v verifierStub) Verify(context.Context, string) (account.Identity, error) 
 }
 
 type accountServiceStub struct {
-	resolved account.User
-	changed  account.User
-	changeID string
+	resolved  account.User
+	disabled  account.User
+	disableID string
 }
 
 func (s *accountServiceStub) Resolve(context.Context, account.Identity) (account.User, error) {
@@ -33,10 +33,10 @@ func (s *accountServiceStub) Resolve(context.Context, account.Identity) (account
 func (s *accountServiceStub) ListUsers(context.Context, account.User, account.AuthProof, account.ListUsersQuery) (account.UserPage, error) {
 	return account.UserPage{Users: []account.User{s.resolved}}, nil
 }
-func (s *accountServiceStub) ChangeStatus(_ context.Context, _ account.User, _ account.AuthProof, targetID string, status account.Status, _ string) (account.User, error) {
-	s.changeID = targetID
-	s.changed.Status = status
-	return s.changed, nil
+func (s *accountServiceStub) DisableUser(_ context.Context, _ account.User, _ account.AuthProof, targetID string, _ string) (account.User, error) {
+	s.disableID = targetID
+	s.disabled.Status = account.StatusDisabled
+	return s.disabled, nil
 }
 func (s *accountServiceStub) ListAuditEvents(context.Context, account.User, account.AuthProof, account.ListAuditQuery) (account.AuditPage, error) {
 	return account.AuditPage{Events: []account.AuditEvent{{ID: "audit-1"}}}, nil
@@ -80,22 +80,22 @@ func TestAdminCanDisableUserThroughVersionedAPI(t *testing.T) {
 	now := time.Now().UTC()
 	service := &accountServiceStub{
 		resolved: account.User{ID: "admin-1", Role: account.RoleAdmin, Status: account.StatusActive},
-		changed:  account.User{ID: "user-2", Role: account.RoleUser},
+		disabled: account.User{ID: "user-2", Role: account.RoleUser},
 	}
 	router := NewWithDependencies(Dependencies{
 		Accounts:         service,
 		IdentityVerifier: verifierStub{identity: account.Identity{Issuer: "https://identity.example", Subject: "admin", Email: "admin@example.com", EmailVerified: true, MFA: true, AuthenticatedAt: now}},
 	})
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPatch, "/v1/admin/users/user-2/status", strings.NewReader(`{"status":"disabled","reason":"abuse"}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/admin/users/user-2/disable", strings.NewReader(`{"reason":"abuse"}`))
 	req.Header.Set("Authorization", "Bearer valid-token")
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
 	}
-	if service.changeID != "user-2" || service.changed.Status != account.StatusDisabled {
-		t.Fatalf("change = %q %+v", service.changeID, service.changed)
+	if service.disableID != "user-2" || service.disabled.Status != account.StatusDisabled {
+		t.Fatalf("disable = %q %+v", service.disableID, service.disabled)
 	}
 }
 

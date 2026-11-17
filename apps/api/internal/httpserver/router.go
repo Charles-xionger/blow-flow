@@ -21,7 +21,7 @@ type IdentityVerifier interface {
 type AccountService interface {
 	Resolve(context.Context, account.Identity) (account.User, error)
 	ListUsers(context.Context, account.User, account.AuthProof, account.ListUsersQuery) (account.UserPage, error)
-	ChangeStatus(context.Context, account.User, account.AuthProof, string, account.Status, string) (account.User, error)
+	DisableUser(context.Context, account.User, account.AuthProof, string, string) (account.User, error)
 	ListAuditEvents(context.Context, account.User, account.AuthProof, account.ListAuditQuery) (account.AuditPage, error)
 }
 

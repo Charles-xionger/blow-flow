@@ -11,7 +11,7 @@ const recentAuthenticationWindow = 10 * time.Minute
 type Repository interface {
 	ResolveIdentity(context.Context, Identity, IdentityProvisioning) (User, error)
 	ListUsers(context.Context, ListUsersQuery) (UserPage, error)
-	ChangeStatus(context.Context, StatusChange) (User, error)
+	DisableUser(context.Context, DisableUser) (User, error)
 	ListAuditEvents(context.Context, ListAuditQuery) (AuditPage, error)
 }
 
@@ -58,7 +58,7 @@ func (s *Service) ListUsers(ctx context.Context, actor User, proof AuthProof, qu
 	return s.repository.ListUsers(ctx, query)
 }
 
-func (s *Service) ChangeStatus(ctx context.Context, actor User, proof AuthProof, targetID string, status Status, reason string) (User, error) {
+func (s *Service) DisableUser(ctx context.Context, actor User, proof AuthProof, targetID string, reason string) (User, error) {
 	if err := requireAdministrator(actor, proof); err != nil {
 		return User{}, err
 	}
@@ -66,11 +66,14 @@ func (s *Service) ChangeStatus(ctx context.Context, actor User, proof AuthProof,
 	if proof.AuthenticatedAt.IsZero() || proof.AuthenticatedAt.After(now) || now.Sub(proof.AuthenticatedAt) > recentAuthenticationWindow {
 		return User{}, ErrRecentMFARequired
 	}
-	if strings.TrimSpace(targetID) == "" || strings.TrimSpace(reason) == "" || (status != StatusActive && status != StatusDisabled) {
+	if strings.TrimSpace(targetID) == "" || strings.TrimSpace(reason) == "" {
 		return User{}, ErrInvalidArgument
 	}
-	return s.repository.ChangeStatus(ctx, StatusChange{
-		ActorID: actor.ID, TargetID: targetID, Status: status, Reason: strings.TrimSpace(reason), At: now,
+	if targetID == actor.ID {
+		return User{}, ErrCannotDisableSelf
+	}
+	return s.repository.DisableUser(ctx, DisableUser{
+		ActorID: actor.ID, TargetID: targetID, Reason: strings.TrimSpace(reason), At: now,
 	})
 }
 

@@ -54,10 +54,10 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "500": { $ref: "#/components/responses/InternalError" }
         "503": { $ref: "#/components/responses/ServiceUnavailable" }
-  /admin/users/{userId}/status:
-    patch:
-      operationId: changeUserStatus
-      summary: Enable or disable a user account and append an audit event
+  /admin/users/{userId}/disable:
+    post:
+      operationId: disableUser
+      summary: Disable a user account and append an audit event
       description: Requires MFA and authentication no more than ten minutes old.
       parameters:
         - name: userId
@@ -71,9 +71,8 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [status, reason]
+              required: [reason]
               properties:
-                status: { $ref: "#/components/schemas/UserStatus" }
                 reason: { type: string, minLength: 1 }
       responses:
         "200":
@@ -89,6 +88,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
         "500": { $ref: "#/components/responses/InternalError" }
         "503": { $ref: "#/components/responses/ServiceUnavailable" }
   /admin/audit-events:
@@ -180,6 +180,11 @@ components:
           schema: { $ref: "#/components/schemas/Error" }
     NotFound:
       description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Conflict:
+      description: Operation conflicts with an account safety invariant
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }

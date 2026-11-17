@@ -38,7 +38,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/admin/users/{userId}/status": {
+    "/admin/users/{userId}/disable": {
         parameters: {
             query?: never;
             header?: never;
@@ -47,15 +47,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post?: never;
+        /**
+         * Disable a user account and append an audit event
+         * @description Requires MFA and authentication no more than ten minutes old.
+         */
+        post: operations["disableUser"];
         delete?: never;
         options?: never;
         head?: never;
-        /**
-         * Enable or disable a user account and append an audit event
-         * @description Requires MFA and authentication no more than ten minutes old.
-         */
-        patch: operations["changeUserStatus"];
+        patch?: never;
         trace?: never;
     };
     "/admin/audit-events": {
@@ -150,6 +150,15 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
+        /** @description Operation conflicts with an account safety invariant */
+        Conflict: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
         /** @description Internal server error */
         InternalError: {
             headers: {
@@ -237,7 +246,7 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
-    changeUserStatus: {
+    disableUser: {
         parameters: {
             query?: never;
             header?: never;
@@ -249,7 +258,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    status: components["schemas"]["UserStatus"];
                     reason: string;
                 };
             };
@@ -270,6 +278,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["ServiceUnavailable"];
         };

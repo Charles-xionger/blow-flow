@@ -10,7 +10,7 @@ import (
 type repositoryStub struct {
 	resolve func(context.Context, Identity, IdentityProvisioning) (User, error)
 	list    func(context.Context, ListUsersQuery) (UserPage, error)
-	status  func(context.Context, StatusChange) (User, error)
+	disable func(context.Context, DisableUser) (User, error)
 	audit   func(context.Context, ListAuditQuery) (AuditPage, error)
 }
 
@@ -20,8 +20,8 @@ func (r repositoryStub) ResolveIdentity(ctx context.Context, identity Identity, 
 func (r repositoryStub) ListUsers(ctx context.Context, query ListUsersQuery) (UserPage, error) {
 	return r.list(ctx, query)
 }
-func (r repositoryStub) ChangeStatus(ctx context.Context, change StatusChange) (User, error) {
-	return r.status(ctx, change)
+func (r repositoryStub) DisableUser(ctx context.Context, command DisableUser) (User, error) {
+	return r.disable(ctx, command)
 }
 func (r repositoryStub) ListAuditEvents(ctx context.Context, query ListAuditQuery) (AuditPage, error) {
 	return r.audit(ctx, query)
@@ -81,12 +81,12 @@ func TestResolveBootstrapsOnlyConfiguredInitialAdministrator(t *testing.T) {
 func TestDisableUserRequiresAdministratorMFAAndRecentAuthentication(t *testing.T) {
 	now := time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)
 	called := 0
-	repo := repositoryStub{status: func(_ context.Context, change StatusChange) (User, error) {
+	repo := repositoryStub{disable: func(_ context.Context, change DisableUser) (User, error) {
 		called++
 		if change.ActorID != "admin-1" || change.TargetID != "user-2" || change.Reason != "abuse" {
 			t.Fatalf("unexpected change: %+v", change)
 		}
-		return User{ID: change.TargetID, Status: change.Status}, nil
+		return User{ID: change.TargetID, Status: StatusDisabled}, nil
 	}}
 	service := NewService(repo, InitialAdministrator{}, func() time.Time { return now })
 	admin := User{ID: "admin-1", Role: RoleAdmin, Status: StatusActive}
@@ -96,7 +96,7 @@ func TestDisableUserRequiresAdministratorMFAAndRecentAuthentication(t *testing.T
 		{MFA: true, AuthenticatedAt: now.Add(-11 * time.Minute)},
 	}
 	for _, proof := range proofs {
-		_, err := service.ChangeStatus(context.Background(), admin, proof, "user-2", StatusDisabled, "abuse")
+		_, err := service.DisableUser(context.Background(), admin, proof, "user-2", "abuse")
 		if !errors.Is(err, ErrRecentMFARequired) {
 			t.Fatalf("ChangeStatus() error = %v, want ErrRecentMFARequired", err)
 		}
@@ -105,11 +105,24 @@ func TestDisableUserRequiresAdministratorMFAAndRecentAuthentication(t *testing.T
 		t.Fatal("status mutation happened without recent MFA")
 	}
 
-	_, err := service.ChangeStatus(context.Background(), admin, AuthProof{MFA: true, AuthenticatedAt: now.Add(-9 * time.Minute)}, "user-2", StatusDisabled, "abuse")
+	_, err := service.DisableUser(context.Background(), admin, AuthProof{MFA: true, AuthenticatedAt: now.Add(-9 * time.Minute)}, "user-2", "abuse")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if called != 1 {
 		t.Fatalf("status mutations = %d, want 1", called)
+	}
+}
+
+func TestAdministratorCannotDisableOwnAccount(t *testing.T) {
+	now := time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)
+	service := NewService(repositoryStub{disable: func(context.Context, DisableUser) (User, error) {
+		t.Fatal("repository called for self-disable")
+		return User{}, nil
+	}}, InitialAdministrator{}, func() time.Time { return now })
+	admin := User{ID: "admin-1", Role: RoleAdmin, Status: StatusActive}
+	_, err := service.DisableUser(context.Background(), admin, AuthProof{MFA: true, AuthenticatedAt: now}, admin.ID, "mistake")
+	if !errors.Is(err, ErrCannotDisableSelf) {
+		t.Fatalf("DisableUser() error = %v, want ErrCannotDisableSelf", err)
 	}
 }
