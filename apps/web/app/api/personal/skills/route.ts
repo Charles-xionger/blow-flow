@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { SkillUploadError, skillUploadLimit, uploadSkillMarkdown } from '@/lib/agent/skills';
+import { parseSkillArchive } from '@/lib/agent/skill-archive';
 
 export const runtime = 'nodejs';
 
@@ -34,11 +35,14 @@ export async function POST(request: NextRequest) {
     const files = form.getAll('file');
     if (files.length !== 1 || !(files[0] instanceof File)) throw new SkillUploadError('请选择一个 SKILL.md 文件');
     const file = files[0];
+    const zip = file.name.toLowerCase().endsWith('.zip') || file.type === 'application/zip';
+    const archive = zip ? parseSkillArchive(Buffer.from(await file.arrayBuffer())) : undefined;
     const data = uploadSkillMarkdown({
-      fileName: file.name,
-      content: await file.text(),
-      size: file.size,
+      fileName: archive ? 'SKILL.md' : file.name,
+      content: archive?.markdown ?? await file.text(),
+      size: archive ? Buffer.byteLength(archive.markdown) : file.size,
       totalSize: upload.size,
+      resources: archive?.resources,
     });
     return NextResponse.json({ success: true, data }, { status: 201 });
   } catch (error) {

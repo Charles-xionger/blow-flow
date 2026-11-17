@@ -125,6 +125,13 @@ function initializeTables(db: Database.Database) {
       instructions TEXT NOT NULL,
       created_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS user_skill_resources (
+      skill_name TEXT NOT NULL,
+      path TEXT NOT NULL,
+      content BLOB NOT NULL,
+      PRIMARY KEY (skill_name, path),
+      FOREIGN KEY (skill_name) REFERENCES user_skills(name) ON DELETE CASCADE
+    );
   `);
 
   // characters 表

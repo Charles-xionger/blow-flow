@@ -32,6 +32,7 @@ const skills = {
 type SkillId = keyof typeof skills;
 
 type UserSkillRow = { name: string; description: string; instructions: string };
+type ResourceRow = { path: string; content?: Buffer };
 
 export class SkillUploadError extends Error {
     constructor(message: string, public status = 400) {
@@ -59,13 +60,14 @@ function toSkillSummary(id: SkillId): SkillSummary {
 export function listSkills(): SkillSummary[] {
     const builtIn = (Object.keys(skills) as SkillId[]).map(toSkillSummary);
     const uploaded = getDatabase().prepare('SELECT name, description FROM user_skills ORDER BY created_at, name').all() as UserSkillRow[];
+    const resources = getDatabase().prepare('SELECT skill_name, path FROM user_skill_resources ORDER BY path').all() as { skill_name: string; path: string }[];
     return [...builtIn, ...uploaded.map(skill => ({
         id: skill.name,
         name: skill.name,
         description: skill.description,
         source: '用户上传' as const,
         readOnly: false,
-        resources: [],
+        resources: resources.filter(resource => resource.skill_name === skill.name).map(resource => resource.path),
     }))];
 }
 
@@ -74,8 +76,9 @@ export function getSkill(id: string): SkillDetail {
     if (skill) return { ...toSkillSummary(id as SkillId), instructions: skill.instructions };
     const uploaded = getDatabase().prepare('SELECT name, description, instructions FROM user_skills WHERE name = ?').get(id) as UserSkillRow | undefined;
     if (!uploaded) throw new Error('Unknown skill');
+    const resources = getDatabase().prepare('SELECT path FROM user_skill_resources WHERE skill_name = ? ORDER BY path').all(id) as ResourceRow[];
     return { id: uploaded.name, name: uploaded.name, description: uploaded.description,
-        source: '用户上传', readOnly: false, resources: [], instructions: uploaded.instructions };
+        source: '用户上传', readOnly: false, resources: resources.map(resource => resource.path), instructions: uploaded.instructions };
 }
 
 export function discoverSkills() {
@@ -90,7 +93,11 @@ export function readSkill(id: string, resource?: string) {
         if (!value) throw new Error('Unknown skill resource');
         return value;
     }
-    if (resource) throw new Error('Unknown skill resource');
+    if (resource) {
+        const uploaded = getDatabase().prepare('SELECT content FROM user_skill_resources WHERE skill_name = ? AND path = ?').get(id, resource) as ResourceRow | undefined;
+        if (!uploaded?.content) throw new Error('Unknown skill resource');
+        return Buffer.from(uploaded.content).toString('utf8');
+    }
     return getSkill(id).instructions;
 }
 
@@ -98,7 +105,7 @@ export const skillFileLimit = 5 * 1024 * 1024;
 export const skillUploadLimit = 20 * 1024 * 1024;
 const skillName = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
-export function uploadSkillMarkdown(input: { fileName: string; content: string; size: number; totalSize: number }): SkillSummary {
+export function uploadSkillMarkdown(input: { fileName: string; content: string; size: number; totalSize: number; resources?: Map<string, Buffer> }): SkillSummary {
     if (input.totalSize > skillUploadLimit) throw new SkillUploadError('整个上传不能超过 20 MB', 413);
     if (input.size > skillFileLimit) throw new SkillUploadError('SKILL.md 不能超过 5 MB', 413);
     if (input.fileName !== 'SKILL.md') throw new SkillUploadError('文件名必须是 SKILL.md');
@@ -122,11 +129,15 @@ export function uploadSkillMarkdown(input: { fileName: string; content: string; 
     if (!instructions) throw new SkillUploadError('SKILL.md 正文不能为空');
     const db = getDatabase();
     try {
-        db.prepare('INSERT INTO user_skills (name, description, instructions, created_at) VALUES (?, ?, ?, ?)')
-            .run(name, description.trim(), instructions, Date.now());
+        db.transaction(() => {
+            db.prepare('INSERT INTO user_skills (name, description, instructions, created_at) VALUES (?, ?, ?, ?)')
+                .run(name, description.trim(), instructions, Date.now());
+            const insertResource = db.prepare('INSERT INTO user_skill_resources (skill_name, path, content) VALUES (?, ?, ?)');
+            for (const [resourcePath, content] of input.resources ?? []) insertResource.run(name, resourcePath, content);
+        }).immediate();
     } catch (error) {
         if (error instanceof Error && /UNIQUE constraint failed/.test(error.message)) throw new SkillUploadError(`创作技能 ${name} 已存在`, 409);
         throw error;
     }
-    return { id: name, name, description: description.trim(), source: '用户上传', readOnly: false, resources: [] };
+    return { id: name, name, description: description.trim(), source: '用户上传', readOnly: false, resources: [...(input.resources?.keys() ?? [])].sort() };
 }
