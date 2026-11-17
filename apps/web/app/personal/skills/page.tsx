@@ -31,7 +31,7 @@ export default async function PersonalSkillsPage({ searchParams }: Props) {
         <article className={styles.detail}>
           <div className={styles.detailHeader}><div><code>{selected.id}</code><h2>{selected.name}</h2><p>{selected.description}</p></div><span><LockKeyhole size={13} />内置 · 只读</span></div>
           <section><h3>完整指令</h3><p className={styles.instructions}>{selected.instructions}</p></section>
-          <section><h3>资源清单</h3><div className={styles.resources}>{selected.resources.map(resource => <div key={resource.id}><code>{resource.id}</code><p>{resource.content}</p></div>)}</div></section>
+          <section><h3>资源清单</h3><div className={styles.resources}>{selected.resources.map(resource => <div key={resource}><code>{resource}</code></div>)}</div></section>
         </article>
       </div>
     </main>

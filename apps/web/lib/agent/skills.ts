@@ -7,9 +7,8 @@ export type SkillSummary = {
     resources: string[];
 };
 
-export type SkillDetail = Omit<SkillSummary, 'resources'> & {
+export type SkillDetail = SkillSummary & {
     instructions: string;
-    resources: Array<{ id: string; content: string }>;
 };
 
 const skills = {
@@ -29,7 +28,7 @@ const skills = {
 
 type SkillId = keyof typeof skills;
 
-function entry(id: SkillId): SkillSummary {
+function toSkillSummary(id: SkillId): SkillSummary {
     const skill = skills[id];
     return {
         id,
@@ -42,16 +41,15 @@ function entry(id: SkillId): SkillSummary {
 }
 
 export function listSkills(): SkillSummary[] {
-    return (Object.keys(skills) as SkillId[]).map(entry);
+    return (Object.keys(skills) as SkillId[]).map(toSkillSummary);
 }
 
 export function getSkill(id: string): SkillDetail {
     const skill = skills[id as SkillId];
     if (!skill) throw new Error('Unknown built-in skill');
     return {
-        ...entry(id as SkillId),
+        ...toSkillSummary(id as SkillId),
         instructions: skill.instructions,
-        resources: Object.entries(skill.resources).map(([resourceId, content]) => ({ id: resourceId, content })),
     };
 }
 
@@ -60,9 +58,10 @@ export function discoverSkills() {
 }
 
 export function readSkill(id: string, resource?: string) {
-    const skill = getSkill(id);
+    const skill = skills[id as SkillId];
+    if (!skill) throw new Error('Unknown built-in skill');
     if (!resource) return skill.instructions;
-    const value = skill.resources.find(item => item.id === resource)?.content;
+    const value = (skill.resources as Record<string, string>)[resource];
     if (!value) throw new Error('Unknown skill resource');
     return value;
 }

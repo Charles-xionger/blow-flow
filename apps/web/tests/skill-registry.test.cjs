@@ -26,7 +26,8 @@ test('personal skill library and Agent read the same built-in skill registry', (
 
   const screenplay = getSkill('screenplay');
   assert.match(screenplay.instructions, /人物、场景、动作与对白/);
-  assert.deepEqual(screenplay.resources, [{ id: 'format', content: readSkill('screenplay', 'format') }]);
+  assert.deepEqual(screenplay.resources, ['format']);
+  assert.match(readSkill('screenplay', 'format'), /场景标题：地点 \/ 时间/);
   assert.deepEqual(discoverSkills(), listSkills().map(({ id, description }) => ({ id, description })));
   assert.equal(readSkill('screenplay'), screenplay.instructions);
 });
