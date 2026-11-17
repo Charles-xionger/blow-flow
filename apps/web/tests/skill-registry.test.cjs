@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-require-imports -- Node CommonJS test fixture. */
 require('../scripts/register-typescript.cjs');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
