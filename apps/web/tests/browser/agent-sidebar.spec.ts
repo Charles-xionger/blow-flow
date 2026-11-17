@@ -142,13 +142,20 @@ test('assistant-ui composer selects skills with dollar or slash, renders tools a
  await input.fill('$');
  const dollarSkills=page.getByRole('listbox',{name:'选择创作技能'});
  await expect(dollarSkills).toBeVisible();
- await dollarSkills.getByRole('option',{name:/剧本创作/}).click();
- await expect(input).toContainText('剧本创作');
+ await expect(dollarSkills.getByRole('option').first()).toHaveAttribute('aria-selected','true');
+ await input.press('ArrowDown');
+ await expect(dollarSkills.getByRole('option').nth(1)).toHaveAttribute('aria-selected','true');
+ await input.press('Escape');
+ await expect(dollarSkills).toHaveCount(0);
+ await input.fill('$剧本');
+ await input.press('Enter');
+ await expect(input).toHaveValue(/剧本创作/);
  await input.pressSequentially(' 请写一个短场景');
  await page.getByRole('button',{name:'发送',exact:true}).click();
  await expect(page.getByLabel('助手消息')).toContainText('技能：剧本创作');
  await expect(page.getByLabel('工具调用')).toContainText('read_canvas');
  await expect(page.getByLabel('工具调用')).toContainText('已完成');
+ await expect(page.getByLabel('工具结果')).toContainText('nodes');
 
  await input.fill('/');
  const slashSkills=page.getByRole('listbox',{name:'选择创作技能'});

@@ -33,19 +33,24 @@ function messageStatus(task?: AgentTask): ThreadMessageLike['status'] {
   return { type: 'complete', reason: 'stop' };
 }
 
+function toolParts(task?: AgentTask) {
+  return (task?.steps ?? []).map(step => ({
+    type: 'tool-call' as const,
+    toolCallId: step.id,
+    toolName: step.name,
+    argsText: JSON.stringify(step.args),
+    ...(step.status === 'completed' ? { result: step.result ?? { ok: true } } : {}),
+    ...(step.status === 'failed' ? { result: step.result ?? { error: '工具执行失败' }, isError: true } : {}),
+  }));
+}
+
 function threadMessages(messages: AgentMessage[], tasks: AgentTask[]): ThreadMessageLike[] {
   const byTask = new Map(tasks.map(task => [task.id, task]));
-  const answered = new Set(messages.filter(message => message.role === 'assistant').map(message => message.taskId));
+  const latestByTask = new Map<string, AgentMessage>();
+  for (const message of messages) latestByTask.set(message.taskId, message);
   const converted = messages.map(message => {
     const task = byTask.get(message.taskId);
-    const tools = message.role === 'assistant' ? (task?.steps ?? []).map(step => ({
-      type: 'tool-call' as const,
-      toolCallId: step.id,
-      toolName: step.name,
-      argsText: JSON.stringify(step.args),
-      ...(step.status === 'completed' ? { result: step.result ?? { ok: true } } : {}),
-      ...(step.status === 'failed' ? { result: step.result ?? { error: '工具执行失败' }, isError: true } : {}),
-    })) : [];
+    const tools = message.role === 'assistant' && latestByTask.get(message.taskId)?.id === message.id ? toolParts(task) : [];
     return {
       id: message.id,
       role: message.role,
@@ -56,21 +61,14 @@ function threadMessages(messages: AgentMessage[], tasks: AgentTask[]): ThreadMes
     } satisfies ThreadMessageLike;
   });
   for (const task of tasks) {
-    if (answered.has(task.id) || (!task.steps.length && task.status !== 'failed')) continue;
+    if (latestByTask.get(task.id)?.role === 'assistant' || (!task.steps.length && task.status !== 'failed')) continue;
     converted.push({
       id: `task-status-${task.id}`,
       role: 'assistant',
       createdAt: new Date(task.createdAt),
       status: messageStatus(task),
       content: [
-        ...task.steps.map(step => ({
-          type: 'tool-call' as const,
-          toolCallId: step.id,
-          toolName: step.name,
-          argsText: JSON.stringify(step.args),
-          ...(step.status === 'completed' ? { result: step.result ?? { ok: true } } : {}),
-          ...(step.status === 'failed' ? { result: step.result ?? { error: '工具执行失败' }, isError: true } : {}),
-        })),
+        ...toolParts(task),
         ...(task.error ? [{ type: 'text' as const, text: task.error }] : []),
       ] as Exclude<ThreadMessageLike['content'], string>,
       metadata: { custom: { taskId: task.id, references: [] } },
@@ -94,7 +92,8 @@ function SkillText({ text }: TextMessagePartProps) {
 function ToolCall({ toolName, result, isError }: ToolCallMessagePartProps) {
   const state = result === undefined ? '执行中' : isError ? '失败' : '已完成';
   return <div aria-label="工具调用" className={styles.toolCall} data-error={isError || undefined}>
-    {result === undefined ? <Loader2 size={13} className="animate-spin"/> : isError ? <X size={13}/> : <Check size={13}/>}<span>{toolName}</span><small>{state}</small>
+    <div>{result === undefined ? <Loader2 size={13} className="animate-spin"/> : isError ? <X size={13}/> : <Check size={13}/>}<span>{toolName}</span><small>{state}</small></div>
+    {result !== undefined ? <pre aria-label="工具结果" className={styles.toolResult}>{JSON.stringify(result, null, 2)}</pre> : null}
   </div>;
 }
 
@@ -191,6 +190,7 @@ export function AgentAssistantUI(props: Props) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messages = useMemo(() => threadMessages(props.messages, props.tasks), [props.messages, props.tasks]);
   const running = props.task ? ['queued', 'running'].includes(props.task.status) : false;
+  const waitingOrInterrupted = props.task ? ['waiting', 'interrupted'].includes(props.task.status) : false;
   const runtime = useExternalStoreRuntime({
     messages,
     convertMessage: message => message,
@@ -221,6 +221,7 @@ export function AgentAssistantUI(props: Props) {
           {props.referenceTools}
           <div className={styles.composerBottom}>{props.modelControl}<div className={styles.actions}>
             {running ? <ComposerPrimitive.Cancel aria-label="停止" title="停止" disabled={props.busy}><Square size={14}/></ComposerPrimitive.Cancel> : null}
+            {waitingOrInterrupted ? <button type="button" aria-label="停止" title="停止" disabled={props.busy} onClick={() => void props.onStop()}><Square size={14}/></button> : null}
             <ComposerPrimitive.Send aria-label={props.waiting ? '回答 / 修改' : '发送'} title={props.waiting ? '回答 / 修改' : '发送'} className={styles.send}>{props.busy ? <Loader2 size={17} className="animate-spin"/> : <ArrowUp size={18}/>}</ComposerPrimitive.Send>
           </div></div>
         </ComposerPrimitive.Root>
