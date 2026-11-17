@@ -55,8 +55,9 @@ phase with budget, datasets, evaluator versions and human review.
 
 ## Deferred administration and operations
 
-The future admin app is a separate apps/admin workspace, created when its first
-real authenticated screen is implemented. Planned modules:
+The admin app is a separate apps/admin workspace. Its first authenticated
+screen verifies the local administrator role through the Go API. Task and cost
+views remain unpopulated until their authoritative APIs are migrated. Planned modules:
 - Generated content: project/task provenance, review status, filtering, retention,
   access control, export and audited moderation actions.
 - Cost ledger: provider/model/version, usage units, price snapshot, currency,
