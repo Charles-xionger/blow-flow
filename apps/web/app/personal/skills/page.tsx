@@ -4,6 +4,7 @@ import { BrandMark } from '@/components/ui/brand-mark';
 import { PersonalSpaceMenu } from '@/components/workspace/PersonalSpaceMenu';
 import { getSkill, listSkills } from '@/lib/agent/skills';
 import { SkillUploadForm } from './SkillUploadForm';
+import { SkillDeleteButton } from './SkillDeleteButton';
 import styles from './skills.module.css';
 
 type Props = { searchParams: Promise<{ skill?: string }> };
@@ -31,7 +32,7 @@ export default async function PersonalSkillsPage({ searchParams }: Props) {
           </Link>)}
         </section>
         <article className={styles.detail}>
-          <div className={styles.detailHeader}><div><code>{selected.id}</code><h2>{selected.name}</h2><p>{selected.description}</p></div><span>{selected.readOnly && <LockKeyhole size={13} />}{selected.readOnly ? '内置 · 只读' : '用户上传'}</span></div>
+          <div className={styles.detailHeader}><div><code>{selected.id}</code><h2>{selected.name}</h2><p>{selected.description}</p></div><div className={styles.detailActions}><span className={styles.detailSource}>{selected.readOnly && <LockKeyhole size={13} />}{selected.readOnly ? '内置 · 只读' : '用户上传'}</span>{!selected.readOnly && <SkillDeleteButton id={selected.id} name={selected.name} />}</div></div>
           <section><h3>完整指令</h3><p className={styles.instructions}>{selected.instructions}</p></section>
           <section><h3>资源清单</h3><div className={styles.resources}>{selected.resources.map(resource => <div key={resource}><code>{resource}</code></div>)}</div></section>
         </article>

@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-registry-'));
 process.env.DATABASE_PATH = path.join(directory, 'skills.db');
-const { listSkills, getSkill, discoverSkills, readSkill, uploadSkillMarkdown } = require('../lib/agent/skills.ts');
+const { listSkills, getSkill, discoverSkills, readSkill, uploadSkillMarkdown, deleteSkill } = require('../lib/agent/skills.ts');
 const { closeDatabase } = require('../lib/db/index.ts');
 
 test.after(() => {
@@ -77,4 +77,28 @@ test('a legal skill name that matches an object prototype property can be upload
   uploadSkillMarkdown({ fileName: 'SKILL.md', content: markdown, size: Buffer.byteLength(markdown), totalSize: Buffer.byteLength(markdown) });
 
   assert.equal(readSkill('constructor'), 'Keep the structure visible.');
+});
+
+test('deleting an uploaded skill removes its resources and permits an independent same-name upload', () => {
+  const original = '---\nname: disposable-skill\ndescription: Original version.\n---\n\nOriginal instructions.';
+  uploadSkillMarkdown({
+    fileName: 'SKILL.md', content: original, size: Buffer.byteLength(original), totalSize: Buffer.byteLength(original),
+    resources: new Map([['references/original.md', Buffer.from('Original resource.')]]),
+  });
+
+  deleteSkill('disposable-skill');
+
+  assert.equal(discoverSkills().some(skill => skill.id === 'disposable-skill'), false);
+  assert.throws(() => readSkill('disposable-skill'), /不再可用/);
+  assert.throws(() => readSkill('disposable-skill', 'references/original.md'), /不再可用/);
+
+  const replacement = '---\nname: disposable-skill\ndescription: Replacement version.\n---\n\nReplacement instructions.';
+  uploadSkillMarkdown({ fileName: 'SKILL.md', content: replacement, size: Buffer.byteLength(replacement), totalSize: Buffer.byteLength(replacement) });
+  assert.equal(readSkill('disposable-skill'), 'Replacement instructions.');
+  assert.throws(() => readSkill('disposable-skill', 'references/original.md'), /不再可用/);
+});
+
+test('built-in skills cannot be deleted through the registry', () => {
+  assert.throws(() => deleteSkill('screenplay'), /内置创作技能不能删除/);
+  assert.match(readSkill('screenplay'), /人物、场景、动作与对白/);
 });

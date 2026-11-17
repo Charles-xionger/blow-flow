@@ -4,7 +4,7 @@
 
 **Blocked by:** 03: 上传 ZIP 创作技能并按需读取资源
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] 用户上传的创作技能提供带名称和影响说明的删除确认，取消确认不会改变任何数据。
 - [ ] 删除成功后，技能及其全部配套资源从个人技能库、`discover_skills` 和后续 `read_skill` 中消失。
