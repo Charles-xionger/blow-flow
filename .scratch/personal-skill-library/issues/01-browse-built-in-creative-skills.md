@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] “个人空间”提供“创作技能”菜单项，并可进入独立的个人技能库管理页。
 - [ ] 管理页列出 `screenplay`、`storyboard`，展示名称、发现描述、来源和只读状态，并可查看完整指令及资源清单。
