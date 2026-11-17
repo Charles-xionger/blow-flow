@@ -133,6 +133,36 @@ test('assistant composer supports starters, multiline input, IME and compact lay
  await page.screenshot({path:'/tmp/ai-flow-agent-desktop.png'});
 });
 
+test('assistant-ui composer selects skills with dollar or slash, renders tools and retries a failed turn', async ({page,request})=>{
+ const id=crypto.randomUUID();await request.post('/api/workspace',{data:{action:'create-project',id,folderId:null}});
+ await page.goto(`/canvas?project=${id}&assistant=1`);
+ const input=page.getByLabel('创作要求');
+ await expect(page.getByRole('combobox',{name:'助手模型'})).toContainText('测试助手');
+
+ await input.fill('$');
+ const dollarSkills=page.getByRole('listbox',{name:'选择创作技能'});
+ await expect(dollarSkills).toBeVisible();
+ await dollarSkills.getByRole('option',{name:/剧本创作/}).click();
+ await expect(input).toContainText('剧本创作');
+ await input.pressSequentially(' 请写一个短场景');
+ await page.getByRole('button',{name:'发送',exact:true}).click();
+ await expect(page.getByLabel('助手消息')).toContainText('技能：剧本创作');
+ await expect(page.getByLabel('工具调用')).toContainText('read_canvas');
+ await expect(page.getByLabel('工具调用')).toContainText('已完成');
+
+ await input.fill('/');
+ const slashSkills=page.getByRole('listbox',{name:'选择创作技能'});
+ await expect(slashSkills).toBeVisible();
+ await slashSkills.getByRole('option',{name:/分镜创作/}).click();
+ await expect(input).toContainText('分镜创作');
+
+ await input.fill('测试失败');
+ await page.getByRole('button',{name:'发送',exact:true}).click();
+ await expect(page.getByText('助手执行失败，请检查平台配置或稍后重试。')).toBeVisible();
+ await page.getByRole('button',{name:'重试消息'}).last().click();
+ await expect(page.getByLabel('助手消息')).toContainText('收到：测试失败');
+});
+
 test('assistant docks beside the canvas, floats, drags and references searchable nodes', async ({page})=>{
  await page.setViewportSize({width:1440,height:1000});
  await page.goto('/canvas');

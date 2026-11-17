@@ -6,8 +6,10 @@ import { getGenerationService } from '../../lib/generation/server';
 const service=getAgentService({leaseMs:1000});
 const generationWorker=new GenerationWorker(getGenerationService(),{fetch:async()=>{throw new Error('Browser fixture cannot call providers');},generateImage:async(_snapshot,_input,beforeSubmit)=>{beforeSubmit();await new Promise(resolve=>setTimeout(resolve,3500));return 'data:image/png;base64,AAAA';},save:async()=> 'http://127.0.0.1:3217/favicon.ico'});
 registerCanvasTools(service, () => getGenerationService().models().map(model => ({ ...model, configured: true })));
+const failedOnce = new Set<string>();
 async function main(){for(;;){const worked=await service.runNext(async c=>{
   const input=c.messages.filter(m=>m.taskId===c.task.id && m.role==='user').at(-1)!;
+  if(input.text==='测试失败' && !failedOnce.has(c.task.projectId)) {failedOnce.add(c.task.projectId);throw new Error('controlled browser failure');}
   if(input.text==='测试服务重启' && !c.task.steps.some(step=>step.id==='restart-marker')) {
     await c.tool('restart-marker','read_canvas',{});c.reply('进度已保存，等待测试重启');await new Promise(()=>{});return;
   }

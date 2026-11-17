@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { deleteSkill, SkillUploadError, skillUploadLimit, uploadSkillMarkdown } from '@/lib/agent/skills';
+import { deleteSkill, listSkills, SkillUploadError, skillUploadLimit, uploadSkillMarkdown } from '@/lib/agent/skills';
 import { parseSkillArchive } from '@/lib/agent/skill-archive';
 import { currentLocalOwner } from '@/lib/auth/current-user';
 
 export const runtime = 'nodejs';
 const multipartOverheadLimit = 64 * 1024;
 const requestBodyLimit = skillUploadLimit + multipartOverheadLimit;
+
+export async function GET() {
+  return NextResponse.json({ data: listSkills(currentLocalOwner) });
+}
 
 async function readUpload(request: NextRequest) {
   const reader = request.body?.getReader();
