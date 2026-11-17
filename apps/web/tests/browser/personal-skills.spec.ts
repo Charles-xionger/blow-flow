@@ -63,4 +63,18 @@ test('uploading SKILL.md gives progress feedback and adds a reusable personal sk
   });
   await page.getByRole('button', { name: '上传技能' }).click();
   await expect(page.getByRole('status')).toContainText('YAML frontmatter');
+
+  await page.getByRole('button', { name: '删除 sound-designer' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toContainText('sound-designer');
+  await expect(dialog).toContainText('新的技能发现与读取');
+  await expect(dialog).toContainText('已记录在助手任务中的历史内容会保留');
+  await dialog.getByRole('button', { name: '取消' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('link', { name: /sound-designer/ })).toBeVisible();
+
+  await page.getByRole('button', { name: '删除 sound-designer' }).click();
+  await dialog.getByRole('button', { name: '确认删除' }).click();
+  await expect(page.getByRole('link', { name: /sound-designer/ })).toHaveCount(0);
+  await expect(page).toHaveURL(/\/personal\/skills(?:\?skill=(?:screenplay|storyboard))?$/);
 });

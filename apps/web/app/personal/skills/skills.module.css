@@ -45,7 +45,19 @@
 .detailHeader code { color:#9d91ad; font-size:10px; }
 .detailHeader h2 { margin-top:5px; font-size:22px; font-weight:600; }
 .detailHeader p { margin-top:8px; color:#93949d; font-size:12px; }
-.detailHeader>span { display:flex; align-items:center; gap:5px; white-space:nowrap; color:#9e99a8; font-size:10px; padding:5px 8px; border:1px solid #3e3b44; border-radius:6px; }
+.detailActions { display:flex; align-items:center; gap:8px; }
+.detailSource { display:flex; align-items:center; gap:5px; white-space:nowrap; color:#9e99a8; font-size:10px; padding:5px 8px; border:1px solid #3e3b44; border-radius:6px; }
+.deleteButton,.cancelButton,.confirmDeleteButton { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:30px; padding:0 10px; border-radius:7px; font-size:11px; cursor:pointer; }
+.deleteButton { border:1px solid #5b353d; background:#2b1d21; color:#ff9eaa; }
+.deleteButton:hover { background:#3a2329; }
+.deleteDialog { border-color:#39343d; background:#191a1d; color:#f1f1f4; }
+.deleteDescription { color:#a1a1aa; line-height:1.7; }
+.cancelButton { border:1px solid #484950; background:#222328; color:#d9d9df; }
+.confirmDeleteButton { border:1px solid #743b46; background:#592b34; color:#fff0f2; }
+.cancelButton:disabled,.confirmDeleteButton:disabled { opacity:.55; cursor:wait; }
+.deleteError { color:#ff9eaa; font-size:12px; }
+.spin { animation:spin 1s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
 .detail section { margin-top:26px; }
 .detail h3 { margin-bottom:11px; color:#d8d5dd; font-size:12px; font-weight:600; }
 .instructions,.resources>div { padding:16px 18px; border:1px solid #2f3035; border-radius:10px; background:#141518; color:#afb0b8; font-size:12px; line-height:1.8; white-space:pre-wrap; }

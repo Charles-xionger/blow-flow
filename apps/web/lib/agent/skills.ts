@@ -75,7 +75,7 @@ export function getSkill(id: string): SkillDetail {
     const skill = builtInSkill(id);
     if (skill) return { ...toSkillSummary(id as SkillId), instructions: skill.instructions };
     const uploaded = getDatabase().prepare('SELECT name, description, instructions FROM user_skills WHERE name = ?').get(id) as UserSkillRow | undefined;
-    if (!uploaded) throw new Error('Unknown skill');
+    if (!uploaded) throw new Error(`Unknown skill: 创作技能 ${id} 不再可用`);
     const resources = getDatabase().prepare('SELECT path FROM user_skill_resources WHERE skill_name = ? ORDER BY path').all(id) as ResourceRow[];
     return { id: uploaded.name, name: uploaded.name, description: uploaded.description,
         source: '用户上传', readOnly: false, resources: resources.map(resource => resource.path), instructions: uploaded.instructions };
@@ -95,10 +95,21 @@ export function readSkill(id: string, resource?: string) {
     }
     if (resource) {
         const uploaded = getDatabase().prepare('SELECT content FROM user_skill_resources WHERE skill_name = ? AND path = ?').get(id, resource) as ResourceRow | undefined;
-        if (!uploaded?.content) throw new Error('Unknown skill resource');
+        if (!uploaded?.content) throw new Error(`Unknown skill resource: 创作技能 ${id} 或资源 ${resource} 不再可用`);
         return Buffer.from(uploaded.content).toString('utf8');
     }
     return getSkill(id).instructions;
+}
+
+export function deleteSkill(id: string) {
+    if (builtInSkill(id)) throw new SkillUploadError('内置创作技能不能删除', 403);
+    const db = getDatabase();
+    db.transaction(() => {
+        // Do not depend on a connection-wide SQLite foreign_keys setting for resource cleanup.
+        db.prepare('DELETE FROM user_skill_resources WHERE skill_name = ?').run(id);
+        const result = db.prepare('DELETE FROM user_skills WHERE name = ?').run(id);
+        if (!result.changes) throw new SkillUploadError(`创作技能 ${id} 不再可用`, 404);
+    }).immediate();
 }
 
 export const skillFileLimit = 5 * 1024 * 1024;

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { SkillUploadError, skillUploadLimit, uploadSkillMarkdown } from '@/lib/agent/skills';
+import { deleteSkill, SkillUploadError, skillUploadLimit, uploadSkillMarkdown } from '@/lib/agent/skills';
 import { parseSkillArchive } from '@/lib/agent/skill-archive';
 
 export const runtime = 'nodejs';
@@ -49,5 +49,20 @@ export async function POST(request: NextRequest) {
     const status = error instanceof SkillUploadError ? error.status : error instanceof TypeError ? 400 : 500;
     if (status === 500) console.error('[Personal skills] Upload failed', error);
     return NextResponse.json({ success: false, error: error instanceof SkillUploadError ? error.message : '上传失败，请重试' }, { status });
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const body = await request.json() as { id?: unknown };
+    if (typeof body.id !== 'string' || !body.id) throw new SkillUploadError('请选择要删除的创作技能');
+    deleteSkill(body.id);
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    const status = error instanceof SkillUploadError ? error.status : 400;
+    return NextResponse.json({
+      success: false,
+      error: error instanceof SkillUploadError ? error.message : '删除请求格式无效',
+    }, { status });
   }
 }
