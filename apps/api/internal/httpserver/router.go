@@ -7,13 +7,35 @@ import (
 	"net/http"
 	"time"
 
+	"blow-flow/api/internal/account"
 	sentrygin "github.com/getsentry/sentry-go/gin"
 	"github.com/gin-gonic/gin"
 )
 
 type Ping func(context.Context) error
 
+type IdentityVerifier interface {
+	Verify(context.Context, string) (account.Identity, error)
+}
+
+type AccountService interface {
+	Resolve(context.Context, account.Identity) (account.User, error)
+	ListUsers(context.Context, account.User, account.AuthProof, account.ListUsersQuery) (account.UserPage, error)
+	ChangeStatus(context.Context, account.User, account.AuthProof, string, account.Status, string) (account.User, error)
+	ListAuditEvents(context.Context, account.User, account.AuthProof, account.ListAuditQuery) (account.AuditPage, error)
+}
+
+type Dependencies struct {
+	Ping             Ping
+	IdentityVerifier IdentityVerifier
+	Accounts         AccountService
+}
+
 func New(ping Ping) *gin.Engine {
+	return NewWithDependencies(Dependencies{Ping: ping})
+}
+
+func NewWithDependencies(dependencies Dependencies) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	_ = r.SetTrustedProxies(nil)
@@ -43,11 +65,12 @@ func New(ping Ping) *gin.Engine {
 	r.GET("/health/ready", func(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 		defer cancel()
-		if ping == nil || ping(ctx) != nil {
+		if dependencies.Ping == nil || dependencies.Ping(ctx) != nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready"})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "ready"})
 	})
+	registerAccountRoutes(r, dependencies)
 	return r
 }

@@ -1,0 +1,172 @@
+openapi: 3.1.0
+info:
+  title: blow-flow API
+  version: 0.1.0
+  description: Account and generation-operations API. Platform credits and user billing are intentionally absent.
+servers:
+  - url: /v1
+security:
+  - bearerAuth: []
+paths:
+  /me:
+    get:
+      operationId: getCurrentUser
+      summary: Resolve the hosted identity to its local user account
+      responses:
+        "200":
+          description: Current local user
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user]
+                properties:
+                  user: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /admin/users:
+    get:
+      operationId: listUsers
+      summary: List local user accounts
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/UserStatus" }
+      responses:
+        "200":
+          description: User page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [users]
+                properties:
+                  users:
+                    type: array
+                    items: { $ref: "#/components/schemas/User" }
+                  nextCursor: { type: string }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /admin/users/{userId}/status:
+    patch:
+      operationId: changeUserStatus
+      summary: Enable or disable a user account and append an audit event
+      description: Requires MFA and authentication no more than ten minutes old.
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [status, reason]
+              properties:
+                status: { $ref: "#/components/schemas/UserStatus" }
+                reason: { type: string, minLength: 1 }
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user]
+                properties:
+                  user: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /admin/audit-events:
+    get:
+      operationId: listAuditEvents
+      summary: List immutable administrator audit events
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Audit event page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events]
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: "#/components/schemas/AuditEvent" }
+                  nextCursor: { type: string }
+        "403": { $ref: "#/components/responses/Forbidden" }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string }
+  schemas:
+    UserStatus:
+      type: string
+      enum: [active, disabled]
+    User:
+      type: object
+      required: [id, email, role, status, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        role: { type: string, enum: [user, admin] }
+        status: { $ref: "#/components/schemas/UserStatus" }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    AuditEvent:
+      type: object
+      required: [id, actorId, action, targetType, targetId, metadata, occurredAt]
+      properties:
+        id: { type: string, format: uuid }
+        actorId: { type: string, format: uuid }
+        action: { type: string }
+        targetType: { type: string }
+        targetId: { type: string }
+        metadata: { type: object, additionalProperties: true }
+        occurredAt: { type: string, format: date-time }
+    Error:
+      type: object
+      required: [error, requestId]
+      properties:
+        error: { type: string }
+        requestId: { type: string }
+  responses:
+    Unauthorized:
+      description: Missing or invalid bearer token
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: Account, role, email verification, or MFA policy rejected the operation
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    InvalidRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }

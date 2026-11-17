@@ -10,8 +10,11 @@ import (
 	"syscall"
 	"time"
 
+	"blow-flow/api/internal/account"
+	accountpostgres "blow-flow/api/internal/account/postgres"
 	"blow-flow/api/internal/database"
 	"blow-flow/api/internal/httpserver"
+	oidcauth "blow-flow/api/internal/identity/oidc"
 	"blow-flow/api/internal/telemetry"
 	"github.com/getsentry/sentry-go"
 )
@@ -28,13 +31,29 @@ func run() error {
 	}
 	defer sentry.Flush(2 * time.Second)
 	var ping httpserver.Ping
+	var accounts *account.Service
+	var identityVerifier httpserver.IdentityVerifier
 	if dsn := os.Getenv("DATABASE_URL"); dsn != "" {
-		_, pool, err := database.Open(dsn)
+		db, pool, err := database.Open(dsn)
 		if err != nil {
 			slog.Warn("database configuration unavailable")
 		} else {
 			defer pool.Close()
-			ping = func(ctx context.Context) error { return database.Check(ctx, pool) }
+			issuer, audience := os.Getenv("OIDC_ISSUER"), os.Getenv("OIDC_AUDIENCE")
+			if issuer != "" && audience != "" {
+				providerContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				verifier, verifyErr := oidcauth.New(providerContext, issuer, audience)
+				cancel()
+				if verifyErr != nil {
+					return verifyErr
+				}
+				identityVerifier = verifier
+				repository := accountpostgres.New(db, time.Now)
+				accounts = account.NewService(repository, os.Getenv("INITIAL_ADMIN_SUBJECT"), time.Now)
+				ping = func(ctx context.Context) error { return database.Check(ctx, pool) }
+			} else {
+				slog.Warn("account API unavailable: OIDC_ISSUER and OIDC_AUDIENCE are required")
+			}
 		}
 	}
 	addr := os.Getenv("API_ADDR")
@@ -45,7 +64,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	server := &http.Server{Handler: httpserver.New(ping), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
+	server := &http.Server{Handler: httpserver.NewWithDependencies(httpserver.Dependencies{Ping: ping, Accounts: accounts, IdentityVerifier: identityVerifier}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	done := make(chan error, 1)

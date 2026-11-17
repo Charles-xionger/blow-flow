@@ -1,7 +1,8 @@
 # PostgreSQL migrations
 
-This directory is the single production schema owner. Phase 1 intentionally has
-no domain tables: the existing application still owns its SQLite data.
+This directory is the single production schema owner. The account domain is the
+first migrated domain. The existing application still owns generation and canvas
+data until those domains are cut over as complete transaction boundaries.
 
 Add reviewed, numbered Goose SQL files when migrating the first domain.
 Run DATABASE_URL=... pnpm db:migrate as a deployment job, never in API/worker
