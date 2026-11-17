@@ -1,9 +1,12 @@
+import { parseDocument } from 'yaml';
+import { getDatabase } from '../db';
+
 export type SkillSummary = {
     id: string;
     name: string;
     description: string;
-    source: '内置';
-    readOnly: true;
+    source: '内置' | '用户上传';
+    readOnly: boolean;
     resources: string[];
 };
 
@@ -28,6 +31,19 @@ const skills = {
 
 type SkillId = keyof typeof skills;
 
+type UserSkillRow = { name: string; description: string; instructions: string };
+
+export class SkillUploadError extends Error {
+    constructor(message: string, public status = 400) {
+        super(message);
+        this.name = 'SkillUploadError';
+    }
+}
+
+function builtInSkill(id: string) {
+    return Object.prototype.hasOwnProperty.call(skills, id) ? skills[id as SkillId] : undefined;
+}
+
 function toSkillSummary(id: SkillId): SkillSummary {
     const skill = skills[id];
     return {
@@ -41,16 +57,25 @@ function toSkillSummary(id: SkillId): SkillSummary {
 }
 
 export function listSkills(): SkillSummary[] {
-    return (Object.keys(skills) as SkillId[]).map(toSkillSummary);
+    const builtIn = (Object.keys(skills) as SkillId[]).map(toSkillSummary);
+    const uploaded = getDatabase().prepare('SELECT name, description FROM user_skills ORDER BY created_at, name').all() as UserSkillRow[];
+    return [...builtIn, ...uploaded.map(skill => ({
+        id: skill.name,
+        name: skill.name,
+        description: skill.description,
+        source: '用户上传' as const,
+        readOnly: false,
+        resources: [],
+    }))];
 }
 
 export function getSkill(id: string): SkillDetail {
-    const skill = skills[id as SkillId];
-    if (!skill) throw new Error('Unknown built-in skill');
-    return {
-        ...toSkillSummary(id as SkillId),
-        instructions: skill.instructions,
-    };
+    const skill = builtInSkill(id);
+    if (skill) return { ...toSkillSummary(id as SkillId), instructions: skill.instructions };
+    const uploaded = getDatabase().prepare('SELECT name, description, instructions FROM user_skills WHERE name = ?').get(id) as UserSkillRow | undefined;
+    if (!uploaded) throw new Error('Unknown skill');
+    return { id: uploaded.name, name: uploaded.name, description: uploaded.description,
+        source: '用户上传', readOnly: false, resources: [], instructions: uploaded.instructions };
 }
 
 export function discoverSkills() {
@@ -58,10 +83,50 @@ export function discoverSkills() {
 }
 
 export function readSkill(id: string, resource?: string) {
-    const skill = skills[id as SkillId];
-    if (!skill) throw new Error('Unknown built-in skill');
-    if (!resource) return skill.instructions;
-    const value = (skill.resources as Record<string, string>)[resource];
-    if (!value) throw new Error('Unknown skill resource');
-    return value;
+    const skill = builtInSkill(id);
+    if (skill) {
+        if (!resource) return skill.instructions;
+        const value = (skill.resources as Record<string, string>)[resource];
+        if (!value) throw new Error('Unknown skill resource');
+        return value;
+    }
+    if (resource) throw new Error('Unknown skill resource');
+    return getSkill(id).instructions;
+}
+
+export const skillFileLimit = 5 * 1024 * 1024;
+export const skillUploadLimit = 20 * 1024 * 1024;
+const skillName = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+export function uploadSkillMarkdown(input: { fileName: string; content: string; size: number; totalSize: number }): SkillSummary {
+    if (input.totalSize > skillUploadLimit) throw new SkillUploadError('整个上传不能超过 20 MB', 413);
+    if (input.size > skillFileLimit) throw new SkillUploadError('SKILL.md 不能超过 5 MB', 413);
+    if (input.fileName !== 'SKILL.md') throw new SkillUploadError('文件名必须是 SKILL.md');
+
+    const match = input.content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+    if (!match) throw new SkillUploadError('SKILL.md 必须包含 YAML frontmatter');
+    const document = parseDocument(match[1]);
+    if (document.errors.length) throw new SkillUploadError(`YAML frontmatter 格式错误：${document.errors[0].message.split('\n')[0]}`);
+    const metadata = document.toJS() as unknown;
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) throw new SkillUploadError('YAML frontmatter 必须是对象');
+    const { name, description } = metadata as Record<string, unknown>;
+    if (typeof name !== 'string' || !name.trim()) throw new SkillUploadError('YAML frontmatter 的 name 不能为空');
+    if (name !== name.trim() || name.length > 64 || !skillName.test(name)) {
+        throw new SkillUploadError('name 格式无效：请使用 1–64 位小写字母、数字和连字符');
+    }
+    if (typeof description !== 'string' || !description.trim()) throw new SkillUploadError('YAML frontmatter 的 description 不能为空');
+    if (description.trim().length > 1024) throw new SkillUploadError('description 不能超过 1024 个字符');
+    if (builtInSkill(name)) throw new SkillUploadError(`创作技能 ${name} 已存在`, 409);
+
+    const instructions = input.content.slice(match[0].length).trim();
+    if (!instructions) throw new SkillUploadError('SKILL.md 正文不能为空');
+    const db = getDatabase();
+    try {
+        db.prepare('INSERT INTO user_skills (name, description, instructions, created_at) VALUES (?, ?, ?, ?)')
+            .run(name, description.trim(), instructions, Date.now());
+    } catch (error) {
+        if (error instanceof Error && /UNIQUE constraint failed/.test(error.message)) throw new SkillUploadError(`创作技能 ${name} 已存在`, 409);
+        throw error;
+    }
+    return { id: name, name, description: description.trim(), source: '用户上传', readOnly: false, resources: [] };
 }

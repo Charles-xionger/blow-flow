@@ -4,7 +4,7 @@
 
 **Blocked by:** 01: 在个人技能库浏览内置创作技能
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] 管理页支持选择并上传单个文件名为 `SKILL.md` 的 Markdown 文件，上传期间和结果均有明确反馈。
 - [ ] 上传要求 YAML frontmatter 提供非空、格式合法且唯一的 `name` 和可用于发现的 `description`；错误信息能够指出失败原因。

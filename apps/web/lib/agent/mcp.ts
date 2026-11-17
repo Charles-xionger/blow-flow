@@ -10,7 +10,7 @@ export const questionDefinition = { name: 'ask_question', description: 'Ask only
 export function registerReadTools(service: AgentService) {
     service.registerTool({ idempotent: true, name: 'read_canvas', description: 'Read current project nodes, content, parameters and edges.', inputSchema: object({}), execute: task => { const { nodes, edges } = service.canvas(task.projectId); return { nodes, edges }; } });
     service.registerTool({ idempotent: true, name: 'read_reference', description: 'Read a project node and visually inspect its image content.', inputSchema: object({ nodeId: { type: 'string' } }, ['nodeId']), execute: (task, args) => resolveReference(service, task.projectId, { nodeId: String(args.nodeId) }) });
-    service.registerTool({ idempotent: true, name: 'discover_skills', description: 'Discover optional built-in creative skills before loading their instructions.', inputSchema: object({}), execute: () => discoverSkills() });
+    service.registerTool({ idempotent: true, name: 'discover_skills', description: 'Discover optional creative skills before loading their instructions.', inputSchema: object({}), execute: () => discoverSkills() });
     service.registerTool({ idempotent: true, name: 'read_skill', description: 'Load a discovered skill or one of its resources when needed.', inputSchema: object({ id: { type: 'string' }, resource: { type: 'string' } }, ['id']), execute: (_task, args) => readSkill(String(args.id), args.resource === undefined ? undefined : String(args.resource)) });
 }
 /** In-process MCP transport: no listening port or external project selector. */

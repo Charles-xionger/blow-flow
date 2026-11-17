@@ -30,3 +30,37 @@ test('personal space opens the read-only built-in creative skill library', async
   await expect(page.getByText('format', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: /删除|编辑|覆盖/ })).toHaveCount(0);
 });
+
+test('uploading SKILL.md gives progress feedback and adds a reusable personal skill', async ({ page }) => {
+  await page.goto('/personal/skills');
+  let releaseUpload!: () => void;
+  const uploadMayFinish = new Promise<void>(resolve => { releaseUpload = resolve; });
+  await page.route('**/api/personal/skills', async route => {
+    await uploadMayFinish;
+    await route.continue();
+  });
+
+  await page.getByLabel('选择 SKILL.md').setInputFiles({
+    name: 'SKILL.md',
+    mimeType: 'text/markdown',
+    buffer: Buffer.from('---\nname: sound-designer\ndescription: Build a purposeful soundscape.\n---\n\nUse layered ambience and motivated effects.'),
+  });
+  await page.getByRole('button', { name: '上传技能' }).click();
+  await expect(page.getByRole('button', { name: '上传中…' })).toBeDisabled();
+  releaseUpload();
+
+  await expect(page.getByRole('status')).toContainText('sound-designer 上传成功');
+  const uploaded = page.getByRole('link', { name: /sound-designer/ });
+  await expect(uploaded).toContainText('用户上传');
+  await expect(uploaded).not.toContainText('只读');
+  await expect(page.getByText('Use layered ambience and motivated effects.')).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByRole('link', { name: /sound-designer/ })).toBeVisible();
+
+  await page.getByLabel('选择 SKILL.md').setInputFiles({
+    name: 'SKILL.md', mimeType: 'text/markdown', buffer: Buffer.from('missing frontmatter'),
+  });
+  await page.getByRole('button', { name: '上传技能' }).click();
+  await expect(page.getByRole('status')).toContainText('YAML frontmatter');
+});

@@ -118,6 +118,15 @@ function initializeTables(db: Database.Database) {
     );
   `);
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS user_skills (
+      name TEXT PRIMARY KEY,
+      description TEXT NOT NULL,
+      instructions TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+  `);
+
   // characters 表
   db.exec(`
     CREATE TABLE IF NOT EXISTS characters (
