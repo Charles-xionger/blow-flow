@@ -48,6 +48,8 @@ Go 当前 `resource.SaveCanvas` 已按项目行锁、`baseVersion` 和 `requestI
 
 工具读取 `(snapshot, version)` 后在 TypeScript 中计算，提交时使用稳定的 `taskId + callId` 作为请求身份。若响应丢失，先用原请求重试或查询回执；若确认为版本冲突，重新读取最新快照并重新计算该批操作，最多有限次数，不把旧快照整体覆盖上去。若目标节点已删除则跳过并返回说明；已有节点内容只有本轮引用或持久确认后可改。每批操作生成一个现有格式的撤销历史记录。画布编辑遵循 [ADR-0009](../adr/0009-agent-canvas-history-and-conflicts.md) 与 [ADR-0011](../adr/0011-agent-preserves-existing-content.md)。
 
+Pi 只能读取服务端已提交快照。当前侧栏发消息前调用 `canvasAutosave.flush()`，但 `flush()` 在离线或同步退避时可能正常返回，不能单凭它确认远端保存。前端切换 Agent 接口时增加严格的 `flushAndConfirm(projectId)`：等待当前画布的所有待提交操作收到服务器回执，核对本地内容版本与服务器确认版本，再把 `canvasVersion` 连同消息发送。未确认就阻止本次发送并显示同步状态。Go 接收消息时核对该版本，若版本已变更，返回冲突让前端刷新后重发；Agent 开始运行后每次 `read_canvas` 仍读取最新已提交版本。这是前端切换阶段的必要小改动，不能用普通 `flush()` 冒充保存确认。
+
 `generate_*` 工具由 Go 先规范化模型、输入、目标节点和预计新增节点，持久化确认快照；用户批准的是该快照的摘要。批准后使用稳定请求 ID 创建 Go 生成任务，任何重试先查已有回执。供应商提交结果不明交给生成模块待核实；Agent 不自行重复付费请求。结果保存与画布附着由 Go 生成/资源模块负责。`ask_question`、`read_canvas`、`read_reference` 与技能读取也经 Go 按任务所有者授权；内置只读技能可先随 Runner 打包，个人技能库再迁移。
 
 ## 实施顺序与验收
