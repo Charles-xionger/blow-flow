@@ -176,6 +176,14 @@ type CircuitGrant struct {
 	Wait       time.Duration
 	ProbeToken string
 }
+type CircuitResult string
+
+const (
+	CircuitSuccess CircuitResult = "success"
+	CircuitFailure CircuitResult = "failure"
+	CircuitNeutral CircuitResult = "neutral"
+)
+
 type ExecutorStore interface {
 	Get(context.Context, string, string) (Task, error)
 	Claim(context.Context, string, time.Duration) (*Claimed, error)
@@ -189,6 +197,6 @@ type ExecutorStore interface {
 	Unpublished(context.Context) ([]string, error)
 	MarkPublished(context.Context, string) error
 	CircuitPermit(context.Context, string) (CircuitGrant, error)
-	RecordCircuit(context.Context, string, bool, string) error
+	RecordCircuit(context.Context, string, CircuitResult, string) error
 	Defer(context.Context, string, string, time.Duration) error
 }

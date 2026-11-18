@@ -187,8 +187,13 @@ func TestProviderCircuitPausesNewClaims(t *testing.T) {
 		if err != nil || wait.Wait != 0 {
 			t.Fatalf("permit %v %v", wait, err)
 		}
-		if err = s.RecordCircuit(ctx, "ark", false, wait.ProbeToken); err != nil {
+		if err = s.RecordCircuit(ctx, "ark", script.CircuitFailure, wait.ProbeToken); err != nil {
 			t.Fatal(err)
+		}
+		if i == 0 {
+			if err = s.RecordCircuit(ctx, "ark", script.CircuitNeutral, ""); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	wait, err := s.CircuitPermit(ctx, "ark")
@@ -222,14 +227,14 @@ func TestProviderCircuitPausesNewClaims(t *testing.T) {
 	if err != nil || wait.Wait <= 0 {
 		t.Fatalf("parallel half-open probe %v %v", wait, err)
 	}
-	if err = s.RecordCircuit(ctx, "ark", true, ""); err != nil {
+	if err = s.RecordCircuit(ctx, "ark", script.CircuitSuccess, ""); err != nil {
 		t.Fatal(err)
 	}
 	blocked, err := s.CircuitPermit(ctx, "ark")
 	if err != nil || blocked.Wait <= 0 {
 		t.Fatalf("stale in-flight completion closed circuit: %v %v", blocked, err)
 	}
-	if err = s.RecordCircuit(ctx, "ark", true, probeToken); err != nil {
+	if err = s.RecordCircuit(ctx, "ark", script.CircuitSuccess, probeToken); err != nil {
 		t.Fatal(err)
 	}
 	wait, err = s.CircuitPermit(ctx, "ark")

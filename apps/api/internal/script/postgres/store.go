@@ -563,7 +563,7 @@ func (s *Store) CircuitPermit(ctx context.Context, provider string) (script.Circ
 	})
 	return grant, err
 }
-func (s *Store) RecordCircuit(ctx context.Context, provider string, success bool, probeToken string) error {
+func (s *Store) RecordCircuit(ctx context.Context, provider string, result script.CircuitResult, probeToken string) error {
 	cooldown := s.CircuitCooldown
 	if cooldown <= 0 {
 		cooldown = 30 * time.Second
@@ -585,8 +585,17 @@ func (s *Store) RecordCircuit(ctx context.Context, provider string, success bool
 			// Older in-flight calls cannot close or reopen an already open circuit.
 			return nil
 		}
-		if success {
+		if result == script.CircuitNeutral {
+			if probeToken != "" {
+				return tx.Exec(`UPDATE script_provider_circuits SET probing=false,probe_token=NULL,updated_at=now() WHERE provider=?`, provider).Error
+			}
+			return nil
+		}
+		if result == script.CircuitSuccess {
 			return tx.Exec(`UPDATE script_provider_circuits SET failures=0,open_until=NULL,probing=false,probe_token=NULL,updated_at=now() WHERE provider=?`, provider).Error
+		}
+		if result != script.CircuitFailure {
+			return fmt.Errorf("invalid circuit result %q", result)
 		}
 		failures := c.Failures + 1
 		var until *time.Time

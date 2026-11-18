@@ -147,11 +147,13 @@ func (w Worker) Process(ctx context.Context, id string) error {
 	}
 	if permitted {
 		recordCtx, recordCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if called {
-			_ = w.Store.RecordCircuit(recordCtx, provider, err == nil || errors.Is(err, ErrWorkflow) || errors.Is(err, context.Canceled) || errors.Is(err, errLocalStore), grant.ProbeToken)
-		} else {
-			_ = w.Store.RecordCircuit(recordCtx, provider, true, grant.ProbeToken)
+		result := CircuitFailure
+		if !called || errors.Is(err, context.Canceled) || errors.Is(err, errLocalStore) {
+			result = CircuitNeutral
+		} else if err == nil || errors.Is(err, ErrWorkflow) {
+			result = CircuitSuccess
 		}
+		_ = w.Store.RecordCircuit(recordCtx, provider, result, grant.ProbeToken)
 		recordCancel()
 	}
 	if err == nil && task.Input.OutputMode != "workflow" {
