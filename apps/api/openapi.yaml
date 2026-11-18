@@ -590,10 +590,11 @@ components:
             purgedAt: { type: string, format: date-time }
     Folder:
       type: object
-      required: [id, name, createdAt, updatedAt]
+      required: [id, name, projectCount, createdAt, updatedAt]
       properties:
         id: { type: string }
         name: { type: string }
+        projectCount: { type: integer, format: int64 }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
     CanvasSaveReceipt:

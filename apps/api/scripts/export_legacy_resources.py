@@ -12,10 +12,7 @@ from pathlib import Path
 
 
 def rows(db, table):
-    exists = db.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
-    ).fetchone()
-    return [dict(row) for row in db.execute(f"SELECT * FROM {table}")] if exists else []
+    return [dict(row) for row in db.execute(f"SELECT * FROM {table}")]
 
 
 def main():
@@ -29,6 +26,11 @@ def main():
     db.row_factory = sqlite3.Row
     try:
         db.execute("BEGIN")
+        required = {"workflows", "project_folders", "media_files", "canvas_save_receipts", "canvas_deleted_nodes"}
+        present = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        missing = sorted(required - present)
+        if missing:
+            parser.error("legacy database is missing required tables: " + ", ".join(missing))
         payload = {
             "schemaVersion": 1,
             "projects": rows(db, "workflows"),

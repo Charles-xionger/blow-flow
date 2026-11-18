@@ -137,8 +137,8 @@ func TestAssetIsOwnedBySameUserAndProject(t *testing.T) {
 	if _, err = svc.ChangeProject(ctx, a, "p", resource.ProjectChange{Action: "trash", ExpectedVersion: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = svc.GetAsset(ctx, a, asset.ID); !errors.Is(err, resource.ErrNotFound) {
-		t.Fatalf("trashed asset: %v", err)
+	if _, err = svc.GetAsset(ctx, a, asset.ID); err != nil {
+		t.Fatalf("asset should retain its own lifecycle after trash: %v", err)
 	}
 }
 
@@ -160,5 +160,45 @@ func TestImportedCanvasReceiptReplaysNextCanonicalDigest(t *testing.T) {
 	receipt, err := svc.SaveCanvas(ctx, owner, "legacy", resource.SaveCanvas{RequestID: "old-request", BaseVersion: 1, Snapshot: snapshot})
 	if err != nil || receipt.Version != 2 {
 		t.Fatalf("legacy replay: %+v %v", receipt, err)
+	}
+}
+
+func TestWorkspaceCountAndCoverFollowCanvasChanges(t *testing.T) {
+	r, owner, _ := resourceStore(t)
+	ctx := context.Background()
+	svc := resource.Service{Repository: r}
+	f, err := svc.CreateFolder(ctx, owner, "f", "Folder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = svc.CreateProject(ctx, owner, "p", "Project", &f.ID); err != nil {
+		t.Fatal(err)
+	}
+	view, err := svc.Workspace(ctx, owner, false)
+	if err != nil || len(view.Folders) != 1 || view.Folders[0].ProjectCount != 1 {
+		t.Fatalf("workspace %+v %v", view, err)
+	}
+	first := []byte(`{"name":"Project","nodes":[{"id":"image","type":"textToImage","position":{"x":0,"y":0},"data":{"imageSrc":"https://oss.test/a.png"}}],"edges":[],"viewport":{"x":0,"y":0,"zoom":1}}`)
+	if _, err = svc.SaveCanvas(ctx, owner, "p", resource.SaveCanvas{RequestID: "a", BaseVersion: 1, Snapshot: first}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := svc.GetProject(ctx, owner, "p")
+	if err != nil || p.CoverURL == nil || *p.CoverURL != "https://oss.test/a.png" {
+		t.Fatalf("first cover %+v %v", p.CoverURL, err)
+	}
+	second := []byte(`{"name":"Project","nodes":[{"id":"image","type":"textToImage","position":{"x":0,"y":0},"data":{"imageSrc":"https://oss.test/b.png"}}],"edges":[],"viewport":{"x":0,"y":0,"zoom":1}}`)
+	if _, err = svc.SaveCanvas(ctx, owner, "p", resource.SaveCanvas{RequestID: "b", BaseVersion: 2, Snapshot: second}); err != nil {
+		t.Fatal(err)
+	}
+	p, err = svc.GetProject(ctx, owner, "p")
+	if err != nil || p.CoverURL == nil || *p.CoverURL != "https://oss.test/b.png" {
+		t.Fatalf("changed cover %+v %v", p.CoverURL, err)
+	}
+	if _, err = svc.ChangeProject(ctx, owner, "p", resource.ProjectChange{Action: "trash", ExpectedVersion: 3}); err != nil {
+		t.Fatal(err)
+	}
+	view, err = svc.Workspace(ctx, owner, true)
+	if err != nil || len(view.Folders) != 1 || view.Folders[0].ProjectCount != 0 {
+		t.Fatalf("trash count %+v %v", view, err)
 	}
 }

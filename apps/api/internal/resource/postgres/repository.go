@@ -39,15 +39,16 @@ func (r projectRow) summary() resource.ProjectSummary {
 }
 
 type folderRow struct {
-	ID        string
-	OwnerID   string
-	Name      string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID           string
+	OwnerID      string
+	Name         string
+	ProjectCount int64
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 func (r folderRow) domain() resource.Folder {
-	return resource.Folder{ID: r.ID, Name: r.Name, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+	return resource.Folder{ID: r.ID, Name: r.Name, ProjectCount: r.ProjectCount, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 }
 
 type assetRow struct {
@@ -105,7 +106,7 @@ func (r *Repository) Workspace(ctx context.Context, owner string, trash bool) (r
 		return resource.Workspace{}, err
 	}
 	var folders []folderRow
-	if err := r.DB.WithContext(ctx).Raw(`SELECT * FROM project_folders WHERE owner_id=? ORDER BY updated_at DESC,id DESC`, owner).Scan(&folders).Error; err != nil {
+	if err := r.DB.WithContext(ctx).Raw(`SELECT f.*,count(p.id) AS project_count FROM project_folders f LEFT JOIN projects p ON p.folder_id=f.id AND p.owner_id=f.owner_id AND p.deleted_at IS NULL AND p.purged_at IS NULL WHERE f.owner_id=? GROUP BY f.id ORDER BY f.updated_at DESC,f.id DESC`, owner).Scan(&folders).Error; err != nil {
 		return resource.Workspace{}, err
 	}
 	view := resource.Workspace{Projects: make([]resource.ProjectSummary, 0, len(rows)), Folders: make([]resource.Folder, 0, len(folders))}
@@ -175,6 +176,10 @@ func (r *Repository) SaveCanvas(ctx context.Context, owner, id string, input res
 		if err := json.Unmarshal(input.Snapshot, &current); err != nil {
 			return err
 		}
+		cover, err := resource.ProjectCover(input.Snapshot, row.Snapshot, row.CoverURL)
+		if err != nil {
+			return err
+		}
 		present := make(map[string]bool, len(current.Nodes))
 		for _, node := range current.Nodes {
 			present[node.ID] = true
@@ -187,7 +192,7 @@ func (r *Repository) SaveCanvas(ctx context.Context, owner, id string, input res
 			}
 		}
 		now := time.Now().UTC()
-		if err := tx.Exec(`UPDATE projects SET name=?,snapshot=?::jsonb,version=version+1,node_count=?,updated_at=? WHERE id=?`, current.Name, string(input.Snapshot), nodeCount, now, id).Error; err != nil {
+		if err := tx.Exec(`UPDATE projects SET name=?,snapshot=?::jsonb,version=version+1,node_count=?,cover_url=?,updated_at=? WHERE id=?`, current.Name, string(input.Snapshot), nodeCount, cover, now, id).Error; err != nil {
 			return err
 		}
 		if err := tx.Exec(`INSERT INTO project_save_receipts(project_id,request_id,digest,version) VALUES(?,?,?,?)`, id, input.RequestID, digest, row.Version+1).Error; err != nil {
@@ -269,7 +274,7 @@ func (r *Repository) CreateFolder(ctx context.Context, owner, id, name string) (
 	if res.RowsAffected == 0 {
 		return resource.Folder{}, resource.ErrDuplicate
 	}
-	return resource.Folder{ID: id, Name: name, CreatedAt: now, UpdatedAt: now}, nil
+	return resource.Folder{ID: id, Name: name, ProjectCount: 0, CreatedAt: now, UpdatedAt: now}, nil
 }
 func (r *Repository) RenameFolder(ctx context.Context, owner, id, name string) (resource.Folder, error) {
 	now := time.Now().UTC()
@@ -281,7 +286,7 @@ func (r *Repository) RenameFolder(ctx context.Context, owner, id, name string) (
 		return resource.Folder{}, resource.ErrNotFound
 	}
 	var row folderRow
-	if err := r.DB.WithContext(ctx).Raw(`SELECT * FROM project_folders WHERE id=? AND owner_id=?`, id, owner).Scan(&row).Error; err != nil {
+	if err := r.DB.WithContext(ctx).Raw(`SELECT f.*,count(p.id) AS project_count FROM project_folders f LEFT JOIN projects p ON p.folder_id=f.id AND p.owner_id=f.owner_id AND p.deleted_at IS NULL AND p.purged_at IS NULL WHERE f.id=? AND f.owner_id=? GROUP BY f.id`, id, owner).Scan(&row).Error; err != nil {
 		return resource.Folder{}, err
 	}
 	return row.domain(), nil
@@ -319,7 +324,7 @@ func (r *Repository) CreateAsset(ctx context.Context, owner string, input resour
 }
 func (r *Repository) GetAsset(ctx context.Context, owner, id string) (resource.Asset, error) {
 	var row assetRow
-	res := r.DB.WithContext(ctx).Raw(`SELECT a.* FROM media_assets a LEFT JOIN projects p ON p.id=a.project_id AND p.owner_id=a.owner_id WHERE a.id=? AND a.owner_id=? AND (a.project_id IS NULL OR (p.id IS NOT NULL AND p.deleted_at IS NULL AND p.purged_at IS NULL))`, id, owner).Scan(&row)
+	res := r.DB.WithContext(ctx).Raw(`SELECT * FROM media_assets WHERE id=? AND owner_id=?`, id, owner).Scan(&row)
 	if res.Error != nil {
 		return resource.Asset{}, res.Error
 	}
