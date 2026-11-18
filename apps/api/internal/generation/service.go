@@ -58,6 +58,7 @@ type Task struct {
 type Event struct {
 	ID         int64     `json:"id"`
 	Type       string    `json:"type"`
+	Stage      string    `json:"stage,omitempty"`
 	OccurredAt time.Time `json:"occurredAt"`
 }
 type Resources interface {

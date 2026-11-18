@@ -3,13 +3,10 @@ package httpserver
 import (
 	"blow-flow/api/internal/generation"
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"github.com/gin-gonic/gin"
 	"net/http"
 	"strconv"
-	"time"
 )
 
 type GenerationService interface {
@@ -17,8 +14,6 @@ type GenerationService interface {
 	Get(context.Context, generation.Actor, string) (generation.Task, error)
 	Cancel(context.Context, generation.Actor, string) (generation.Task, error)
 }
-
-func mustJSON(value any) string { raw, _ := json.Marshal(value); return string(raw) }
 
 type GenerationEvents interface {
 	Events(context.Context, generation.Actor, string, int64) ([]generation.Event, error)
@@ -93,54 +88,17 @@ func registerGenerationRoutes(v1 *gin.RouterGroup, d Dependencies) {
 		if after < 0 {
 			after = 0
 		}
-		if last := c.GetHeader("Last-Event-ID"); last != "" {
-			if parsed, err := strconv.ParseInt(last, 10, 64); err == nil && parsed > after {
-				after = parsed
-			}
-		}
 		task, err := d.Generation.Get(c.Request.Context(), generationActor(c), c.Param("id"))
 		if err != nil {
 			generationError(c, err)
 			return
 		}
-		if c.GetHeader("Accept") != "text/event-stream" {
-			events, err := service.Events(c.Request.Context(), generationActor(c), c.Param("id"), after)
-			if err != nil {
-				generationError(c, err)
-				return
-			}
-			c.JSON(200, gin.H{"task": task, "events": events})
+		events, err := service.Events(c.Request.Context(), generationActor(c), c.Param("id"), after)
+		if err != nil {
+			generationError(c, err)
 			return
 		}
-		c.Header("Content-Type", "text/event-stream")
-		c.Header("Cache-Control", "no-cache")
-		c.Header("X-Accel-Buffering", "no")
-		fmt.Fprintf(c.Writer, "event: snapshot\ndata: %s\n\n", mustJSON(task))
-		c.Writer.Flush()
-		timer := time.NewTimer(20 * time.Second)
-		defer timer.Stop()
-		ticker := time.NewTicker(time.Second)
-		defer ticker.Stop()
-		for {
-			events, err := service.Events(c.Request.Context(), generationActor(c), c.Param("id"), after)
-			if err != nil {
-				return
-			}
-			for _, e := range events {
-				fmt.Fprintf(c.Writer, "id: %d\nevent: task\ndata: %s\n\n", e.ID, mustJSON(e))
-				after = e.ID
-			}
-			if len(events) > 0 {
-				c.Writer.Flush()
-			}
-			select {
-			case <-c.Request.Context().Done():
-				return
-			case <-timer.C:
-				return
-			case <-ticker.C:
-			}
-		}
+		c.JSON(200, gin.H{"task": task, "events": events})
 	})
 }
 func generationActor(c *gin.Context) generation.Actor {

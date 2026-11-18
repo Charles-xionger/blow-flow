@@ -37,22 +37,38 @@ func (s *Store) ClaimDelivery(ctx context.Context, id string) (DeliveryClaim, bo
 	claim.Token = token
 	return claim, err == nil, err
 }
-func (s *Store) apply(ctx context.Context, id, token, status, stage, event, providerURL, fileType, failure string, percent *float64, next time.Time, attemptIncrement bool) error {
+
+type deliveryTransition struct {
+	Status, Stage, Event, ProviderURL, FileType, Failure string
+	Percent                                              *float64
+	Next                                                 time.Time
+	IncrementAttempt                                     bool
+}
+
+func (s *Store) apply(ctx context.Context, id, token string, change deliveryTransition) error {
 	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
-		var nextValue any
-		if !next.IsZero() {
-			nextValue = next
+		var priorStage string
+		if err := tx.Raw(`SELECT stage FROM generation_tasks WHERE id=? FOR UPDATE`, id).Scan(&priorStage).Error; err != nil {
+			return err
 		}
-		res := tx.Exec(`UPDATE generation_tasks SET status=?,stage=?,percent=COALESCE(?,percent),provider_result_url=CASE WHEN ?<>'' THEN ? ELSE provider_result_url END,provider_result_type=CASE WHEN ?<>'' THEN ? ELSE provider_result_type END,failure_code=NULLIF(?,''),next_attempt_at=?,poll_attempts=poll_attempts+?,lease_token=NULL,lease_until=NULL,updated_at=? WHERE id=? AND lease_token=? AND lease_until>now()`, status, stage, percent, providerURL, providerURL, fileType, fileType, failure, nextValue, boolInt(attemptIncrement), now, id, token)
+		var nextValue any
+		if !change.Next.IsZero() {
+			nextValue = change.Next
+		}
+		res := tx.Exec(`UPDATE generation_tasks SET status=?,stage=?,percent=COALESCE(?,percent),provider_result_url=CASE WHEN ?<>'' THEN ? ELSE provider_result_url END,provider_result_type=CASE WHEN ?<>'' THEN ? ELSE provider_result_type END,failure_code=NULLIF(?,''),next_attempt_at=?,poll_attempts=poll_attempts+?,lease_token=NULL,lease_until=NULL,updated_at=? WHERE id=? AND lease_token=? AND lease_until>now()`, change.Status, change.Stage, change.Percent, change.ProviderURL, change.ProviderURL, change.FileType, change.FileType, change.Failure, nextValue, boolInt(change.IncrementAttempt), now, id, token)
 		if res.Error != nil {
 			return res.Error
 		}
 		if res.RowsAffected == 0 {
 			return ErrStaleLease
 		}
+		event := change.Event
+		if event == "" && priorStage != change.Stage {
+			event = "stage_changed"
+		}
 		if event != "" {
-			return tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,occurred_at) VALUES(?,?,?)`, id, event, now).Error
+			return tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,stage,occurred_at) VALUES(?,?,?,?)`, id, event, change.Stage, now).Error
 		}
 		return nil
 	})
@@ -69,19 +85,19 @@ func (s *Store) RecordProgress(ctx context.Context, id, token, stage string, per
 	}
 	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
-		res := tx.Exec(`UPDATE generation_tasks SET stage=?,percent=COALESCE(?,percent),updated_at=? WHERE id=? AND status='running' AND lease_token=? AND lease_until>now() AND (stage<>? OR (? IS NOT NULL AND (percent IS NULL OR percent<?)))`, stage, percent, now, id, token, stage, percent, percent)
+		res := tx.Exec(`UPDATE generation_tasks SET stage=?,percent=COALESCE(?,percent),updated_at=? WHERE id=? AND status='running' AND lease_token=? AND lease_until>now() AND (stage<>? OR (?::double precision IS NOT NULL AND (percent IS NULL OR percent<?)))`, stage, percent, now, id, token, stage, percent, percent)
 		if res.Error != nil {
 			return res.Error
 		}
 		if res.RowsAffected == 0 {
 			return nil
 		}
-		return tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,occurred_at) VALUES(?,'progress',?)`, id, now).Error
+		return tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,stage,occurred_at) VALUES(?,'progress',?,?)`, id, stage, now).Error
 	})
 }
 func (s *Store) ScheduleQuery(ctx context.Context, c DeliveryClaim, stage string, err error, timeout time.Duration) error {
 	if !c.StartedAt.IsZero() && time.Since(c.StartedAt) >= timeout {
-		return s.apply(ctx, c.TaskID, c.Token, "wait_timeout", "wait_timeout", "wait_timeout", "", "", "", nil, time.Time{}, false)
+		return s.apply(ctx, c.TaskID, c.Token, deliveryTransition{Status: "wait_timeout", Stage: "wait_timeout", Event: "wait_timeout"})
 	}
 	attempts := 0
 	if err != nil {
@@ -98,16 +114,16 @@ func (s *Store) ScheduleQuery(ctx context.Context, c DeliveryClaim, stage string
 	if err != nil {
 		event = "query_retry"
 	}
-	return s.apply(ctx, c.TaskID, c.Token, "running", stage, event, "", "", "", nil, time.Now().Add(delay), err != nil)
+	return s.apply(ctx, c.TaskID, c.Token, deliveryTransition{Status: "running", Stage: stage, Event: event, Next: time.Now().Add(delay), IncrementAttempt: err != nil})
 }
 func (s *Store) ProviderSucceeded(ctx context.Context, c DeliveryClaim, url, fileType string) error {
 	if url == "" {
 		return errors.New("empty provider output")
 	}
-	return s.apply(ctx, c.TaskID, c.Token, "saving", "saving", "provider_succeeded", url, fileType, "", nil, time.Time{}, false)
+	return s.apply(ctx, c.TaskID, c.Token, deliveryTransition{Status: "saving", Stage: "saving", Event: "provider_succeeded", ProviderURL: url, FileType: fileType})
 }
 func (s *Store) ProviderFailed(ctx context.Context, c DeliveryClaim) error {
-	return s.apply(ctx, c.TaskID, c.Token, "failed", "provider_failed", "provider_failed", "", "", "provider_failed", nil, time.Time{}, false)
+	return s.apply(ctx, c.TaskID, c.Token, deliveryTransition{Status: "failed", Stage: "provider_failed", Event: "provider_failed", Failure: "provider_failed"})
 }
 func (s *Store) SaveFailed(ctx context.Context, c DeliveryClaim, code string, permanent bool) error {
 	next := time.Now().Add(10 * time.Second)
@@ -122,7 +138,7 @@ func (s *Store) SaveFailed(ctx context.Context, c DeliveryClaim, code string, pe
 	if permanent {
 		status = "save_unavailable"
 	}
-	return s.apply(ctx, c.TaskID, c.Token, status, status, event, "", "", code, nil, next, false)
+	return s.apply(ctx, c.TaskID, c.Token, deliveryTransition{Status: status, Stage: status, Event: event, Failure: code, Next: next})
 }
 func (s *Store) Delivered(ctx context.Context, c DeliveryClaim, url string) error {
 	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -134,7 +150,7 @@ func (s *Store) Delivered(ctx context.Context, c DeliveryClaim, url string) erro
 		if res.RowsAffected == 0 {
 			return ErrStaleLease
 		}
-		return tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,occurred_at) VALUES(?,'delivered',?)`, c.TaskID, now).Error
+		return tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,stage,occurred_at) VALUES(?,'delivered','delivered',?)`, c.TaskID, now).Error
 	})
 }
 func (s *Store) ResumeDelivery(ctx context.Context, id string) error {
@@ -147,11 +163,11 @@ func (s *Store) ResumeDelivery(ctx context.Context, id string) error {
 		if res.RowsAffected == 0 {
 			return generation.ErrConflict
 		}
-		return tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,occurred_at) VALUES(?,'resumed',?)`, id, now).Error
+		return tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,stage,occurred_at) SELECT id,'resumed',stage,? FROM generation_tasks WHERE id=?`, now, id).Error
 	})
 }
 func (s *Store) Events(ctx context.Context, id string, after int64) ([]generation.Event, error) {
 	var events []generation.Event
-	err := s.DB.WithContext(ctx).Raw(`SELECT id,event_type AS type,occurred_at FROM generation_task_events WHERE task_id=? AND id>? ORDER BY id LIMIT 100`, id, after).Scan(&events).Error
+	err := s.DB.WithContext(ctx).Raw(`SELECT id,event_type AS type,COALESCE(stage,'') AS stage,occurred_at FROM generation_task_events WHERE task_id=? AND id>? ORDER BY id LIMIT 100`, id, after).Scan(&events).Error
 	return events, err
 }

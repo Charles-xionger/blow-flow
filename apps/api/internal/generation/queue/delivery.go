@@ -89,15 +89,16 @@ func (w DeliveryWorker) ProcessDue(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	var failures []error
 	for _, id := range ids {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		if err := w.ProcessOne(ctx, id); err != nil {
-			return err
+			failures = append(failures, err)
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
 func saveCode(err error) string {
 	if errors.Is(err, ErrArtifactUnavailable) {

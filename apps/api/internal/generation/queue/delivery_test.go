@@ -157,3 +157,23 @@ func TestDeliveryQueryTimeoutAndUnavailableFileNeverResubmit(t *testing.T) {
 		t.Fatalf("unavailable %+v %v", store, provider.calls)
 	}
 }
+
+type scanStore struct{ *deliveryStoreFake }
+
+func (s scanStore) DueDeliveries(context.Context, int) ([]string, error) {
+	return []string{"bad", "good"}, nil
+}
+func (s scanStore) ClaimDelivery(ctx context.Context, id string) (postgres.DeliveryClaim, bool, error) {
+	if id == "bad" {
+		return postgres.DeliveryClaim{}, false, errors.New("temporary database failure")
+	}
+	return s.deliveryStoreFake.ClaimDelivery(ctx, id)
+}
+func TestDeliveryScanContinuesPastOneTaskError(t *testing.T) {
+	store := &deliveryStoreFake{status: "running", claim: postgres.DeliveryClaim{ProviderID: "original"}}
+	provider := &trackerFake{observations: []Observation{{OutputURL: "https://provider.test/image.png", FileType: "png"}}}
+	err := (DeliveryWorker{Store: scanStore{store}, Provider: provider}).ProcessDue(context.Background())
+	if err == nil || store.status != "saving" || len(provider.calls) != 1 {
+		t.Fatalf("scan result: %v %+v %v", err, store, provider.calls)
+	}
+}

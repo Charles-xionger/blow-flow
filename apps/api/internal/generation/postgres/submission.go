@@ -46,7 +46,7 @@ func (s *Store) ClaimSubmission(ctx context.Context, id string) (Submission, boo
 			return err
 		}
 		now := time.Now().UTC()
-		res := tx.Exec(`UPDATE generation_tasks t SET status='submitting',lease_token=?,lease_until=?,updated_at=? FROM users u WHERE t.id=? AND t.owner_id=u.id AND u.status='active' AND t.status='queued' AND EXISTS (SELECT 1 FROM generation_resource_grants g WHERE g.owner_id=t.owner_id AND g.resource_type='project' AND g.resource_id=t.project_id)`, token, now.Add(60*time.Second), now, id)
+		res := tx.Exec(`UPDATE generation_tasks t SET status='submitting',stage='submitting',lease_token=?,lease_until=?,updated_at=? FROM users u WHERE t.id=? AND t.owner_id=u.id AND u.status='active' AND t.status='queued' AND EXISTS (SELECT 1 FROM generation_resource_grants g WHERE g.owner_id=t.owner_id AND g.resource_type='project' AND g.resource_id=t.project_id)`, token, now.Add(60*time.Second), now, id)
 		if res.Error != nil {
 			return res.Error
 		}
@@ -61,7 +61,7 @@ func (s *Store) ClaimSubmission(ctx context.Context, id string) (Submission, boo
 			return err
 		}
 		out.Token = token
-		if err := tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,occurred_at) VALUES(?,'submitting',?)`, id, now).Error; err != nil {
+		if err := tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,stage,occurred_at) VALUES(?,'submitting','submitting',?)`, id, now).Error; err != nil {
 			return err
 		}
 		claimed = true
@@ -92,7 +92,7 @@ func (s *Store) ResolveSubmission(ctx context.Context, id, token, providerID str
 		if res.RowsAffected == 0 {
 			return ErrStaleLease
 		}
-		return tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,occurred_at) VALUES(?,?,?)`, id, event, now).Error
+		return tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,stage,occurred_at) VALUES(?,?,?,?)`, id, event, status, now).Error
 	})
 }
 
@@ -100,11 +100,11 @@ func (s *Store) ResolveSubmission(ctx context.Context, id, token, providerID str
 func (s *Store) RecoverExpiredSubmissions(ctx context.Context) error {
 	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var ids []string
-		if err := tx.Raw(`UPDATE generation_tasks SET status='needs_review',lease_token=NULL,lease_until=NULL,updated_at=now() WHERE status='submitting' AND lease_until<=now() RETURNING id`).Scan(&ids).Error; err != nil {
+		if err := tx.Raw(`UPDATE generation_tasks SET status='needs_review',stage='needs_review',lease_token=NULL,lease_until=NULL,updated_at=now() WHERE status='submitting' AND lease_until<=now() RETURNING id`).Scan(&ids).Error; err != nil {
 			return err
 		}
 		for _, id := range ids {
-			if err := tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,occurred_at) VALUES(?,'submission_uncertain',now())`, id).Error; err != nil {
+			if err := tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,stage,occurred_at) VALUES(?,'submission_uncertain','needs_review',now())`, id).Error; err != nil {
 				return err
 			}
 		}

@@ -71,6 +71,19 @@ func TestProviderSuccessSaveRetryAndEventsSurviveRestart(t *testing.T) {
 	if err != nil || !ok || first.ProviderID != "original-provider-task" {
 		t.Fatalf("delivery claim %+v %v %v", first, ok, err)
 	}
+	if err = store.RecordProgress(ctx, task.ID, first.Token, "generating", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.ScheduleQuery(ctx, first, "waiting_provider", nil, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Exec(`UPDATE generation_tasks SET next_attempt_at=now()-interval '1 second' WHERE id=?`, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	first, ok, err = store.ClaimDelivery(ctx, task.ID)
+	if err != nil || !ok {
+		t.Fatalf("reclaim %v %v", ok, err)
+	}
 	if err = store.ProviderSucceeded(ctx, first, "https://provider.test/image.png", "png"); err != nil {
 		t.Fatal(err)
 	}
@@ -111,12 +124,47 @@ func TestProviderSuccessSaveRetryAndEventsSurviveRestart(t *testing.T) {
 	var names []string
 	for _, event := range events {
 		names = append(names, event.Type)
+		if event.Type == "stage_changed" && event.Stage != "waiting_provider" {
+			t.Fatalf("stage change=%+v", event)
+		}
 	}
-	if fmt.Sprint(names) != "[created submitting accepted provider_succeeded save_retry delivered]" {
+	if fmt.Sprint(names) != "[created submitting accepted progress stage_changed provider_succeeded save_retry delivered]" {
 		t.Fatalf("events %v", names)
 	}
 	after, err := restarted.Events(ctx, task.ID, events[len(events)-1].ID)
 	if err != nil || len(after) != 0 {
 		t.Fatalf("cursor %v %v", after, err)
+	}
+	stalled, err := store.Create(ctx, owner, "stalled", "hash-stalled", input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stalledSubmission, ok, err := store.ClaimSubmission(ctx, stalled.ID)
+	if err != nil || !ok {
+		t.Fatalf("stalled submit: %v %v", ok, err)
+	}
+	if err = store.ResolveSubmission(ctx, stalled.ID, stalledSubmission.Token, "same-original-id", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Exec(`UPDATE generation_tasks SET tracking_started_at=now()-interval '1 hour' WHERE id=?`, stalled.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	stalledClaim, ok, err := store.ClaimDelivery(ctx, stalled.ID)
+	if err != nil || !ok {
+		t.Fatalf("stalled claim: %v %v", ok, err)
+	}
+	if err = store.ScheduleQuery(ctx, stalledClaim, "generating", nil, 30*time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	stalledTask, _, err := store.Get(ctx, stalled.ID)
+	if err != nil || stalledTask.Status != "wait_timeout" {
+		t.Fatalf("timeout: %+v %v", stalledTask, err)
+	}
+	if err = store.ResumeDelivery(ctx, stalled.ID); err != nil {
+		t.Fatal(err)
+	}
+	resumed, ok, err := store.ClaimDelivery(ctx, stalled.ID)
+	if err != nil || !ok || resumed.ProviderID != "same-original-id" {
+		t.Fatalf("resume: %+v %v %v", resumed, ok, err)
 	}
 }
