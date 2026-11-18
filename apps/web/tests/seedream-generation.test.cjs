@@ -3,7 +3,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { generateImage } = require('../lib/generation/image-adapters.ts');
 const { seedreamImageConfig } = require('../lib/generation/seedream.ts');
-const snapshot = () => { const config = seedreamImageConfig(); return { model: config.models[0], connection: config.connections[0] }; };
+const snapshot = (id = 'doubao-seedream-5-0-pro-260628') => { const config = seedreamImageConfig(); return { model: config.models.find(model => model.id === id), connection: config.connections[0] }; };
 process.env.ARK_API_KEY = 'test-ark-key';
 const input = { prompt: '雨夜街景', width: 2816, height: 1584 };
 
@@ -22,6 +22,29 @@ test('image function maps Seedream defaults to the official single-image endpoin
     },
   });
   assert.deepEqual(result, ['https://result.test/image.png']);
+});
+
+test('Seedream 5.5 is listed with its official model ID and native transparency capabilities', async () => {
+  const config = seedreamImageConfig();
+  assert.deepEqual(config.models.map(model => [model.id, model.name]), [
+    ['doubao-seedream-5-5-261028', 'Seedream 5.5'],
+    ['doubao-seedream-5-0-pro-260628', 'Seedream 5.0 Pro'],
+  ]);
+  const model = config.models[0];
+  assert.equal(model.capabilities.image.maxImages, 10);
+  assert.deepEqual(model.capabilities.image.options.promptOptimizations, ['standard']);
+  assert.equal(model.capabilities.image.options.transparentBackgroundPolicy, 'native');
+  let body;
+  const result = await generateImage(snapshot(model.id), { ...input, imageOptions: { background: 'transparent' } }, {
+    beforeSubmit() {},
+    fetch: async (_url, init) => { body = JSON.parse(init.body); return Response.json({ data: [{ url: 'https://result.test/native-alpha.png' }] }); },
+  });
+  assert.equal(body.model, 'doubao-seedream-5-5-261028');
+  assert.equal(body.background, 'transparent');
+  assert.deepEqual(result, ['https://result.test/native-alpha.png']);
+  await assert.rejects(generateImage(snapshot(model.id), { ...input, imageOptions: { promptOptimization: 'fast' } }, {
+    beforeSubmit() { assert.fail('unsupported options must fail before submission'); }, fetch: async () => assert.fail(),
+  }), /不支持/);
 });
 
 test('image function preserves ordered references and advanced settings, validating transparency before submitting', async () => {

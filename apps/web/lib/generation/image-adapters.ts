@@ -46,6 +46,7 @@ const adapters: Record<ImageModelConfig['adapter'], ImageAdapter> = {
         !Array.isArray(options.outputFormats) || !options.outputFormats.length || options.outputFormats.some(v => !['png','jpeg'].includes(v)) ||
         !Array.isArray(options.promptOptimizations) || !options.promptOptimizations.length || options.promptOptimizations.some(v => !['standard','fast'].includes(v)) ||
         typeof options.watermark !== 'boolean' || typeof options.transparentBackground !== 'boolean' ||
+        (options.transparentBackgroundPolicy !== undefined && !['alpha-reference','native'].includes(options.transparentBackgroundPolicy)) ||
         !Array.isArray(image.sizes) || !image.sizes.length || image.sizes.some(v => typeof v !== 'string' || !v) ||
         !Array.isArray(image.aspectRatios) || !image.aspectRatios.length || image.aspectRatios.some(v => !/^\d+:\d+$/.test(v)) ||
         !Array.isArray(image.presets) || !image.presets.length) throw new Error('Invalid image capabilities');

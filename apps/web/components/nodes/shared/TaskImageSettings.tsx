@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import type { ImageGenerationOptions, PublicModel } from '@/lib/generation/types';
-import { resolveImageOptions } from '@/lib/generation/image-options';
+import { resolveImageOptions, transparentBackgroundNeedsAlphaReference } from '@/lib/generation/image-options';
 import { ImageSettingsPopover } from './ImageSettingsPopover';
 import { consoleSelectClass } from './ConsoleControls';
 import styles from './ImageGeneration.module.css';
@@ -37,9 +37,12 @@ export function TaskImageSettings({ model, width, height, options: value, canUse
         {image.options?.promptOptimizations.map(mode => <option key={mode} value={mode}>{mode === 'standard' ? '标准' : '快速'}</option>)}
       </select></label>
       <label><input type="checkbox" checked={options.watermark} disabled={!image.options?.watermark && !options.watermark} onChange={e => change({ watermark: e.target.checked })} /> 可见水印</label>
-      <label><input type="checkbox" checked={options.background === 'transparent'} disabled={options.background !== 'transparent' && (!image.options?.transparentBackground || !canUseTransparency || options.outputFormat !== 'png')}
+      <label><input type="checkbox" checked={options.background === 'transparent'} disabled={options.background !== 'transparent' && (!image.options?.transparentBackground ||
+        (transparentBackgroundNeedsAlphaReference(image) && !canUseTransparency) || options.outputFormat !== 'png')}
         onChange={e => change({ background: e.target.checked ? 'transparent' : 'opaque' })} /> 透明背景</label>
-      <p className={styles.hint}>透明背景需要一张带透明通道的参考图，输出格式为 PNG。</p>
+      <p className={styles.hint}>{!transparentBackgroundNeedsAlphaReference(image)
+        ? '可原生生成透明背景，输出格式为 PNG。'
+        : '透明背景需要一张带透明通道的参考图，输出格式为 PNG。'}</p>
     </div>}
   </ImageSettingsPopover>;
 }

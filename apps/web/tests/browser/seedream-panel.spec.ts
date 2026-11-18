@@ -14,6 +14,7 @@ test('Seedream exposes official size presets and persists advanced options in bo
     await page.goto(`/?project=${id}`);
     await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
     await page.locator('.react-flow__node').click();
+    await expect(page.getByRole('combobox', { name: '生图模型' }).locator('option[value="doubao-seedream-5-5-261028"]')).toHaveText('Seedream 5.5');
     if (type === 'imageToImage') await expect(page.getByRole('combobox', { name: '生图模型' }).locator('option[value="runninghub-krea2"]')).toHaveCount(0);
     await page.getByRole('button', { name: '图像设置', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: '图像设置' });
@@ -31,6 +32,39 @@ test('Seedream exposes official size presets and persists advanced options in bo
     await page.reload(); await page.locator('.react-flow__node').click();
     await expect(page.getByRole('button', { name: '图像设置', exact: true })).toContainText('1.5K · 16:9');
   }
+});
+
+test('switching Seedream versions resets incompatible options and 5.5 offers native transparency', async ({ page, request }) => {
+  await page.route('**/api/generation/models', async route => {
+    const response = await route.fetch();
+    await route.fulfill({ json: (await response.json()).map((model: Record<string, unknown>) => ({ ...model, configured: true })) });
+  });
+  const id = crypto.randomUUID();
+  const response = await request.put(`/api/workflow/${id}`, { data: { id, requestId: crypto.randomUUID(), baseVersion: 0,
+    snapshot: { name: 'Seedream 版本切换', nodes: [{ id: 'image', type: 'textToImage', position: { x: 400, y: 80 },
+      data: { type: 'textToImage', label: 'Seedream', model: 'doubao-seedream-5-0-pro-260628', usesGenerationTasks: true,
+        prompt: '透明玻璃花瓶', imageOptions: { outputFormat: 'png', watermark: false, promptOptimization: 'fast', background: 'opaque' } } }],
+      edges: [], viewport: { x: -200, y: 0, zoom: 1 } } } });
+  expect(response.ok()).toBeTruthy();
+  await page.goto(`/?project=${id}`);
+  await page.locator('.react-flow__node').click();
+  await page.getByRole('combobox', { name: '生图模型' }).selectOption('doubao-seedream-5-5-261028');
+  await page.getByRole('button', { name: '图像设置', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '图像设置' });
+  await dialog.getByText('高级设置', { exact: true }).click();
+  await expect(dialog.getByLabel('提示词优化').locator('option')).toHaveCount(1);
+  await expect(dialog.getByLabel('提示词优化')).toHaveValue('standard');
+  await expect(dialog.getByLabel('透明背景')).toBeEnabled();
+  await dialog.getByLabel('透明背景').check();
+  await expect(dialog.getByText('可原生生成透明背景，输出格式为 PNG。')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.getByRole('combobox', { name: '生图模型' }).selectOption('doubao-seedream-5-0-pro-260628');
+  await page.getByRole('button', { name: '图像设置', exact: true }).click();
+  const advanced = dialog.getByText('高级设置', { exact: true });
+  if (await advanced.getAttribute('aria-expanded') !== 'true') await advanced.click();
+  await expect(dialog.getByLabel('提示词优化')).toHaveValue('standard');
+  await expect(dialog.getByLabel('透明背景')).not.toBeChecked();
+  await expect(dialog.getByLabel('透明背景')).toBeDisabled();
 });
 
 test('reference upload, ordering and prompt numbering reach the frozen generation request', async ({ page, request }, testInfo) => {

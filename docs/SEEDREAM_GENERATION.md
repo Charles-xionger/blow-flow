@@ -1,6 +1,6 @@
-# Seedream 5.0 Pro 官方生图
+# Seedream 5.5 与 5.0 Pro 官方生图
 
-模型 `doubao-seedream-5-0-pro-260628` 通过火山方舟官方 `POST https://ark.cn-beijing.volces.com/api/v3/images/generations` 接入持久化生成任务，覆盖画布文生图、图生图和创作助手。模型与参数依据：[官方图片生成 API](https://console.volcengine.com/ark/region:cn-beijing/docs/image-generation-api)。
+模型 `doubao-seedream-5-5-261028` 与 `doubao-seedream-5-0-pro-260628` 通过火山方舟官方 `POST https://ark.cn-beijing.volces.com/api/v3/images/generations` 接入持久化生成任务，覆盖画布文生图、图生图和创作助手。模型与参数依据：[官方 Seedream 5.5 教程](https://docs.volcengine.com/docs/ark/seedream-5-5?lang=zh)与[图片生成 API](https://docs.volcengine.com/docs/ark/image-generation-api?lang=zh)。
 
 ## 配置与运行
 
@@ -16,7 +16,7 @@ pnpm generation:worker
 
 ## 输入与高级设置
 
-每次生成一张图片，最多十张参考图。参考图片可连接画布节点或直接上传，按界面顺序发送，排序后提示词中的连接引用编号随之变化。项目目前接受 PNG、JPEG、WebP，每张不超过 30 MB；官方接口还支持其他格式，本次沿用项目原始素材上传格式。服务端在付费提交前校验图片内容、尺寸与透明通道。
+两个模型每次生成一张图片，最多十张参考图。参考图片可连接画布节点或直接上传，按界面顺序发送，排序后提示词中的连接引用编号随之变化。项目目前接受 PNG、JPEG、WebP，每张不超过 30 MB；官方接口还支持其他格式，本次沿用项目原始素材上传格式。服务端在付费提交前校验图片内容、尺寸与透明通道。
 
 尺寸提供 1K、1.5K、2K 和常用画幅，默认 2K。使用官方的像素预设，例如 1.5K / 16:9 为 2048×1152，2K / 16:9 为 2816×1584；不使用 Krea2 的短边换算。
 
@@ -25,11 +25,11 @@ pnpm generation:worker
 | 字段 | 取值 | 默认 |
 | --- | --- | --- |
 | `outputFormat` | `png`、`jpeg` | `png` |
-| `promptOptimization` | `standard`、`fast` | `standard` |
+| `promptOptimization` | 5.5：`standard`；5.0 Pro：`standard`、`fast` | `standard` |
 | `watermark` | 布尔值，可见水印 | `false` |
 | `background` | `opaque`、`transparent` | `opaque` |
 
-透明背景需要一张带透明通道的参考图，并使用 PNG 输出。图层拆分、坐标／框选／箭头局部编辑不在本次范围内。Pro 普通生图不发送组图、流式或联网参数，也不发送未声明支持的 seed。
+5.5 可在文生图或图生图中原生生成透明 PNG；5.0 Pro 仍需要一张带透明通道的参考图。图层拆分、富文本 OCR、多轮精准编辑、坐标／框选／箭头局部编辑不在本次范围内。普通生图不发送组图、流式或联网参数，也不发送未声明支持的 seed。
 
 ## 封装与失败处理
 

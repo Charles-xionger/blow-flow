@@ -14,8 +14,19 @@ export const seedreamImageCapabilities: NonNullable<PublicModel['capabilities'][
   pixelLimits: { min: 921600, max: 4624220, maxAspectRatio: 16 },
   maxImages: 10, sizes: Object.keys(pixels), aspectRatios: ratios,
   presets: Object.entries(pixels).flatMap(([size, dimensions]) => dimensions.map(([width,height], i) => ({ size, ratio: ratios[i], width, height }))),
-  options: { outputFormats: ['png','jpeg'], promptOptimizations: ['standard','fast'], watermark: true, transparentBackground: true },
+  options: { outputFormats: ['png','jpeg'], promptOptimizations: ['standard','fast'], watermark: true,
+    transparentBackground: true, transparentBackgroundPolicy: 'alpha-reference' },
 };
+
+export const seedream55ImageCapabilities: NonNullable<PublicModel['capabilities']['image']> = {
+  ...structuredClone(seedreamImageCapabilities),
+  options: { outputFormats: ['png','jpeg'], promptOptimizations: ['standard'], watermark: true,
+    transparentBackground: true, transparentBackgroundPolicy: 'native' },
+};
+
+export function transparentBackgroundNeedsAlphaReference(image: NonNullable<PublicModel['capabilities']['image']>): boolean {
+  return image.options?.transparentBackgroundPolicy !== 'native';
+}
 
 export function normalizeImageOptions(value: unknown): ImageGenerationOptions {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('无效的图片高级设置');
@@ -48,6 +59,8 @@ export function validateImageGenerationInput(input: GenerationInput, image: NonN
   if (!image.options?.outputFormats.includes(options.outputFormat) || !image.options.promptOptimizations.includes(options.promptOptimization) ||
     (options.watermark && !image.options.watermark) || (options.background === 'transparent' && !image.options.transparentBackground))
     throw new Error('模型不支持所选图片高级设置');
-  if (options.background === 'transparent' && (input.references?.length !== 1 || options.outputFormat !== 'png'))
-    throw new Error('透明背景需要一张带透明通道的参考图，且输出格式为 PNG');
+  if (options.background === 'transparent' && options.outputFormat !== 'png')
+    throw new Error('透明背景的输出格式必须为 PNG');
+  if (options.background === 'transparent' && transparentBackgroundNeedsAlphaReference(image) && input.references?.length !== 1)
+    throw new Error('透明背景需要一张带透明通道的参考图');
 }

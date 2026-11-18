@@ -1,19 +1,21 @@
 import { ImageGenerationError } from './image-errors';
-import { seedreamImageCapabilities, resolveImageOptions } from './image-options';
+import { seedream55ImageCapabilities, seedreamImageCapabilities, resolveImageOptions, transparentBackgroundNeedsAlphaReference } from './image-options';
 import { readReferenceBody, validReferenceUrl } from './reference-files';
 import type { GenerationConfig, GenerationInput } from './types';
 import type { TaskSnapshot } from './service';
 import type { ImageGenerationIO } from './image-adapters';
 
 export function seedreamImageConfig(): GenerationConfig {
+  const model = (id: string, name: string, image: typeof seedreamImageCapabilities): GenerationConfig['models'][number] => ({
+    id, providerModel: id, name, category: 'IMAGE', adapter: 'ark-image', version: '1', connectionId: 'volcengine-ark',
+    capabilities: { prompt: true, referenceImages: true,
+      dimensions: { min: 16, max: 8192, step: 1, defaultWidth: 2048, defaultHeight: 2048 }, image: structuredClone(image) },
+  });
   return {
     connections: [{ id: 'volcengine-ark', baseUrl: 'https://ark.cn-beijing.volces.com', apiKeyEnv: 'ARK_API_KEY',
       concurrency: 5, requestTimeoutMs: 180_000, pollIntervalMs: 5000, queryTimeoutMs: 300_000, maxQueryErrors: 1 }],
-    models: [{ id: 'doubao-seedream-5-0-pro-260628', providerModel: 'doubao-seedream-5-0-pro-260628', name: 'Seedream 5.0 Pro',
-      category: 'IMAGE', adapter: 'ark-image', version: '1', connectionId: 'volcengine-ark',
-      capabilities: { prompt: true, referenceImages: true,
-        dimensions: { min: 16, max: 8192, step: 1, defaultWidth: 2048, defaultHeight: 2048 },
-        image: structuredClone(seedreamImageCapabilities) } }],
+    models: [model('doubao-seedream-5-5-261028', 'Seedream 5.5', seedream55ImageCapabilities),
+      model('doubao-seedream-5-0-pro-260628', 'Seedream 5.0 Pro', seedreamImageCapabilities)],
   };
 }
 
@@ -34,7 +36,8 @@ export async function generateSeedreamImage(snapshot: TaskSnapshot, input: Gener
     if (!['png','jpeg','webp'].includes(metadata.format ?? '') || !width || !height || width <= 14 || height <= 14 ||
       width * height > 36_000_000 || width / height < 1/16 || width / height > 16 || (metadata.pages ?? 1) > 1)
       throw new ImageGenerationError('参考图格式或尺寸不符合模型要求', 'preparation');
-    if (options?.background === 'transparent' && !metadata.hasAlpha) throw new ImageGenerationError('透明背景需要带透明通道的参考图', 'preparation');
+    if (options?.background === 'transparent' && transparentBackgroundNeedsAlphaReference(snapshot.model.capabilities.image!) && !metadata.hasAlpha)
+      throw new ImageGenerationError('透明背景需要带透明通道的参考图', 'preparation');
     images.push(reference.url);
   }
   const body = { model: snapshot.model.providerModel ?? snapshot.model.id, prompt: input.prompt, size: `${input.width}x${input.height}`,

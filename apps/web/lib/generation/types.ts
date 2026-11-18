@@ -26,7 +26,8 @@ export interface PublicModel {
     image?: { maxImages: number; sizes: string[]; aspectRatios: string[];
       pixelLimits?: { min: number; max: number; maxAspectRatio: number };
       presets?: { size: string; ratio: string; width: number; height: number }[];
-      options?: { outputFormats: ('png' | 'jpeg')[]; promptOptimizations: ('standard' | 'fast')[]; watermark: boolean; transparentBackground: boolean };
+      options?: { outputFormats: ('png' | 'jpeg')[]; promptOptimizations: ('standard' | 'fast')[]; watermark: boolean;
+        transparentBackground: boolean; transparentBackgroundPolicy?: 'alpha-reference' | 'native' };
     };
     dimensions: { min: number; max: number; step: number; defaultWidth: number; defaultHeight: number };
     video?: { minDuration: number; maxDuration: number; defaultDuration: number; fps: number;

@@ -1,4 +1,5 @@
 import type { NodeData } from '../../types';
+import { resolveImageOptions } from './image-options';
 import type { PublicModel } from './types';
 
 /** Match the task renderers available in each image node; legacy models use their existing menus. */
@@ -14,5 +15,6 @@ export function imageModelSelection(id: string, models: PublicModel[], previousR
   const defaultPreset = model?.capabilities.image?.presets?.find(p => p.width === dimensions?.defaultWidth && p.height === dimensions?.defaultHeight);
   const preset = model?.capabilities.image?.presets?.find(p => p.ratio === previousRatio && p.size === defaultPreset?.size) ?? defaultPreset;
   return { model: id, usesGenerationTasks: !!model, generationWidth: preset?.width ?? dimensions?.defaultWidth, generationHeight: preset?.height ?? dimensions?.defaultHeight,
-    generationSizePreset: preset?.size.toLowerCase() as NodeData['generationSizePreset'], aspectRatio: preset?.ratio ?? previousRatio };
+    generationSizePreset: preset?.size.toLowerCase() as NodeData['generationSizePreset'], aspectRatio: preset?.ratio ?? previousRatio,
+    imageOptions: model?.capabilities.image?.options ? resolveImageOptions(undefined, model.capabilities.image) : undefined };
 }
