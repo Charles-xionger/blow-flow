@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"blow-flow/api/internal/account"
+	"blow-flow/api/internal/agent"
 	"blow-flow/api/internal/resource"
 	"blow-flow/api/internal/script"
 	"blow-flow/api/internal/textmodel"
@@ -39,6 +40,15 @@ type RefreshSessions interface {
 	Rotate(context.Context, string, string) (account.Identity, string, error)
 	Revoke(context.Context, string, string) error
 }
+type AgentRuns interface {
+	Claim(context.Context, string) (agent.Run, error)
+	Heartbeat(context.Context, string) (time.Time, error)
+	ReadCanvas(context.Context, string) (agent.Canvas, error)
+	DeletedNodes(context.Context, string, []string) ([]string, error)
+	CanvasReceipt(context.Context, string, string) (agent.CanvasReceipt, bool, error)
+	CommitCanvas(context.Context, string, agent.Commit) (agent.CanvasReceipt, error)
+	Finish(context.Context, string, string) error
+}
 
 type AccountService interface {
 	Resolve(context.Context, account.Identity) (account.User, error)
@@ -55,6 +65,8 @@ type Dependencies struct {
 	CreatorAuth           CreatorAuthenticator
 	Captcha               ImageCaptcha
 	RefreshSessions       RefreshSessions
+	AgentRuns             AgentRuns
+	AgentRunnerKey        []byte
 	Accounts              AccountService
 	Generation            GenerationService
 	GenerationWakeups     GenerationWakeups
@@ -107,5 +119,6 @@ func NewWithDependencies(dependencies Dependencies) *gin.Engine {
 		c.JSON(http.StatusOK, gin.H{"status": "ready"})
 	})
 	registerAccountRoutes(r, dependencies)
+	registerAgentInternalRoutes(r, dependencies)
 	return r
 }

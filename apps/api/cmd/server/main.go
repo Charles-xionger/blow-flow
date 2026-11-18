@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 
 	"blow-flow/api/internal/account"
 	accountpostgres "blow-flow/api/internal/account/postgres"
+	agentpostgres "blow-flow/api/internal/agent/postgres"
 	"blow-flow/api/internal/database"
 	"blow-flow/api/internal/generation"
 	generationpostgres "blow-flow/api/internal/generation/postgres"
@@ -53,6 +55,9 @@ func run() error {
 	var captcha httpserver.ImageCaptcha
 	var refreshSessions httpserver.RefreshSessions
 	var refreshStore *session.Store
+	var agentRuns httpserver.AgentRuns
+	var agentStore *agentpostgres.Store
+	var agentRunnerKey []byte
 	var generationService httpserver.GenerationService
 	var resourceService *resource.Service
 	var scriptService *script.Service
@@ -66,6 +71,8 @@ func run() error {
 		} else {
 			defer pool.Close()
 			store := generationpostgres.New(db)
+			agentStore = agentpostgres.New(db)
+			agentRuns = agentStore
 			resourceService = &resource.Service{Repository: resourcepostgres.New(db)}
 			scriptStore := scriptpostgres.New(db)
 			if n, e := strconv.Atoi(os.Getenv("SCRIPT_MAX_QUEUED_PER_USER")); e == nil && n > 0 && n <= 1000 {
@@ -124,6 +131,13 @@ func run() error {
 		}
 	}
 	addr := os.Getenv("API_ADDR")
+	if raw := os.Getenv("AGENT_RUNNER_KEY"); raw != "" {
+		key, err := base64.RawStdEncoding.DecodeString(raw)
+		if err != nil || len(key) < 32 {
+			return fmt.Errorf("AGENT_RUNNER_KEY must be at least 32 decoded bytes")
+		}
+		agentRunnerKey = key
+	}
 	if addr == "" {
 		addr = "127.0.0.1:8080"
 	}
@@ -151,7 +165,25 @@ func run() error {
 			}
 		}()
 	}
-	server := &http.Server{Handler: httpserver.NewWithDependencies(httpserver.Dependencies{Ping: ping, Accounts: accounts, IdentityVerifier: identityVerifier, LocalAdmin: localAdmin, CreatorAuth: creatorAuth, Captcha: captcha, RefreshSessions: refreshSessions, Generation: generationService, GenerationWakeups: wakeups, GenerationStreamClose: ctx.Done(), Resources: resourceService, ResourceBlobs: resourceoss.FromEnv(), Scripts: scriptService, ScriptWakeups: scriptWakeups, TextModels: textModels}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
+	if agentStore != nil && len(agentRunnerKey) >= 32 {
+		go func() {
+			ticker := time.NewTicker(15 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					check, cancel := context.WithTimeout(ctx, 10*time.Second)
+					if _, err := agentStore.InterruptExpired(check); err != nil && ctx.Err() == nil {
+						slog.Warn("agent run expiry check failed")
+					}
+					cancel()
+				}
+			}
+		}()
+	}
+	server := &http.Server{Handler: httpserver.NewWithDependencies(httpserver.Dependencies{Ping: ping, Accounts: accounts, IdentityVerifier: identityVerifier, LocalAdmin: localAdmin, CreatorAuth: creatorAuth, Captcha: captcha, RefreshSessions: refreshSessions, AgentRuns: agentRuns, AgentRunnerKey: agentRunnerKey, Generation: generationService, GenerationWakeups: wakeups, GenerationStreamClose: ctx.Done(), Resources: resourceService, ResourceBlobs: resourceoss.FromEnv(), Scripts: scriptService, ScriptWakeups: scriptWakeups, TextModels: textModels}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(listener) }()
 	slog.Info("API listening", "address", listener.Addr().String())

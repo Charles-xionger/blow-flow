@@ -1,8 +1,12 @@
 # 创作助手迁移设计（提案）
 
-状态：实施中。画布计算器与 Go 资源适配已落地测试；Agent 专用授权与生产切流尚未完成。
+状态：实施中。画布计算器、Go 资源适配和运行令牌约束的画布提交接口已落地测试；任务命令、消息持久化、Runner 切换与生产切流尚未完成。
 
-当前代码边界：`apps/web/lib/agent/canvas-plan.ts` 是不访问数据库的画布编辑计算器，现有 SQLite Agent 工具已复用它。`apps/web/lib/agent/go-canvas.ts` 只提供 Go 资源接口的隔离适配与并发重算测试，尚未接入 Pi Worker。现有 Go 资源路由使用项目所有者令牌，不能充当 Agent 内部提交接口；删除节点检查与保存分离，也不能代替同一事务中的授权和差异校验。下一步要先实现运行令牌约束的 Go Agent 提交入口及持久工具回执，再让 Pi Worker 调用适配器。前端及生产 Agent 路由保持现状。
+当前代码边界：`apps/web/lib/agent/canvas-plan.ts` 是不访问数据库的画布编辑计算器，现有 SQLite Agent 工具已复用它。`apps/web/lib/agent/go-canvas.ts` 提供项目所有者资源适配及独立的 `GoRunCanvasHTTP` 内部 Runner 适配，尚未接入生产 Pi Worker。Go `agent` 模块持久化任务状态和运行租约，提交入口从运行令牌推导所有者与项目，在同一事务中检查版本、操作范围、删除节点并写快照和工具回执。服务密钥只用于领取任务，不能访问运行画布；过期运行令牌不能提交。当前任务入队仅有 Store 方法，尚未开放用户命令或连接 RabbitMQ，因此不能形成完整对话链路。前端及生产 Agent 路由保持现状。
+
+本阶段内部接口：`POST /internal/agent/tasks/:id/claim` 使用 `AGENT_RUNNER_KEY`（标准 Base64 编码的至少 32 字节）；领取后使用返回的独立运行令牌调用 `POST /run/heartbeat`、`GET /run/canvas`、`POST /run/deleted-nodes/check`、`GET /run/canvas/receipt/:callId`、`PUT /run/canvas`、`POST /run/finish`（均在 `/internal/agent` 前缀下）。`PUT /run/canvas` 提交 `callId`、`label`、`baseVersion`、`operations`、`snapshot`、`skipped`。同一工具调用重复提交返回原回执；画布版本冲突需要 Runner 重读后计算，运行过期则停止写入。Go 当前仅允许助手本任务新建节点的内容更新；现有节点的引用或用户确认授权仍待用户命令与确认持久化后接入，不能由 Runner 自报授权。
+
+画布提交只做服务端差异与授权边界校验；TypeScript 计算器仍负责历史补丁、提示词引用和图语义。Go 尚未在节点删除时取消未提交的生成请求，也尚未接入生成模块的迟到结果保护；在补齐这一步前不得把生产 Pi Worker 切到此接口。`skipped` 是 Runner 报告，不代表 Go 独立推导了跳过原因。
 
 ## 结论
 

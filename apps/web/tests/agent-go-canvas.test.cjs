@@ -1,7 +1,7 @@
 require('../scripts/register-typescript.cjs');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { GoCanvasEditor, GoCanvasHTTP, CanvasStoreError } = require('../lib/agent/go-canvas');
+const { GoCanvasEditor, GoCanvasHTTP, GoRunCanvasHTTP, CanvasStoreError } = require('../lib/agent/go-canvas');
 
 const initial = () => ({ name: '故事', nodes: [
   { id: 'a', type: 'text', position: { x: 0, y: 0 }, data: { type: 'text', label: 'A', prompt: '旧稿' } },
@@ -96,4 +96,31 @@ test('Go canvas HTTP adapter carries owner credential and preserves API error co
   await assert.rejects(client.save('p', 'r', 7, initial()), error => error instanceof CanvasStoreError && error.code === 'version_conflict');
   assert.ok(calls.every(call => call.init.headers.Authorization === 'Bearer owner-token'));
   assert.equal(calls[2].init.method, 'PUT');
+});
+
+test('run canvas adapter scopes every request to the run token and recovers a saved call', async () => {
+  const calls = [];
+  const operations = [{ kind: 'move', id: 'a', position: { x: 1, y: 2 } }];
+  const client = new GoRunCanvasHTTP('http://api.test/', 'p', 'run-token', async (url, init) => {
+    calls.push({ url, init });
+    if (url.endsWith('/receipt/agent%3Acall')) return Response.json({ version: 3, label: '助手编辑', skipped: ['missing'], operations, removedNodes: [] });
+    if (url.endsWith('/deleted-nodes/check')) return Response.json({ deleted: ['old'] });
+    if (url.endsWith('/canvas') && init.method === 'PUT') return Response.json({ version: 3 });
+    return Response.json({ snapshot: initial(), version: 2 });
+  });
+  assert.equal((await client.read('p')).version, 2);
+  assert.deepEqual(await client.deleted('p', ['old']), ['old']);
+  assert.deepEqual(await client.receipt('p', 'agent:call'), { version: 3, label: '助手编辑', skipped: ['missing'], operations, removedNodes: [] });
+  assert.deepEqual(await client.save('p', 'agent:call', 2, initial(), operations, []), { version: 3 });
+  assert.ok(calls.every(call => call.init.headers.Authorization === 'Bearer run-token'));
+  assert.ok(calls.every(call => !call.url.includes('/projects/')));
+  assert.equal(JSON.parse(calls[3].init.body).callId, 'agent:call');
+  await assert.rejects(client.read('wrong'), /Run project mismatch/);
+  assert.equal(calls.length, 4);
+});
+
+test('a prior run receipt only replays matching operations', async () => {
+  const saved = { version: 3, label: '助手编辑', skipped: [], operations: [{ kind: 'disconnect', id: 'edge-1' }], removedNodes: [] };
+  const store = { receipt: async () => saved, read: async () => { throw new Error('should not read'); } };
+  await assert.rejects(new GoCanvasEditor(store).apply('p', 'call', [{ kind: 'disconnect', id: 'edge-2' }]), /request_conflict/);
 });
