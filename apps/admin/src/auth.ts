@@ -1,25 +1,11 @@
 import type { components } from '@blow-flow/api-client'
 import { publicClient } from './api'
+import { saveSession } from './admin-session'
+
+export { getSession, clearSession, ensureSession, signOut } from './admin-session'
 
 type Account = components['schemas']['User']
 type AdminSession = { accessToken: string; expiresAt: number; user: Account }
-const storageKey = 'blow-flow-admin-session'
-
-export function getSession(): AdminSession | null {
-  try {
-    const value = window.sessionStorage.getItem(storageKey)
-    if (!value) return null
-    const session = JSON.parse(value) as AdminSession
-    if (!session.accessToken || !session.user || !Number.isFinite(session.expiresAt) || session.expiresAt <= Date.now()) {
-      clearSession()
-      return null
-    }
-    return session
-  } catch {
-    clearSession()
-    return null
-  }
-}
 
 export async function loadCaptcha(): Promise<{ id: string; image: string }> {
   const result = await publicClient.GET('/auth/captcha')
@@ -37,11 +23,5 @@ export async function login(email: string, password: string, captchaId: string, 
     if (result.error?.error === 'invalid_captcha') throw new Error('图片验证码不正确或已过期，已为你换一张。')
     throw new Error('邮箱或密码不正确。')
   }
-  const session = { accessToken: result.data.accessToken, expiresAt: Date.now() + result.data.expiresIn * 1000, user: result.data.user }
-  window.sessionStorage.setItem(storageKey, JSON.stringify(session))
-  return session
-}
-
-export function clearSession() {
-  window.sessionStorage.removeItem(storageKey)
+  return saveSession(result.data.accessToken, result.data.expiresIn, result.data.user)
 }

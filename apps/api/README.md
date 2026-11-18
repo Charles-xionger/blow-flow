@@ -4,7 +4,7 @@ Go API 按完整领域逐步接管现有 TypeScript 实现的业务写入。Go �
 
 ## 模块边界
 
-1. `internal/identity/localauth` 验证本地管理员密码，并签发、校验 15 分钟的 HS256 JWT；`internal/identity/imagecaptcha` 生成一次性图片验证码。
+1. `internal/identity/localauth` 验证本地管理员密码，并签发、校验 15 分钟的 HS256 JWT；`internal/identity/session` 在 PostgreSQL 中保存可轮换的七天刷新会话；`internal/identity/imagecaptcha` 生成一次性图片验证码。
 2. `internal/account` 定义本地用户账户、角色、状态和管理员操作规则，不依赖 Gin、GORM 或认证实现。
 3. `internal/account/postgres` 维护身份映射、账户状态及追加式审计记录。
 4. `internal/httpserver` 暴露 `openapi.yaml` 定义的版本化接口。
@@ -30,7 +30,7 @@ pnpm dev:api
 
 `GET /v1/auth/captcha` 生成一次性四位图片验证码，按单进程令牌桶限制取图频率；`POST /v1/auth/admin/login` 校验图片答案后再校验密码。图片答案无论对错只可提交一次，未提交的验证码十分钟后过期；当前最多保留 1000 个挑战，均在单个 API 进程内，多实例部署需要共享挑战存储。失败响应在单进程内逐步延迟，不会因代理共享 IP 而锁定正常登录；`GET /v1/me`、用户列表、禁用用户、审计记录均使用签名令牌和本地账户授权。成功登录也会追加审计事件。密码存储采用带随机盐的 Argon2id。图片验证码用于限制简单自动请求，不是第二身份因素。
 
-首位管理员仍由本地引导。Go API 还提供受控创建的普通创作用户登录：运行 `CREATOR_SETUP_PASSWORD=... pnpm --filter @blow-flow/api creator:setup -- -email creator@example.com`，随后调用 `POST /v1/auth/user/login`（邮箱、密码、图片验证码）获取 15 分钟 JWT。公开自助注册、邮箱验证、找回密码、跨实例共享验证码与登录限流、签名密钥轮换和主动撤销令牌尚未提供，生产开放前须补齐。
+首位管理员仍由本地引导。Go API 还提供受控创建的普通创作用户登录：运行 `CREATOR_SETUP_PASSWORD=... pnpm --filter @blow-flow/api creator:setup -- -email creator@example.com`，随后调用 `POST /v1/auth/user/login`（邮箱、密码、图片验证码）获取 15 分钟 JWT 和仅限认证路径的刷新 Cookie。管理员与创作者分别调用 `/v1/auth/admin/refresh` 或 `/v1/auth/user/refresh` 轮换 Cookie 并取得新 JWT，退出时调用对应 `/logout`。Admin 前端已自动续期；普通创作前端尚未接入 Go 登录。迁移 `00010_auth_sessions.sql` 必须先于新 API 部署执行。公开自助注册、邮箱验证、找回密码、跨实例共享验证码与登录限流、签名密钥轮换和主动撤销已签发 JWT 尚未提供，生产开放前须补齐。
 
 ## Go generation service
 

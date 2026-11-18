@@ -1,12 +1,16 @@
 package httpserver
 
 import (
+	"errors"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"blow-flow/api/internal/account"
+	"blow-flow/api/internal/identity/session"
 	"github.com/gin-gonic/gin"
 )
 
@@ -71,7 +75,7 @@ func (l *loginLimiter) clear() {
 func adminLogin(dependencies Dependencies) gin.HandlerFunc {
 	limiter := &loginLimiter{}
 	return func(c *gin.Context) {
-		if dependencies.LocalAdmin == nil || dependencies.Accounts == nil || dependencies.Captcha == nil {
+		if dependencies.LocalAdmin == nil || dependencies.Accounts == nil || dependencies.Captcha == nil || dependencies.RefreshSessions == nil {
 			c.JSON(http.StatusServiceUnavailable, errorBody(c, "service_unavailable"))
 			return
 		}
@@ -115,7 +119,13 @@ func adminLogin(dependencies Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, errorBody(c, "internal_error"))
 			return
 		}
+		refresh, err := dependencies.RefreshSessions.Issue(c.Request.Context(), user, identity)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, errorBody(c, "internal_error"))
+			return
+		}
 		limiter.clear()
+		setRefreshCookie(c, account.RoleAdmin, refresh)
 		c.Header("Cache-Control", "no-store")
 		c.JSON(http.StatusOK, gin.H{"accessToken": token, "expiresIn": 900, "user": user})
 	}
@@ -124,7 +134,7 @@ func adminLogin(dependencies Dependencies) gin.HandlerFunc {
 func creatorLogin(dependencies Dependencies) gin.HandlerFunc {
 	limiter := &loginLimiter{}
 	return func(c *gin.Context) {
-		if dependencies.CreatorAuth == nil || dependencies.Accounts == nil || dependencies.Captcha == nil {
+		if dependencies.CreatorAuth == nil || dependencies.Accounts == nil || dependencies.Captcha == nil || dependencies.RefreshSessions == nil {
 			c.JSON(http.StatusServiceUnavailable, errorBody(c, "service_unavailable"))
 			return
 		}
@@ -160,9 +170,120 @@ func creatorLogin(dependencies Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, errorBody(c, "internal_error"))
 			return
 		}
+		refresh, err := dependencies.RefreshSessions.Issue(c.Request.Context(), user, identity)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, errorBody(c, "internal_error"))
+			return
+		}
 		limiter.clear()
+		setRefreshCookie(c, account.RoleUser, refresh)
 		c.Header("Cache-Control", "no-store")
 		c.JSON(http.StatusOK, gin.H{"accessToken": token, "expiresIn": 900, "user": user})
+	}
+}
+
+func refreshCookie(role account.Role) (name, path, issuer string) {
+	if role == account.RoleAdmin {
+		return "blow_flow_admin_refresh", "/v1/auth/admin", "blow-flow-local"
+	}
+	return "blow_flow_user_refresh", "/v1/auth/user", "blow-flow-creator"
+}
+
+func setRefreshCookie(c *gin.Context, role account.Role, value string) {
+	name, path, _ := refreshCookie(role)
+	maxAge := 7 * 24 * 60 * 60
+	if value == "" {
+		maxAge = -1
+	}
+	http.SetCookie(c.Writer, &http.Cookie{Name: name, Value: value, Path: path, HttpOnly: true, Secure: c.Request.TLS != nil || os.Getenv("APP_ENV") == "production", SameSite: http.SameSiteStrictMode, MaxAge: maxAge})
+}
+
+func sameOrigin(c *gin.Context) bool {
+	if site := c.GetHeader("Sec-Fetch-Site"); site != "" {
+		if site == "same-origin" {
+			return true
+		}
+		if site != "none" {
+			return false
+		}
+	}
+	if origin := c.GetHeader("Origin"); origin != "" {
+		parsed, err := url.Parse(origin)
+		return err == nil && parsed.Host == c.Request.Host && (parsed.Scheme == "https" || parsed.Scheme == "http")
+	}
+	return true
+}
+
+func refreshLogin(dependencies Dependencies, role account.Role) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store")
+		if !sameOrigin(c) {
+			c.JSON(http.StatusForbidden, errorBody(c, "forbidden"))
+			return
+		}
+		if dependencies.RefreshSessions == nil || dependencies.Accounts == nil {
+			c.JSON(http.StatusServiceUnavailable, errorBody(c, "service_unavailable"))
+			return
+		}
+		name, _, issuer := refreshCookie(role)
+		cookie, err := c.Request.Cookie(name)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, errorBody(c, "invalid_refresh"))
+			return
+		}
+		identity, next, err := dependencies.RefreshSessions.Rotate(c.Request.Context(), cookie.Value, issuer)
+		if err != nil {
+			if !errors.Is(err, session.ErrInvalid) {
+				c.JSON(http.StatusServiceUnavailable, errorBody(c, "service_unavailable"))
+				return
+			}
+			setRefreshCookie(c, role, "")
+			c.JSON(http.StatusUnauthorized, errorBody(c, "invalid_refresh"))
+			return
+		}
+		user, err := dependencies.Accounts.Resolve(c.Request.Context(), identity)
+		if err != nil && !errors.Is(err, account.ErrAccountDisabled) && !errors.Is(err, account.ErrForbidden) && !errors.Is(err, account.ErrNotFound) {
+			setRefreshCookie(c, role, next)
+			c.JSON(http.StatusServiceUnavailable, errorBody(c, "service_unavailable"))
+			return
+		}
+		if err != nil || user.Role != role || user.Status != account.StatusActive {
+			_ = dependencies.RefreshSessions.Revoke(c.Request.Context(), next, issuer)
+			setRefreshCookie(c, role, "")
+			c.JSON(http.StatusUnauthorized, errorBody(c, "invalid_refresh"))
+			return
+		}
+		var token string
+		if role == account.RoleAdmin && dependencies.LocalAdmin != nil {
+			token, err = dependencies.LocalAdmin.Issue(identity)
+		} else if role == account.RoleUser && dependencies.CreatorAuth != nil {
+			token, err = dependencies.CreatorAuth.Issue(identity)
+		} else {
+			err = account.ErrForbidden
+		}
+		if err != nil {
+			setRefreshCookie(c, role, next)
+			c.JSON(http.StatusServiceUnavailable, errorBody(c, "service_unavailable"))
+			return
+		}
+		setRefreshCookie(c, role, next)
+		c.JSON(http.StatusOK, gin.H{"accessToken": token, "expiresIn": 900, "user": user})
+	}
+}
+
+func logout(dependencies Dependencies, role account.Role) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store")
+		if !sameOrigin(c) {
+			c.JSON(http.StatusForbidden, errorBody(c, "forbidden"))
+			return
+		}
+		name, _, issuer := refreshCookie(role)
+		if cookie, err := c.Request.Cookie(name); err == nil && dependencies.RefreshSessions != nil {
+			_ = dependencies.RefreshSessions.Revoke(c.Request.Context(), cookie.Value, issuer)
+		}
+		setRefreshCookie(c, role, "")
+		c.Status(http.StatusNoContent)
 	}
 }
 

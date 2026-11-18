@@ -72,7 +72,7 @@ func Verify(key []byte, issuer, audience, raw string, now time.Time) (Claims, er
 		return Claims{}, ErrInvalid
 	}
 	seconds := now.UTC().Unix()
-	if claim.Issuer != issuer || claim.Audience != audience || claim.Subject == "" || claim.Email == "" || claim.JWTID == "" || claim.IssuedAt > seconds || claim.ExpiresAt <= seconds || claim.ExpiresAt-claim.IssuedAt > 900 || claim.AuthTime > seconds || claim.AuthTime < claim.IssuedAt-30 {
+	if claim.Issuer != issuer || claim.Audience != audience || claim.Subject == "" || claim.Email == "" || claim.JWTID == "" || claim.IssuedAt > seconds || claim.ExpiresAt <= seconds || claim.ExpiresAt-claim.IssuedAt > 900 || claim.AuthTime <= 0 || claim.AuthTime > claim.IssuedAt+30 || claim.AuthTime > seconds {
 		return Claims{}, ErrInvalid
 	}
 	return claim, nil

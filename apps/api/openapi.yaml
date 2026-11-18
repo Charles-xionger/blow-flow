@@ -99,6 +99,47 @@ paths:
                   user: { $ref: "#/components/schemas/User" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "503": { $ref: "#/components/responses/ServiceUnavailable" }
+  /auth/admin/refresh:
+    post:
+      operationId: refreshAdministratorSession
+      summary: Rotate the administrator refresh cookie and issue a new access token
+      security: []
+      responses:
+        "200":
+          description: New fifteen-minute access token and rotated HttpOnly refresh cookie
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginSession" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Cross-origin request rejected }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+  /auth/user/refresh:
+    post:
+      operationId: refreshCreatorSession
+      summary: Rotate the creator refresh cookie and issue a new access token
+      security: []
+      responses:
+        "200":
+          description: New fifteen-minute access token and rotated HttpOnly refresh cookie
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginSession" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Cross-origin request rejected }
+  /auth/admin/logout:
+    post:
+      operationId: logoutAdministrator
+      summary: Revoke the administrator refresh cookie
+      security: []
+      responses:
+        "204": { description: Session revoked and cookie cleared }
+  /auth/user/logout:
+    post:
+      operationId: logoutCreator
+      summary: Revoke the creator refresh cookie
+      security: []
+      responses:
+        "204": { description: Session revoked and cookie cleared }
   /workspace:
     get:
       operationId: getOwnedWorkspace
@@ -681,6 +722,13 @@ components:
       in: query
       schema: { type: string }
   schemas:
+    LoginSession:
+      type: object
+      required: [accessToken, expiresIn, user]
+      properties:
+        accessToken: { type: string }
+        expiresIn: { type: integer, description: Seconds until access token expiry }
+        user: { $ref: "#/components/schemas/User" }
     Workspace:
       type: object
       required: [projects, folders]

@@ -34,6 +34,11 @@ type ImageCaptcha interface {
 	Generate() (id, image string, err error)
 	Verify(id, answer string) bool
 }
+type RefreshSessions interface {
+	Issue(context.Context, account.User, account.Identity) (string, error)
+	Rotate(context.Context, string, string) (account.Identity, string, error)
+	Revoke(context.Context, string, string) error
+}
 
 type AccountService interface {
 	Resolve(context.Context, account.Identity) (account.User, error)
@@ -49,6 +54,7 @@ type Dependencies struct {
 	LocalAdmin            LocalAdminAuthenticator
 	CreatorAuth           CreatorAuthenticator
 	Captcha               ImageCaptcha
+	RefreshSessions       RefreshSessions
 	Accounts              AccountService
 	Generation            GenerationService
 	GenerationWakeups     GenerationWakeups

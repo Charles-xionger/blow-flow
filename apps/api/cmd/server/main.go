@@ -22,6 +22,7 @@ import (
 	"blow-flow/api/internal/identity/creatorauth"
 	"blow-flow/api/internal/identity/imagecaptcha"
 	localauth "blow-flow/api/internal/identity/localauth"
+	"blow-flow/api/internal/identity/session"
 	"blow-flow/api/internal/resource"
 	resourceoss "blow-flow/api/internal/resource/oss"
 	resourcepostgres "blow-flow/api/internal/resource/postgres"
@@ -50,6 +51,7 @@ func run() error {
 	var localAdmin httpserver.LocalAdminAuthenticator
 	var creatorAuth httpserver.CreatorAuthenticator
 	var captcha httpserver.ImageCaptcha
+	var refreshSessions httpserver.RefreshSessions
 	var generationService httpserver.GenerationService
 	var resourceService *resource.Service
 	var scriptService *script.Service
@@ -110,6 +112,7 @@ func run() error {
 				}
 				identityVerifier = verifiers
 				captcha = imagecaptcha.New()
+				refreshSessions = session.Store{DB: db, Now: time.Now}
 				repository := accountpostgres.New(db, time.Now)
 				accounts = account.NewService(repository, account.InitialAdministrator{Issuer: localauth.Issuer, Subject: localauth.Subject, LinkExistingByEmail: true}, time.Now)
 				ping = func(ctx context.Context) error { return database.Check(ctx, pool) }
@@ -128,7 +131,7 @@ func run() error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	server := &http.Server{Handler: httpserver.NewWithDependencies(httpserver.Dependencies{Ping: ping, Accounts: accounts, IdentityVerifier: identityVerifier, LocalAdmin: localAdmin, CreatorAuth: creatorAuth, Captcha: captcha, Generation: generationService, GenerationWakeups: wakeups, GenerationStreamClose: ctx.Done(), Resources: resourceService, ResourceBlobs: resourceoss.FromEnv(), Scripts: scriptService, ScriptWakeups: scriptWakeups, TextModels: textModels}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
+	server := &http.Server{Handler: httpserver.NewWithDependencies(httpserver.Dependencies{Ping: ping, Accounts: accounts, IdentityVerifier: identityVerifier, LocalAdmin: localAdmin, CreatorAuth: creatorAuth, Captcha: captcha, RefreshSessions: refreshSessions, Generation: generationService, GenerationWakeups: wakeups, GenerationStreamClose: ctx.Done(), Resources: resourceService, ResourceBlobs: resourceoss.FromEnv(), Scripts: scriptService, ScriptWakeups: scriptWakeups, TextModels: textModels}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(listener) }()
 	slog.Info("API listening", "address", listener.Addr().String())

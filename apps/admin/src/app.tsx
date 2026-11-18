@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import type { components } from '@blow-flow/api-client'
 import { Activity, ShieldCheck, Sparkles } from 'lucide-react'
-import { clearSession as removeStoredSession, getSession, loadCaptcha, login } from './auth'
+import { clearSession as removeStoredSession, ensureSession, getSession, loadCaptcha, login, signOut } from './auth'
 import { adminClient } from './api'
 import { mayEnterAdmin } from './access'
 import { AdminConsole } from './admin-console'
@@ -46,13 +46,21 @@ export function AdminApp() {
     let active = true
     async function load() {
       if (preview) { setLoading(false); return }
-      const session = getSession()
+      const session = await ensureSession()
       if (!session) { setLoading(false); return }
       try {
         const result = await adminClient(session.accessToken).GET('/me')
-        if (result.error || !mayEnterAdmin(result.data?.user.role, result.data?.user.status, session.expiresAt <= Date.now())) throw new Error('forbidden')
+        if (result.response.status === 401 || result.response.status === 403) { if (active) clearSession(); return }
+        if (result.error || !result.data) throw new Error('temporarily unavailable')
+        if (!mayEnterAdmin(result.data.user.role, result.data.user.status, false)) { if (active) clearSession(); return }
         if (active) { setToken(session.accessToken); setAccount(result.data.user) }
-      } catch { if (active) clearSession() }
+      } catch {
+        if (active) {
+          const cached = getSession()
+          if (cached && cached.expiresAt > Date.now()) { setToken(cached.accessToken); setAccount(cached.user) }
+          else setError('暂时无法验证会话，请检查网络后刷新页面。')
+        }
+      }
       finally { if (active) setLoading(false) }
     }
     void load()
@@ -66,11 +74,13 @@ export function AdminApp() {
   useEffect(() => {
     if (!token) return
     const timer = window.setInterval(() => {
-      const session = getSession()
-      if (!session) { clearSession(); return }
-      void adminClient(token).GET('/me').then(result => {
-        if (result.error || !mayEnterAdmin(result.data?.user.role, result.data?.user.status, false)) clearSession()
-      }).catch(clearSession)
+      void ensureSession().then(session => {
+        if (!session) { clearSession(); return }
+        return adminClient(session.accessToken).GET('/me').then(result => {
+          if (result.response.status === 401 || result.response.status === 403 || !mayEnterAdmin(result.data?.user.role, result.data?.user.status, false)) clearSession()
+          else if (result.data) { setToken(session.accessToken); setAccount(result.data.user) }
+        })
+      }).catch(() => { /* A transient network error must not sign out the user. */ })
     }, 30_000)
     return () => window.clearInterval(timer)
   }, [token, clearSession])
@@ -87,7 +97,7 @@ export function AdminApp() {
       setAccount(session.user)
       setPassword('')
     } catch (cause) {
-      removeStoredSession()
+      void signOut().catch(() => { /* Local session is cleared even when the server is offline. */ })
       setError(cause instanceof Error ? cause.message : '登录失败，请重试。')
       void refreshCaptcha()
     } finally { setBusy(false) }

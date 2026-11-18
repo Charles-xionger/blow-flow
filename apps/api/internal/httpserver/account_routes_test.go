@@ -11,6 +11,7 @@ import (
 
 	"blow-flow/api/internal/account"
 	"blow-flow/api/internal/identity/localauth"
+	"blow-flow/api/internal/identity/session"
 )
 
 type verifierStub struct {
@@ -19,6 +20,26 @@ type verifierStub struct {
 }
 
 type captchaStub struct{ used bool }
+
+type refreshStub struct{ current string }
+
+func (s *refreshStub) Issue(_ context.Context, _ account.User, _ account.Identity) (string, error) {
+	s.current = "refresh-1"
+	return s.current, nil
+}
+func (s *refreshStub) Rotate(_ context.Context, raw, _ string) (account.Identity, string, error) {
+	if raw != s.current {
+		return account.Identity{}, "", session.ErrInvalid
+	}
+	s.current = "refresh-2"
+	return account.Identity{Issuer: localauth.Issuer, Subject: localauth.Subject, Email: "admin@example.com", EmailVerified: true, AuthenticatedAt: time.Now()}, s.current, nil
+}
+func (s *refreshStub) Revoke(_ context.Context, raw, _ string) error {
+	if raw == s.current {
+		s.current = ""
+	}
+	return nil
+}
 
 func (*captchaStub) Generate() (string, string, error) {
 	return "challenge-1", "data:image/png;base64,example", nil
@@ -42,7 +63,8 @@ func TestLocalAdminLoginIssuesTokenForRealAccountRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	router := NewWithDependencies(Dependencies{Accounts: &accountServiceStub{resolved: account.User{ID: "admin-1", Email: "admin@example.com", Role: account.RoleAdmin, Status: account.StatusActive}}, IdentityVerifier: auth, LocalAdmin: auth, Captcha: &captchaStub{}})
+	sessions := &refreshStub{}
+	router := NewWithDependencies(Dependencies{Accounts: &accountServiceStub{resolved: account.User{ID: "admin-1", Email: "admin@example.com", Role: account.RoleAdmin, Status: account.StatusActive}}, IdentityVerifier: auth, LocalAdmin: auth, Captcha: &captchaStub{}, RefreshSessions: sessions})
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/auth/admin/login", strings.NewReader(`{"email":"admin@example.com","password":"test-password-long-enough","captchaId":"challenge-1","captchaAnswer":"1234"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -59,6 +81,51 @@ func TestLocalAdminLoginIssuesTokenForRealAccountRoutes(t *testing.T) {
 	if response.AccessToken == "" || w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatal("login did not return a protected token")
 	}
+	cookies := w.Result().Cookies()
+	if len(cookies) != 1 || !cookies[0].HttpOnly || cookies[0].SameSite != http.SameSiteStrictMode || cookies[0].Value == "" {
+		t.Fatalf("refresh cookie missing protection: %+v", cookies)
+	}
+	refreshRequest := httptest.NewRequest(http.MethodPost, "/v1/auth/admin/refresh", nil)
+	refreshRequest.AddCookie(cookies[0])
+	refreshed := httptest.NewRecorder()
+	router.ServeHTTP(refreshed, refreshRequest)
+	if refreshed.Code != 200 || refreshed.Result().Cookies()[0].Value == cookies[0].Value {
+		t.Fatalf("refresh failed: %d %s", refreshed.Code, refreshed.Body.String())
+	}
+	replay := httptest.NewRecorder()
+	router.ServeHTTP(replay, refreshRequest)
+	if replay.Code != 401 {
+		t.Fatalf("replayed refresh = %d", replay.Code)
+	}
+	logoutRequest := httptest.NewRequest(http.MethodPost, "/v1/auth/admin/logout", nil)
+	logoutRequest.AddCookie(refreshed.Result().Cookies()[0])
+	loggedOut := httptest.NewRecorder()
+	router.ServeHTTP(loggedOut, logoutRequest)
+	if loggedOut.Code != 204 || loggedOut.Result().Cookies()[0].MaxAge != -1 {
+		t.Fatalf("logout = %d", loggedOut.Code)
+	}
+	invalidAfterLogout := httptest.NewRecorder()
+	router.ServeHTTP(invalidAfterLogout, logoutRequest)
+	if invalidAfterLogout.Code != 204 {
+		t.Fatalf("repeated logout = %d", invalidAfterLogout.Code)
+	}
+	crossOrigin := httptest.NewRequest(http.MethodPost, "/v1/auth/admin/refresh", nil)
+	crossOrigin.Header.Set("Origin", "https://elsewhere.example")
+	crossOrigin.AddCookie(cookies[0])
+	rejected := httptest.NewRecorder()
+	router.ServeHTTP(rejected, crossOrigin)
+	if rejected.Code != 403 {
+		t.Fatalf("cross-origin refresh = %d", rejected.Code)
+	}
+	proxied := httptest.NewRequest(http.MethodPost, "/v1/auth/admin/refresh", nil)
+	proxied.Header.Set("Sec-Fetch-Site", "same-origin")
+	proxied.Header.Set("Origin", "http://127.0.0.1:3218")
+	proxied.AddCookie(cookies[0])
+	proxiedResult := httptest.NewRecorder()
+	router.ServeHTTP(proxiedResult, proxied)
+	if proxiedResult.Code == 403 {
+		t.Fatal("same-origin browser request behind a proxy was rejected")
+	}
 	w = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/v1/admin/users", nil)
 	req.Header.Set("Authorization", "Bearer "+response.AccessToken)
@@ -70,7 +137,7 @@ func TestLocalAdminLoginIssuesTokenForRealAccountRoutes(t *testing.T) {
 
 func TestAdminLoginConsumesMalformedImageAnswer(t *testing.T) {
 	challenge := &captchaStub{}
-	router := NewWithDependencies(Dependencies{Accounts: &accountServiceStub{}, LocalAdmin: &authenticatorStub{}, Captcha: challenge})
+	router := NewWithDependencies(Dependencies{Accounts: &accountServiceStub{}, LocalAdmin: &authenticatorStub{}, Captcha: challenge, RefreshSessions: &refreshStub{}})
 	for _, body := range []string{
 		`{"email":"admin@example.com","password":"password","captchaId":"challenge-1","captchaAnswer":"xx"}`,
 		`{"email":"admin@example.com","password":"password","captchaId":"challenge-1","captchaAnswer":"1234"}`,
@@ -103,7 +170,7 @@ func (*creatorAuthenticatorStub) Authenticate(_ context.Context, email, password
 }
 func (*creatorAuthenticatorStub) Issue(account.Identity) (string, error) { return "creator-token", nil }
 func TestCreatorLoginUsesCaptchaAndReturnsUserToken(t *testing.T) {
-	router := NewWithDependencies(Dependencies{Accounts: &accountServiceStub{resolved: account.User{ID: "creator-1", Role: account.RoleUser, Status: account.StatusActive}}, CreatorAuth: &creatorAuthenticatorStub{}, Captcha: &captchaStub{}})
+	router := NewWithDependencies(Dependencies{Accounts: &accountServiceStub{resolved: account.User{ID: "creator-1", Role: account.RoleUser, Status: account.StatusActive}}, CreatorAuth: &creatorAuthenticatorStub{}, Captcha: &captchaStub{}, RefreshSessions: &refreshStub{}})
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/auth/user/login", strings.NewReader(`{"email":"creator@example.com","password":"creator-password-long","captchaId":"challenge-1","captchaAnswer":"1234"}`))
 	req.Header.Set("Content-Type", "application/json")
