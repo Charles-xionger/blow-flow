@@ -23,6 +23,7 @@
     "DEFAULT_API_KEY",
     "API_BASE_URL",
     "APP_ENV",
+    "VITE_*",
     "NEXT_PUBLIC_*",
     "FFPROBE_PATH"
   ],
@@ -34,9 +35,11 @@
       "outputs": [
         ".next/**",
         "!.next/cache/**",
-        "bin/**"
+        "bin/**",
+        "dist/**"
       ],
       "env": [
+        "VITE_*",
         "NEXT_PUBLIC_*",
         "SENTRY_*"
       ]
