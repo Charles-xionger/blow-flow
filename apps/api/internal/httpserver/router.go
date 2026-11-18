@@ -37,12 +37,14 @@ type AccountService interface {
 }
 
 type Dependencies struct {
-	Ping             Ping
-	IdentityVerifier IdentityVerifier
-	LocalAdmin       LocalAdminAuthenticator
-	Captcha          ImageCaptcha
-	Accounts         AccountService
-	Generation       GenerationService
+	Ping                  Ping
+	IdentityVerifier      IdentityVerifier
+	LocalAdmin            LocalAdminAuthenticator
+	Captcha               ImageCaptcha
+	Accounts              AccountService
+	Generation            GenerationService
+	GenerationWakeups     GenerationWakeups
+	GenerationStreamClose <-chan struct{}
 }
 
 func New(ping Ping) *gin.Engine {

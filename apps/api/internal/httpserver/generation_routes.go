@@ -3,16 +3,26 @@ package httpserver
 import (
 	"blow-flow/api/internal/generation"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/gin-gonic/gin"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 )
 
 type GenerationService interface {
 	Create(context.Context, generation.Actor, string, generation.Input) (generation.Task, error)
 	Get(context.Context, generation.Actor, string) (generation.Task, error)
 	Cancel(context.Context, generation.Actor, string) (generation.Task, error)
+}
+
+var generationStreamSlots = make(chan struct{}, 256)
+
+type GenerationWakeups interface {
+	Subscribe(context.Context, string) (<-chan string, func(), error)
 }
 
 type GenerationEvents interface {
@@ -79,6 +89,10 @@ func registerGenerationRoutes(v1 *gin.RouterGroup, d Dependencies) {
 		c.JSON(200, task)
 	})
 	g.GET("/:id/events", func(c *gin.Context) {
+		if strings.Contains(c.GetHeader("Accept"), "text/event-stream") {
+			streamGeneration(c, d)
+			return
+		}
 		service, ok := d.Generation.(GenerationEvents)
 		if !ok {
 			c.JSON(503, errorBody(c, "service_unavailable"))
@@ -118,4 +132,92 @@ func generationError(c *gin.Context, err error) {
 		status, code = 409, "idempotency_conflict"
 	}
 	c.JSON(status, errorBody(c, code))
+}
+
+// Each stream is bounded by request cancellation and periodic database catchup.
+func streamGeneration(c *gin.Context, d Dependencies) {
+	if d.Generation == nil {
+		c.JSON(503, errorBody(c, "service_unavailable"))
+		return
+	}
+	actor, id := generationActor(c), c.Param("id")
+	actor.Admin = false // SSE subscriptions are restricted to the resource owner.
+	task, err := d.Generation.Get(c.Request.Context(), actor, id)
+	if err != nil {
+		generationError(c, err)
+		return
+	}
+	select {
+	case generationStreamSlots <- struct{}{}:
+		defer func() { <-generationStreamSlots }()
+	default:
+		c.JSON(http.StatusServiceUnavailable, errorBody(c, "stream_capacity"))
+		return
+	}
+	var wakeups <-chan string
+	closeSub := func() {}
+	if d.GenerationWakeups != nil {
+		channel, closeFn, err := d.GenerationWakeups.Subscribe(c.Request.Context(), id)
+		if err == nil {
+			wakeups, closeSub = channel, closeFn
+		}
+	}
+	defer closeSub()
+	if latest, err := d.Generation.Get(c.Request.Context(), actor, id); err == nil {
+		task = latest
+	} else {
+		generationError(c, err)
+		return
+	}
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("X-Accel-Buffering", "no")
+	c.Status(200)
+	version := -int64(1)
+	emit := func(t generation.Task) bool {
+		if t.Version <= version {
+			return true
+		}
+		data, err := json.Marshal(t)
+		if err != nil {
+			return false
+		}
+		if _, err = fmt.Fprintf(c.Writer, "id: %d\nevent: task\ndata: %s\n\n", t.Version, data); err != nil {
+			return false
+		}
+		c.Writer.Flush()
+		version = t.Version
+		return true
+	}
+	if !emit(task) {
+		return
+	}
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	lifetime := time.NewTimer(25 * time.Second)
+	defer lifetime.Stop()
+	for {
+		select {
+		case <-c.Request.Context().Done():
+			return
+		case <-d.GenerationStreamClose:
+			return
+		case <-lifetime.C:
+			return
+		case _, ok := <-wakeups:
+			if !ok {
+				wakeups = nil
+			}
+		case <-ticker.C:
+		}
+		query, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+		latest, err := d.Generation.Get(query, actor, id)
+		cancel()
+		if err == nil && !emit(latest) {
+			return
+		}
+		if errors.Is(err, generation.ErrNotFound) || errors.Is(err, generation.ErrForbidden) {
+			return
+		}
+	}
 }

@@ -45,6 +45,7 @@ type Input struct {
 }
 type Task struct {
 	ID          string    `json:"id"`
+	Version     int64     `json:"version"`
 	Status      Status    `json:"status"`
 	Model       string    `json:"model"`
 	ProjectID   string    `json:"projectId"`

@@ -9,7 +9,16 @@ import (
 	"time"
 )
 
-type Store struct{ DB *gorm.DB }
+type Store struct {
+	DB     *gorm.DB
+	Notify func(context.Context, string)
+}
+
+func (s *Store) notify(ctx context.Context, id string) {
+	if s.Notify != nil {
+		s.Notify(ctx, id)
+	}
+}
 
 func New(db *gorm.DB) *Store { return &Store{DB: db} }
 func (s *Store) Create(ctx context.Context, owner, key, hash string, input generation.Input) (generation.Task, error) {
@@ -43,15 +52,19 @@ func (s *Store) Create(ctx context.Context, owner, key, hash string, input gener
 		Status                             generation.Status
 		ProjectID, Model, ResultURL, Stage string
 		CreatedAt, UpdatedAt               time.Time
+		Version                            int64
 	}
-	err = s.DB.WithContext(ctx).Raw(`SELECT id,input_hash,status,stage,project_id,model,result_url,created_at,updated_at FROM generation_tasks WHERE owner_id=? AND idempotency_key=?`, owner, key).Scan(&row).Error
+	err = s.DB.WithContext(ctx).Raw(`SELECT t.id,input_hash,status,stage,project_id,model,result_url,created_at,updated_at,COALESCE((SELECT max(id) FROM generation_task_events WHERE task_id=t.id),0) AS version FROM generation_tasks t WHERE owner_id=? AND idempotency_key=?`, owner, key).Scan(&row).Error
 	if err != nil {
 		return generation.Task{}, err
 	}
 	if row.InputHash != hash {
 		return generation.Task{}, generation.ErrConflict
 	}
-	return generation.Task{ID: row.ID, Status: row.Status, Stage: row.Stage, ProjectID: row.ProjectID, Model: row.Model, ResultURL: row.ResultURL, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}, nil
+	if row.ID == id {
+		s.notify(ctx, id)
+	}
+	return generation.Task{ID: row.ID, Version: row.Version, Status: row.Status, Stage: row.Stage, ProjectID: row.ProjectID, Model: row.Model, ResultURL: row.ResultURL, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}, nil
 }
 func (s *Store) Get(ctx context.Context, id string) (generation.Task, string, error) {
 	var r struct {
@@ -59,15 +72,16 @@ func (s *Store) Get(ctx context.Context, id string) (generation.Task, string, er
 		Percent                                                      *float64
 		Status                                                       generation.Status
 		CreatedAt, UpdatedAt                                         time.Time
+		Version                                                      int64
 	}
-	tx := s.DB.WithContext(ctx).Raw(`SELECT id,owner_id,project_id,model,result_url,status,stage,percent,COALESCE(failure_code,'') AS failure_code,created_at,updated_at FROM generation_tasks WHERE id=?`, id).Scan(&r)
+	tx := s.DB.WithContext(ctx).Raw(`SELECT t.id,owner_id,project_id,model,result_url,status,stage,percent,COALESCE(failure_code,'') AS failure_code,created_at,updated_at,COALESCE((SELECT max(id) FROM generation_task_events WHERE task_id=t.id),0) AS version FROM generation_tasks t WHERE id=?`, id).Scan(&r)
 	if tx.Error != nil {
 		return generation.Task{}, "", tx.Error
 	}
 	if tx.RowsAffected == 0 {
 		return generation.Task{}, "", generation.ErrNotFound
 	}
-	return generation.Task{ID: r.ID, ProjectID: r.ProjectID, Model: r.Model, ResultURL: r.ResultURL, Status: r.Status, Stage: r.Stage, Percent: r.Percent, FailureCode: r.FailureCode, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}, r.OwnerID, nil
+	return generation.Task{ID: r.ID, Version: r.Version, ProjectID: r.ProjectID, Model: r.Model, ResultURL: r.ResultURL, Status: r.Status, Stage: r.Stage, Percent: r.Percent, FailureCode: r.FailureCode, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}, r.OwnerID, nil
 }
 func (s *Store) Cancel(ctx context.Context, id, owner string) (generation.Task, error) {
 	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -93,6 +107,9 @@ func (s *Store) Cancel(ctx context.Context, id, owner string) (generation.Task, 
 		return generation.Task{}, err
 	}
 	t, _, err := s.Get(ctx, id)
+	if err == nil {
+		s.notify(ctx, id)
+	}
 	return t, err
 }
 func (s *Store) Claim(ctx context.Context, id string) (generation.Input, bool, error) {
@@ -120,6 +137,9 @@ func (s *Store) Claim(ctx context.Context, id string) (generation.Input, bool, e
 		claimed = true
 		return nil
 	})
+	if err == nil && claimed {
+		s.notify(ctx, id)
+	}
 	return input, claimed, err
 }
 func (s *Store) Finish(ctx context.Context, id, url string, runErr error) error {
@@ -128,7 +148,7 @@ func (s *Store) Finish(ctx context.Context, id, url string, runErr error) error 
 		status, event = "failed", "failed"
 		url = ""
 	}
-	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
 		res := tx.Exec(`UPDATE generation_tasks SET status=?,stage=?,result_url=?,updated_at=? WHERE id=? AND status='running'`, status, status, url, now, id)
 		if res.Error != nil {
@@ -139,4 +159,8 @@ func (s *Store) Finish(ctx context.Context, id, url string, runErr error) error 
 		}
 		return tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,stage,occurred_at) VALUES(?,?,?,?)`, id, event, status, now).Error
 	})
+	if err == nil {
+		s.notify(ctx, id)
+	}
+	return err
 }

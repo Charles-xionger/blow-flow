@@ -46,7 +46,7 @@ type deliveryTransition struct {
 }
 
 func (s *Store) apply(ctx context.Context, id, token string, change deliveryTransition) error {
-	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
 		var priorStage string
 		if err := tx.Raw(`SELECT stage FROM generation_tasks WHERE id=? FOR UPDATE`, id).Scan(&priorStage).Error; err != nil {
@@ -72,6 +72,10 @@ func (s *Store) apply(ctx context.Context, id, token string, change deliveryTran
 		}
 		return nil
 	})
+	if err == nil {
+		s.notify(ctx, id)
+	}
+	return err
 }
 func boolInt(v bool) int {
 	if v {
@@ -83,7 +87,7 @@ func (s *Store) RecordProgress(ctx context.Context, id, token, stage string, per
 	if stage == "" {
 		stage = "generating"
 	}
-	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
 		res := tx.Exec(`UPDATE generation_tasks SET stage=?,percent=COALESCE(?,percent),updated_at=? WHERE id=? AND status='running' AND lease_token=? AND lease_until>now() AND (stage<>? OR (?::double precision IS NOT NULL AND (percent IS NULL OR percent<?)))`, stage, percent, now, id, token, stage, percent, percent)
 		if res.Error != nil {
@@ -94,6 +98,10 @@ func (s *Store) RecordProgress(ctx context.Context, id, token, stage string, per
 		}
 		return tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,stage,occurred_at) VALUES(?,'progress',?,?)`, id, stage, now).Error
 	})
+	if err == nil {
+		s.notify(ctx, id)
+	}
+	return err
 }
 func (s *Store) ScheduleQuery(ctx context.Context, c DeliveryClaim, stage string, err error, timeout time.Duration) error {
 	if !c.StartedAt.IsZero() && time.Since(c.StartedAt) >= timeout {
@@ -141,7 +149,7 @@ func (s *Store) SaveFailed(ctx context.Context, c DeliveryClaim, code string, pe
 	return s.apply(ctx, c.TaskID, c.Token, deliveryTransition{Status: status, Stage: status, Event: event, Failure: code, Next: next})
 }
 func (s *Store) Delivered(ctx context.Context, c DeliveryClaim, url string) error {
-	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
 		res := tx.Exec(`UPDATE generation_tasks SET status='completed',stage='delivered',result_url=?,failure_code=NULL,lease_token=NULL,lease_until=NULL,next_attempt_at=NULL,updated_at=? WHERE id=? AND status IN ('saving','save_failed') AND lease_token=? AND lease_until>now()`, url, now, c.TaskID, c.Token)
 		if res.Error != nil {
@@ -152,9 +160,13 @@ func (s *Store) Delivered(ctx context.Context, c DeliveryClaim, url string) erro
 		}
 		return tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,stage,occurred_at) VALUES(?,'delivered','delivered',?)`, c.TaskID, now).Error
 	})
+	if err == nil {
+		s.notify(ctx, c.TaskID)
+	}
+	return err
 }
 func (s *Store) ResumeDelivery(ctx context.Context, id string) error {
-	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
 		res := tx.Exec(`UPDATE generation_tasks SET status=CASE WHEN provider_result_url IS NULL THEN 'running' ELSE 'saving' END,stage=CASE WHEN provider_result_url IS NULL THEN 'waiting_provider' ELSE 'saving' END,failure_code=NULL,next_attempt_at=?,tracking_started_at=CASE WHEN provider_result_url IS NULL THEN ? ELSE tracking_started_at END,updated_at=? WHERE id=? AND status IN ('wait_timeout','save_failed') AND (lease_until IS NULL OR lease_until<=now())`, now, now, now, id)
 		if res.Error != nil {
@@ -165,6 +177,10 @@ func (s *Store) ResumeDelivery(ctx context.Context, id string) error {
 		}
 		return tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,stage,occurred_at) SELECT id,'resumed',stage,? FROM generation_tasks WHERE id=?`, now, id).Error
 	})
+	if err == nil {
+		s.notify(ctx, id)
+	}
+	return err
 }
 func (s *Store) Events(ctx context.Context, id string, after int64) ([]generation.Event, error) {
 	var events []generation.Event

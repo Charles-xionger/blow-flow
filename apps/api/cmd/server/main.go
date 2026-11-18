@@ -16,6 +16,7 @@ import (
 	"blow-flow/api/internal/database"
 	"blow-flow/api/internal/generation"
 	generationpostgres "blow-flow/api/internal/generation/postgres"
+	"blow-flow/api/internal/generation/progress"
 	"blow-flow/api/internal/httpserver"
 	"blow-flow/api/internal/identity/imagecaptcha"
 	localauth "blow-flow/api/internal/identity/localauth"
@@ -40,13 +41,24 @@ func run() error {
 	var localAdmin httpserver.LocalAdminAuthenticator
 	var captcha httpserver.ImageCaptcha
 	var generationService httpserver.GenerationService
+	var wakeups *progress.Redis
 	if dsn := os.Getenv("DATABASE_URL"); dsn != "" {
 		db, pool, err := database.Open(dsn)
 		if err != nil {
 			slog.Warn("database configuration unavailable")
 		} else {
 			defer pool.Close()
-			generationService = generation.Service{Store: generationpostgres.New(db), Resources: generationpostgres.Resources{DB: db}}
+			store := generationpostgres.New(db)
+			if raw := os.Getenv("REDIS_URL"); raw != "" {
+				client, dialErr := progress.Dial(raw)
+				if dialErr != nil {
+					return dialErr
+				}
+				wakeups = client
+				defer client.Close()
+				store.Notify = client.Publish
+			}
+			generationService = generation.Service{Store: store, Resources: generationpostgres.Resources{DB: db}}
 			if os.Getenv("ADMIN_AUTH_EMAIL") != "" {
 				key, err := base64.RawStdEncoding.DecodeString(os.Getenv("AUTH_SIGNING_KEY"))
 				if err != nil {
@@ -75,9 +87,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	server := &http.Server{Handler: httpserver.NewWithDependencies(httpserver.Dependencies{Ping: ping, Accounts: accounts, IdentityVerifier: identityVerifier, LocalAdmin: localAdmin, Captcha: captcha, Generation: generationService}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	server := &http.Server{Handler: httpserver.NewWithDependencies(httpserver.Dependencies{Ping: ping, Accounts: accounts, IdentityVerifier: identityVerifier, LocalAdmin: localAdmin, Captcha: captcha, Generation: generationService, GenerationWakeups: wakeups, GenerationStreamClose: ctx.Done()}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(listener) }()
 	slog.Info("API listening", "address", listener.Addr().String())

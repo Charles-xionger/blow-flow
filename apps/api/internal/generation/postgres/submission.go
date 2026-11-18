@@ -67,6 +67,9 @@ func (s *Store) ClaimSubmission(ctx context.Context, id string) (Submission, boo
 		claimed = true
 		return nil
 	})
+	if err == nil && claimed {
+		s.notify(ctx, id)
+	}
 	return out, claimed, err
 }
 func (s *Store) CheckSubmission(ctx context.Context, id, token string) (bool, error) {
@@ -83,7 +86,7 @@ func (s *Store) ResolveSubmission(ctx context.Context, id, token, providerID str
 			status, event = "needs_review", "submission_uncertain"
 		}
 	}
-	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
 		res := tx.Exec(`UPDATE generation_tasks SET status=?,stage=?,provider_task_id=?,lease_token=NULL,lease_until=NULL,updated_at=? WHERE id=? AND status='submitting' AND lease_token=? AND lease_until>now()`, status, status, providerID, now, id, token)
 		if res.Error != nil {
@@ -94,15 +97,21 @@ func (s *Store) ResolveSubmission(ctx context.Context, id, token, providerID str
 		}
 		return tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,stage,occurred_at) VALUES(?,?,?,?)`, id, event, status, now).Error
 	})
+	if err == nil {
+		s.notify(ctx, id)
+	}
+	return err
 }
 
 // Expired submission is uncertain even if the process disappeared before recording a response.
 func (s *Store) RecoverExpiredSubmissions(ctx context.Context) error {
-	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	var changed []string
+	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var ids []string
 		if err := tx.Raw(`UPDATE generation_tasks SET status='needs_review',stage='needs_review',lease_token=NULL,lease_until=NULL,updated_at=now() WHERE status='submitting' AND lease_until<=now() RETURNING id`).Scan(&ids).Error; err != nil {
 			return err
 		}
+		changed = ids
 		for _, id := range ids {
 			if err := tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,stage,occurred_at) VALUES(?,'submission_uncertain','needs_review',now())`, id).Error; err != nil {
 				return err
@@ -110,4 +119,10 @@ func (s *Store) RecoverExpiredSubmissions(ctx context.Context) error {
 		}
 		return nil
 	})
+	if err == nil {
+		for _, id := range changed {
+			s.notify(ctx, id)
+		}
+	}
+	return err
 }

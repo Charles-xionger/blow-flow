@@ -3,6 +3,7 @@ package main
 import (
 	"blow-flow/api/internal/database"
 	"blow-flow/api/internal/generation/postgres"
+	"blow-flow/api/internal/generation/progress"
 	"blow-flow/api/internal/generation/queue"
 	"context"
 	"log/slog"
@@ -33,6 +34,14 @@ func run() error {
 	defer stop()
 	publisher := queue.Publisher{DB: db, Rabbit: rabbit}
 	store := postgres.New(db)
+	if raw := os.Getenv("REDIS_URL"); raw != "" {
+		client, dialErr := progress.Dial(raw)
+		if dialErr != nil {
+			return dialErr
+		}
+		defer client.Close()
+		store.Notify = client.Publish
+	}
 	worker := queue.SubmissionWorker{Store: store, Rabbit: rabbit, Provider: queue.Krea2{BaseURL: os.Getenv("RUNNINGHUB_BASE_URL"), APIKey: os.Getenv("RUNNINGHUB_API_KEY")}}
 	delivery := queue.DeliveryWorker{Store: store, Provider: queue.Krea2{BaseURL: os.Getenv("RUNNINGHUB_BASE_URL"), APIKey: os.Getenv("RUNNINGHUB_API_KEY")}, Artifacts: queue.OSSFromEnv()}
 	result := make(chan error, 1)
