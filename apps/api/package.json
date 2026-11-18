@@ -14,6 +14,7 @@
     "test:integration": "go test -race -count=1 -tags=integration ./internal/...",
     "test:e2e": "node --test tests/server.test.mjs",
     "db:migrate": "go run ./cmd/migrate",
-    "generation:worker": "go run ./cmd/generation-worker"
+    "generation:worker": "go run ./cmd/generation-worker",
+    "script:worker": "go run ./cmd/script-worker"
   }
 }

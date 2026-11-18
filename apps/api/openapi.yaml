@@ -306,6 +306,93 @@ paths:
           schema: { type: string }
       responses:
         "204": { description: Folder deleted }
+  /script/models:
+    get:
+      operationId: listScriptModels
+      summary: List configured server-side text models without credentials
+      responses:
+        "200":
+          description: Available model capabilities
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  models:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        provider: { type: string, enum: [ark, gemini] }
+                        vision: { type: boolean }
+                        available: { type: boolean }
+  /script/tasks:
+    post:
+      operationId: createScriptTask
+      summary: Create an owned script task and its output node atomically
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ScriptCreate" }
+      responses:
+        "202":
+          description: Queued task or idempotent replay
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScriptTask" }
+        "409": { description: Active task, missing script node, or request identity conflict }
+        "503": { description: Text model not configured }
+    get:
+      operationId: listScriptTasks
+      summary: List the current user's script tasks for one project
+      parameters:
+        - { name: canvasId, in: query, required: true, schema: { type: string } }
+        - { name: nodeId, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Tasks ordered newest first
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/ScriptTask" } }
+  /script/tasks/{id}:
+    get:
+      operationId: getScriptTask
+      summary: Read an owned script task and its latest checkpoint
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200":
+          description: Script task
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScriptTask" }
+        "404": { description: Task not found or owned by another user }
+  /script/tasks/{id}/stop:
+    post:
+      operationId: stopScriptTask
+      summary: Stop a queued or running owned script task
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200":
+          description: Latest task state
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScriptTask" }
+  /script/tasks/{id}/events:
+    get:
+      operationId: streamScriptTask
+      summary: Stream owned task revisions by SSE with PostgreSQL catchup
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: SSE task events with revision IDs }
+  /script/events:
+    get:
+      operationId: streamProjectScriptTasks
+      summary: Stream changed script tasks for an owned project
+      parameters: [{ name: canvasId, in: query, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: SSE tasks events containing changed tasks }
   /generation/tasks:
     post:
       operationId: createGenerationTask
@@ -617,6 +704,55 @@ components:
         contentType: { type: string }
         sizeBytes: { type: integer, format: int64 }
         createdAt: { type: string, format: date-time }
+    ScriptCreate:
+      type: object
+      required: [requestId, canvasId, nodeId, input]
+      properties:
+        requestId: { type: string, maxLength: 200 }
+        canvasId: { type: string, maxLength: 200 }
+        nodeId: { type: string, maxLength: 200 }
+        input:
+          type: object
+          required: [model, requirements, instruction, preset, references]
+          properties:
+            model: { type: string }
+            requirements: { type: string }
+            instruction: { type: string }
+            preset: { type: string }
+            outputMode: { type: string, enum: [board, workflow] }
+            storyboard:
+              type: object
+              properties:
+                duration: { type: integer, minimum: 5, maximum: 600 }
+                maxShots: { type: integer, minimum: 1, maximum: 40 }
+            references:
+              type: array
+              items:
+                type: object
+                required: [nodeId, label, type, content]
+                properties:
+                  nodeId: { type: string }
+                  label: { type: string }
+                  type: { type: string, enum: [text, image] }
+                  content: { type: string }
+    ScriptTask:
+      type: object
+      required: [id, requestId, canvasId, nodeId, input, status, phase, text, revision, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        requestId: { type: string }
+        canvasId: { type: string }
+        nodeId: { type: string }
+        input: { $ref: "#/components/schemas/ScriptCreate/properties/input" }
+        status: { type: string, enum: [queued, running, stopping, stopped, completed, failed, interrupted] }
+        phase: { type: string }
+        text: { type: string }
+        workflow: { type: object }
+        outputNodeId: { type: string }
+        revision: { type: integer, format: int64 }
+        createdAt: { type: integer, format: int64, description: Unix milliseconds }
+        updatedAt: { type: integer, format: int64, description: Unix milliseconds }
+        error: { type: string }
     GenerationTask:
       type: object
       required: [id, version, status, model, projectId, stage, createdAt, updatedAt]

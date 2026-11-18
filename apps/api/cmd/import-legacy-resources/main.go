@@ -31,7 +31,7 @@ func main() {
 	if err = export.Validate(); err != nil {
 		fatal(err)
 	}
-	fmt.Printf("validated: projects=%d folders=%d media=%d receipts=%d deletedNodes=%d\n", len(export.Projects), len(export.Folders), len(export.MediaFiles), len(export.SaveReceipts), len(export.DeletedNodes))
+	fmt.Printf("validated: projects=%d folders=%d media=%d receipts=%d deletedNodes=%d scriptTasks=%d scriptRequests=%d\n", len(export.Projects), len(export.Folders), len(export.MediaFiles), len(export.SaveReceipts), len(export.DeletedNodes), len(export.ScriptTasks), len(export.ScriptRequests))
 	if !*apply {
 		fmt.Println("dry run; PostgreSQL unchanged")
 		return

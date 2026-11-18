@@ -24,7 +24,11 @@ import (
 	"blow-flow/api/internal/resource"
 	resourceoss "blow-flow/api/internal/resource/oss"
 	resourcepostgres "blow-flow/api/internal/resource/postgres"
+	"blow-flow/api/internal/script"
+	scriptpostgres "blow-flow/api/internal/script/postgres"
+	scriptprogress "blow-flow/api/internal/script/progress"
 	"blow-flow/api/internal/telemetry"
+	"blow-flow/api/internal/textmodel"
 	"github.com/getsentry/sentry-go"
 )
 
@@ -47,6 +51,9 @@ func run() error {
 	var captcha httpserver.ImageCaptcha
 	var generationService httpserver.GenerationService
 	var resourceService *resource.Service
+	var scriptService *script.Service
+	var textModels *textmodel.Client
+	var scriptWakeups *scriptprogress.Redis
 	var wakeups *progress.Redis
 	if dsn := os.Getenv("DATABASE_URL"); dsn != "" {
 		db, pool, err := database.Open(dsn)
@@ -56,6 +63,18 @@ func run() error {
 			defer pool.Close()
 			store := generationpostgres.New(db)
 			resourceService = &resource.Service{Repository: resourcepostgres.New(db)}
+			scriptStore := scriptpostgres.New(db)
+			textModels = textmodel.FromEnv()
+			scriptService = &script.Service{Repository: scriptStore, Models: textModels}
+			if raw := os.Getenv("REDIS_URL"); raw != "" {
+				client, dialErr := scriptprogress.Dial(raw)
+				if dialErr != nil {
+					return dialErr
+				}
+				scriptWakeups = client
+				defer client.Close()
+				scriptStore.Notify = client.Publish
+			}
 			if raw := os.Getenv("REDIS_URL"); raw != "" {
 				client, dialErr := progress.Dial(raw)
 				if dialErr != nil {
@@ -105,7 +124,7 @@ func run() error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	server := &http.Server{Handler: httpserver.NewWithDependencies(httpserver.Dependencies{Ping: ping, Accounts: accounts, IdentityVerifier: identityVerifier, LocalAdmin: localAdmin, CreatorAuth: creatorAuth, Captcha: captcha, Generation: generationService, GenerationWakeups: wakeups, GenerationStreamClose: ctx.Done(), Resources: resourceService, ResourceBlobs: resourceoss.FromEnv()}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
+	server := &http.Server{Handler: httpserver.NewWithDependencies(httpserver.Dependencies{Ping: ping, Accounts: accounts, IdentityVerifier: identityVerifier, LocalAdmin: localAdmin, CreatorAuth: creatorAuth, Captcha: captcha, Generation: generationService, GenerationWakeups: wakeups, GenerationStreamClose: ctx.Done(), Resources: resourceService, ResourceBlobs: resourceoss.FromEnv(), Scripts: scriptService, ScriptWakeups: scriptWakeups, TextModels: textModels}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(listener) }()
 	slog.Info("API listening", "address", listener.Addr().String())

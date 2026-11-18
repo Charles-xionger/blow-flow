@@ -84,3 +84,13 @@ index trusted OSS links already embedded in project snapshots. Follow
 [the cutover procedure](../../docs/architecture/resource-migration.md) before
 running it against persistent data. The export contains project content and is
 created with mode `0600`; remove it after verifying the import.
+
+## Go script tasks
+
+`/v1/script/models` reports server-configured Ark and Gemini text models without exposing keys. Set `ARK_API_KEY` or `GOOGLE_API_KEY`/`GEMINI_API_KEY` in both Go API and worker environments. Run `pnpm --filter @blow-flow/api script:worker` as a separate process. `SCRIPT_CONCURRENCY` sets its local and PostgreSQL claim limit; RabbitMQ carries wakeups and Redis wakes individual task SSE subscribers. PostgreSQL owns task state, leases, workflow checkpoints, request aliases, and output node writes.
+
+`POST /v1/script/tasks` accepts the script input shape. Plain text tasks create the result text node in the same transaction as the task and outbox row. The fixed storyboard workflow saves plan, assets, detail batches and final prompts as resumable checkpoints on the task; a retry with identical input uses the same task and completed steps. Stopping and failures keep received text or stage drafts. `GET /v1/script/tasks`, `GET /v1/script/tasks/{id}`, `POST /v1/script/tasks/{id}/stop`, and the two SSE endpoints expose progress. Historical `shots` mode is read through imported tasks but cannot start new tasks.
+
+Image references must match an owned uploaded asset or completed generation result. The worker only fetches exact configured HTTPS hosts, never follows redirects, and limits image bytes to 10 MB. `SCRIPT_ASSET_HOSTS` permits additional legacy OSS hosts; the active OSS bucket host is derived from `OSS_BUCKET_NAME` and `OSS_REGION`.
+
+The resource export now includes legacy `script_tasks` and `script_requests`. Existing active legacy tasks import as interrupted, preserving drafts and workflow checkpoints without resubmitting model requests. Stop legacy writers and verify the imported rows before routing client traffic to Go. Frontend calls still target Next.js; production cutover is separate.

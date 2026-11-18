@@ -38,6 +38,8 @@ def main():
             "mediaFiles": rows(db, "media_files"),
             "saveReceipts": rows(db, "canvas_save_receipts"),
             "deletedNodes": rows(db, "canvas_deleted_nodes"),
+            "scriptTasks": rows(db, "script_tasks") if "script_tasks" in present else [],
+            "scriptRequests": rows(db, "script_requests") if "script_requests" in present else [],
         }
         db.execute("COMMIT")
     finally:

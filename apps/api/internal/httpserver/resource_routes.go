@@ -70,9 +70,8 @@ func registerResourceRoutes(v1 *gin.RouterGroup, d Dependencies) {
 			resourceUnavailable(c)
 			return
 		}
-		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 10<<20)
 		var body resource.SaveCanvas
-		if decodeJSON(c, &body) != nil {
+		if decodeJSONLimited(c, &body, 11<<20) != nil {
 			resourceError(c, resource.ErrInvalid)
 			return
 		}

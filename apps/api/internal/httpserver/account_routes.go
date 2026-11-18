@@ -27,6 +27,7 @@ func registerAccountRoutes(router *gin.Engine, dependencies Dependencies) {
 	v1.Use(authenticate(dependencies.IdentityVerifier, dependencies.Accounts))
 	registerGenerationRoutes(v1, dependencies)
 	registerResourceRoutes(v1, dependencies)
+	registerScriptRoutes(v1, dependencies)
 	v1.GET("/me", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"user": currentUser(c)})
 	})
@@ -147,7 +148,10 @@ func parseLimit(value string) (int, error) {
 }
 
 func decodeJSON(c *gin.Context, destination any) error {
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16<<10)
+	return decodeJSONLimited(c, destination, 16<<10)
+}
+func decodeJSONLimited(c *gin.Context, destination any, limit int64) error {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)
 	decoder := json.NewDecoder(c.Request.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(destination); err != nil {

@@ -53,13 +53,38 @@ type DeletedNode struct {
 	CanvasID string `json:"canvas_id"`
 	NodeID   string `json:"node_id"`
 }
+type ScriptTask struct {
+	ID           string  `json:"id"`
+	RequestID    string  `json:"request_id"`
+	CanvasID     string  `json:"canvas_id"`
+	NodeID       string  `json:"node_id"`
+	Input        string  `json:"input"`
+	Status       string  `json:"status"`
+	Text         string  `json:"text"`
+	Pipeline     *string `json:"pipeline"`
+	OutputNodeID *string `json:"output_node_id"`
+	Phase        string  `json:"phase"`
+	Revision     int64   `json:"revision"`
+	CreatedAt    int64   `json:"created_at"`
+	UpdatedAt    int64   `json:"updated_at"`
+	Error        *string `json:"error"`
+}
+type ScriptRequest struct {
+	RequestID string `json:"request_id"`
+	TaskID    string `json:"task_id"`
+	CanvasID  string `json:"canvas_id"`
+	NodeID    string `json:"node_id"`
+	Input     string `json:"input"`
+}
 type Export struct {
-	SchemaVersion int           `json:"schemaVersion"`
-	Projects      []Project     `json:"projects"`
-	Folders       []Folder      `json:"folders"`
-	MediaFiles    []MediaFile   `json:"mediaFiles"`
-	SaveReceipts  []Receipt     `json:"saveReceipts"`
-	DeletedNodes  []DeletedNode `json:"deletedNodes"`
+	SchemaVersion  int             `json:"schemaVersion"`
+	Projects       []Project       `json:"projects"`
+	Folders        []Folder        `json:"folders"`
+	MediaFiles     []MediaFile     `json:"mediaFiles"`
+	SaveReceipts   []Receipt       `json:"saveReceipts"`
+	DeletedNodes   []DeletedNode   `json:"deletedNodes"`
+	ScriptTasks    []ScriptTask    `json:"scriptTasks"`
+	ScriptRequests []ScriptRequest `json:"scriptRequests"`
 }
 
 func (e Export) Validate() error {
@@ -107,6 +132,35 @@ func (e Export) Validate() error {
 			return errors.New("invalid legacy deleted node")
 		}
 		deleted[key] = true
+	}
+	tasks := map[string]ScriptTask{}
+	requests := map[string]bool{}
+	for _, t := range e.ScriptTasks {
+		if !valid(t.ID) || !valid(t.RequestID) || !projects[t.CanvasID] || !valid(t.NodeID) || tasks[t.ID].ID != "" || t.Revision < 1 || t.CreatedAt <= 0 || t.UpdatedAt <= 0 {
+			return errors.New("invalid legacy script task")
+		}
+		var input any
+		if json.Unmarshal([]byte(t.Input), &input) != nil || input == nil {
+			return errors.New("invalid legacy script input")
+		}
+		if t.Pipeline != nil {
+			var workflow any
+			if json.Unmarshal([]byte(*t.Pipeline), &workflow) != nil || workflow == nil {
+				return errors.New("invalid legacy storyboard")
+			}
+		}
+		tasks[t.ID] = t
+	}
+	for _, r := range e.ScriptRequests {
+		t, ok := tasks[r.TaskID]
+		if !ok || !valid(r.RequestID) || requests[r.RequestID] || r.CanvasID != t.CanvasID || r.NodeID != t.NodeID {
+			return errors.New("invalid legacy script request")
+		}
+		var input any
+		if json.Unmarshal([]byte(r.Input), &input) != nil || input == nil {
+			return errors.New("invalid legacy script request input")
+		}
+		requests[r.RequestID] = true
 	}
 	return nil
 }
@@ -202,6 +256,52 @@ func Apply(ctx context.Context, db *gorm.DB, owner, ossHost string, e Export) er
 			}
 			if res.RowsAffected != 1 {
 				return fmt.Errorf("media ID collision: %s", m.ID)
+			}
+		}
+		for _, task := range e.ScriptTasks {
+			status := task.Status
+			failure := task.Error
+			if status == "queued" || status == "running" {
+				status = "interrupted"
+				message := "迁移时中断；已保存正文与检查点，可重新提交"
+				failure = &message
+			}
+			if status == "stopping" {
+				status = "stopped"
+			}
+			phase := task.Phase
+			if phase == "" {
+				phase = "preparing"
+			}
+			var workflow *string
+			if task.Pipeline != nil {
+				workflow = task.Pipeline
+			}
+			res := tx.Exec(`INSERT INTO script_tasks(id,owner_id,project_id,node_id,request_id,input,status,phase,text,workflow,output_node_id,error,revision,created_at,updated_at) VALUES(?::uuid,?,?,?,?,?::jsonb,?,?,?,?::jsonb,?,?,?,?,?) ON CONFLICT(id) DO NOTHING`, task.ID, owner, task.CanvasID, task.NodeID, task.RequestID, task.Input, status, phase, task.Text, workflow, task.OutputNodeID, failure, task.Revision, timestamp(task.CreatedAt), timestamp(task.UpdatedAt))
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected != 1 {
+				return fmt.Errorf("script task ID collision: %s", task.ID)
+			}
+			if err := tx.Exec(`INSERT INTO script_requests(owner_id,request_id,task_id,project_id,node_id,input) VALUES(?,?,?::uuid,?,?,?::jsonb)`, owner, task.RequestID, task.ID, task.CanvasID, task.NodeID, task.Input).Error; err != nil {
+				return err
+			}
+		}
+		for _, request := range e.ScriptRequests {
+			var existing struct{ TaskID string }
+			q := tx.Raw(`SELECT task_id FROM script_requests WHERE owner_id=? AND request_id=?`, owner, request.RequestID).Scan(&existing)
+			if q.Error != nil {
+				return q.Error
+			}
+			if q.RowsAffected > 0 {
+				if existing.TaskID != request.TaskID {
+					return errors.New("script request collision")
+				}
+				continue
+			}
+			if err := tx.Exec(`INSERT INTO script_requests(owner_id,request_id,task_id,project_id,node_id,input) VALUES(?,?,?::uuid,?,?,?::jsonb)`, owner, request.RequestID, request.TaskID, request.CanvasID, request.NodeID, request.Input).Error; err != nil {
+				return err
 			}
 		}
 		return nil

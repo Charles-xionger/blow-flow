@@ -9,6 +9,8 @@ import (
 
 	"blow-flow/api/internal/account"
 	"blow-flow/api/internal/resource"
+	"blow-flow/api/internal/script"
+	"blow-flow/api/internal/textmodel"
 	sentrygin "github.com/getsentry/sentry-go/gin"
 	"github.com/gin-gonic/gin"
 )
@@ -53,6 +55,9 @@ type Dependencies struct {
 	GenerationStreamClose <-chan struct{}
 	Resources             *resource.Service
 	ResourceBlobs         ResourceBlobStore
+	Scripts               *script.Service
+	ScriptWakeups         GenerationWakeups
+	TextModels            *textmodel.Client
 }
 
 func New(ping Ping) *gin.Engine {
