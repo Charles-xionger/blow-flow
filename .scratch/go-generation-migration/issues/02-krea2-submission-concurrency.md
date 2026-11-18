@@ -17,3 +17,7 @@
 - [ ] 提交前再次检查任务未取消且生成许可有效；供应商明确接受后持久化原平台任务 ID 和事件。
 - [ ] 请求超时或连接断开造成提交结果不明确时记录“待核实”并保留占位，RabbitMQ 重投、Worker 重启和租约到期均不自动重提付费请求。
 - [ ] 使用真实 PostgreSQL、RabbitMQ 与模拟 RunningHub 覆盖并发领取、名额释放、重复消息、明确拒绝及响应丢失；直接断言供应商提交次数。
+
+## Comments
+
+- Implemented on `codex/go-generation-integration` in commits `df1a413`; cross-ticket review fixes in `e7074f1`. Frontend and production cutover remain outside this effort.

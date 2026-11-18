@@ -18,3 +18,7 @@
 - [ ] Outbox 发布器以发布确认向持久化 RabbitMQ 队列发送任务 ID；发布失败可补发，重复投递不会重复执行已领取或已完成任务。
 - [ ] 独立 Go Worker 使用模拟供应商完成任务；HTTP 请求结束或 Go API 重启不影响任务执行。API 能查询排队、执行与完成状态。
 - [ ] 尚未提交供应商的任务可取消；取消后即使收到迟到消息也不会执行。任务创建、查询、取消和 RabbitMQ 闭环有接口及真实 PostgreSQL／RabbitMQ 集成测试。
+
+## Comments
+
+- Implemented on `codex/go-generation-integration` in commits `5fe3ac0`; cross-ticket review fixes in `e7074f1`. Frontend and production cutover remain outside this effort.

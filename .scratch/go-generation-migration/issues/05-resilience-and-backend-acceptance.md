@@ -17,3 +17,7 @@
 - [ ] 队列长度、最老等待时间、Worker 心跳、各阶段耗时、失败分类和待核实任务数可由 Go 管理接口或指标查看；敏感访问有审计。
 - [ ] RabbitMQ 不可用时 outbox 留存，恢复后补发；Redis 不可用时任务仍落库并可查询；Worker 崩溃后租约回收不会重新提交状态不明的付费请求。
 - [ ] 在真实 PostgreSQL、RabbitMQ、Redis 与模拟供应商环境中进行故障注入，覆盖重启、重复投递、熔断、积压、通知丢失及恢复；固定 Go API 契约供后续前端重构使用。
+
+## Comments
+
+- Implemented on `codex/go-generation-integration` in commits `573e6d5`; cross-ticket review fixes in `e7074f1`. Frontend and production cutover remain outside this effort.

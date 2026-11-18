@@ -18,3 +18,7 @@
 - [ ] 保存失败保留供应商结果及任务 ID，重试仅执行保存；平台临时文件失效给出明确失败，不自动重新生成。
 - [ ] 查询错误有限退避，等待超时与供应商失败分别表达；继续查询只使用原平台任务 ID。
 - [ ] 使用模拟 RunningHub WebSocket／HTTP 和对象存储覆盖断线恢复、重复完成事件、查询超时、保存失败及重试；通过 Go API 验证最终状态和事件。
+
+## Comments
+
+- Implemented on `codex/go-generation-integration` in commits `98a5046, 9448f88`; cross-ticket review fixes in `e7074f1`. Frontend and production cutover remain outside this effort.

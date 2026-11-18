@@ -17,3 +17,7 @@
 - [ ] 首次连接、断线重连、通知重复或缺失时从 PostgreSQL 补齐最新状态；Redis 不可用时任务继续执行，SSE 以数据库补查恢复。
 - [ ] 慢连接、客户端取消和服务端关闭不会无限占用 goroutine 或阻塞 Worker；通知不泄漏其他账户数据。
 - [ ] 使用真实 PostgreSQL、Redis 和两个 Go API 实例的接口测试验证实时推送、断线补查、Redis 故障及权限隔离。
+
+## Comments
+
+- Implemented on `codex/go-generation-integration` in commits `80dbff4`; cross-ticket review fixes in `e7074f1`. Frontend and production cutover remain outside this effort.
