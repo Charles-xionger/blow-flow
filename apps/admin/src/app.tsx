@@ -106,7 +106,12 @@ export function AdminApp() {
           </form>
           <details className='mt-6 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 open:pb-4'>
             <summary className='cursor-pointer font-medium text-slate-800'>动态验证码从哪里获取？</summary>
-            <p className='mt-3 leading-6'>首位管理员在部署本机获取绑定二维码，用 Google Authenticator、Microsoft Authenticator 等验证器扫描后输入 6 位验证码。验证码每 30 秒更新；这里不会发送短信或邮件。新增管理员的绑定流程尚未开放。</p>
+            {import.meta.env.DEV ? <ol className='mt-3 list-decimal space-y-2 pl-5 leading-6'>
+              <li>在项目根目录运行 <code className='rounded bg-slate-100 px-1 py-0.5'>pnpm admin:qr</code>。</li>
+              <li>打开生成的二维码图片，用手机验证器 App 扫码。<code className='mt-1 block break-all rounded bg-slate-100 px-2 py-1 text-xs'>apps/api/.admin-totp-qr.local.png</code></li>
+              <li>回到这里，输入 App 显示的 6 位数字。以后登录也从该 App 获取。</li>
+            </ol> : <p className='mt-3 leading-6'>打开已绑定的手机验证器 App，输入其中显示的 6 位数字。如尚未绑定，请联系部署维护人员。</p>}
+            {import.meta.env.DEV && <p className='mt-3 leading-6'>本机调试可运行 <code className='rounded bg-slate-100 px-1 py-0.5'>pnpm admin:code</code> 查看当前验证码。二维码只保存在本机，不会显示在公开登录页。</p>}
           </details>
           <p className='mt-6 text-center text-xs leading-5 text-slate-500'>普通创作用户的注册将在创作端开放，后台不提供自行注册。</p>
           </CardContent>
