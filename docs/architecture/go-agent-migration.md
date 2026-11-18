@@ -4,17 +4,17 @@
 
 ## 结论
 
-保留 TypeScript 的 Pi Agent 运行循环，移出 Next.js 进程，作为独立的 `apps/agent-runner` Node Worker 运行。Go API 持有创作助手的身份、任务、消息、确认、工具副作用和进度状态；PostgreSQL 是权威存储，RabbitMQ 只唤醒 Runner，Redis 只通知 SSE。浏览器仍只与应用 API 通信。这里的“迁移到 Go”是将业务状态和工具执行权迁到 Go，不重新实现 Pi 的模型循环。
+保留 TypeScript 的 Pi Agent 运行循环，最终移出 Next.js 进程，作为独立的 `apps/agent-runner` Node Worker 运行。画布操作仍由 TypeScript 画布逻辑计算；Go API 持有创作助手的身份、任务、消息、确认、资源授权、快照提交和进度状态。PostgreSQL 是权威存储，RabbitMQ 只唤醒 Runner，Redis 只通知 SSE。浏览器仍只与应用 API 通信。这里的“迁移到 Go”不要求重新实现 Pi 或把画布编辑规则复制成第二套 Go 实现。
 
-Pi 当前通过 `@mariozechner/pi-agent-core` 和 `@mariozechner/pi-ai` 在 `apps/web/lib/agent/runtime.ts` 执行模型调用和工具循环；仓库固定版本为 0.73.1。`apps/web/lib/agent/service.ts` 自行实现 SQLite 任务、消息、步骤、租约和确认；`apps/web/lib/agent/mcp.ts` 使用进程内 MCP transport。Runner 只保留 Pi、模型适配、提示词构建与事件转换，不再访问 SQLite、画布数据库或生成任务数据库。Pi 上游包升级与本迁移分开验证。
+Pi 当前通过 `@mariozechner/pi-agent-core` 和 `@mariozechner/pi-ai` 在 `apps/web/lib/agent/runtime.ts` 执行模型调用和工具循环；仓库固定版本为 0.73.1。`apps/web/lib/agent/service.ts` 自行实现 SQLite 任务、消息、步骤、租约和确认；`apps/web/lib/agent/mcp.ts` 使用进程内 MCP transport。普通画布编辑规则主要在浏览器的 TypeScript 代码中，Agent 专用编辑在服务端 TypeScript 的 `apps/web/lib/agent/canvas.ts` 中组合这些规则。Runner 最终保留 Pi、画布操作计算、模型适配、提示词构建与事件转换，不再直接访问 SQLite、画布数据库或生成任务数据库。Pi 上游包升级与本迁移分开验证。
 
 ```text
 浏览器 ──HTTP/SSE──> Go API ──PostgreSQL（任务、消息、工具回执、确认、事件）
                          │                   │
                          │ outbox            └──Redis Pub/Sub──> Go SSE
                          v
-                       RabbitMQ ──唤醒──> Node Pi Runner
-                                             │ 领取、心跳、事件与工具调用
+                       RabbitMQ ──唤醒──> Node Pi Runner + TS 画布操作计算
+                                             │ 领取、心跳、事件与版本化快照提交
                                              ├───────────────────────> Go 内部接口/MCP
                                              └──模型流式调用──────────> 模型供应商
 ```
@@ -24,11 +24,11 @@ Pi 当前通过 `@mariozechner/pi-agent-core` 和 `@mariozechner/pi-ai` 在 `app
 | 模块 | 负责 | 不负责 |
 | --- | --- | --- |
 | Go `agent` 模块 | 用户和项目授权、任务命令、幂等、状态机、租约、事件、等待确认、运行恢复 | 拼接供应商请求或执行 Pi 循环 |
-| Node Pi Runner | 领取一次运行、组装已持久化上下文、执行 Pi、转发模型与工具事件 | 决定用户是否有权修改项目，直接改画布或提交生成 |
-| Go 资源与生成模块 | 校验并执行画布语义操作、生成确认和提交；写可重放回执 | 信任模型输出直接形成副作用 |
+| Node Pi Runner | 领取一次运行、组装已持久化上下文、执行 Pi、用 TypeScript 画布规则计算下一个快照 | 决定用户是否有权修改项目，直接写数据库或提交生成 |
+| Go 资源与生成模块 | 校验所有权与编辑授权、按版本提交完整快照及回执、执行生成确认与提交 | 重新实现浏览器/Agent 的画布操作算法 |
 | PostgreSQL | 权威任务、消息、步骤、确认、工具回执与 outbox | 高频 token 广播队列 |
 
-Runner 与 Go 的外部 seam 保持少量操作：`Claim(taskId)` 领取并取得运行令牌与上下文；`Heartbeat(runId)` 续租并获知停止/等待；`AppendEvents(runId, events)` 按序持久化消息和步骤；`ExecuteTool(runId, callId, name, args)` 执行工具并返回回执；`Finish(runId, outcome)` 结束本轮。工具通过应用内 MCP 向 Pi 暴露，但 MCP handler 只调用 Go 的工具接口。内部接口使用服务身份认证；Go 从已领取的任务推导用户和项目，拒绝 Runner 自报的所有者。每次写操作检查运行令牌，旧 Runner 不得覆盖新运行。
+Runner 与 Go 的外部 seam 保持少量操作：`Claim(taskId)` 领取并取得运行令牌与上下文；`Heartbeat(runId)` 续租并获知停止/等待；`AppendEvents(runId, events)` 按序持久化消息和步骤；`ReadCanvas(projectId)` 读取当前快照及版本；`CommitCanvasEdit(runId, callId, baseVersion, operations, nextSnapshot)` 提交经 TypeScript 计算的编辑；`Finish(runId, outcome)` 结束本轮。其他工具通过应用内 MCP 向 Pi 暴露，MCP handler 转发到 Go 或调用画布操作计算器。内部接口使用服务身份认证；Go 从已领取的任务推导用户和项目，拒绝 Runner 自报的所有者。每次写操作检查运行令牌，旧 Runner 不得覆盖新运行。
 
 公开接口可沿用当前侧栏的 `snapshot/send/continue/answer/stop` 语义，Go 提供 `GET /v1/agent/projects/{projectId}`、`POST /v1/agent/projects/{projectId}/commands` 与 `GET /v1/agent/projects/{projectId}/events`。命令包含 `requestId`；相同 ID、相同请求返回原结果，复用 ID 改内容报冲突。SSE 发送数据库事件游标；Redis 丢通知后按游标补查。具体 JSON 字段以当前前端契约和接口测试固定，切换前不改前端。
 
@@ -42,14 +42,18 @@ Go 在同一事务中写任务变更、不可变事件和 outbox。RabbitMQ 消�
 
 ## 画布与生成工具
 
-先把现有 `CanvasAgentService.apply` 的语义（操作校验、同一步历史批次、版本冲突、删除节点、授权与回执）迁入 Go `resource` 模块，再将 `edit_canvas` 等工具接向它。当前 Go `resource.SaveCanvas` 仅提供整张快照及版本检查，不能代替 Agent 的语义编辑，否则旧快照可能覆盖无关的人工修改。画布编辑遵循 [ADR-0009](../adr/0009-agent-canvas-history-and-conflicts.md) 与 [ADR-0011](../adr/0011-agent-preserves-existing-content.md)：默认新建；改写已有内容需本轮引用或确认；已删节点跳过；操作进入持久历史。
+**第一步先实现画布工具，不启动 Agent 状态迁移。** 将 `CanvasAgentService.apply` 中不依赖 SQLite 的编辑计算提取成 TypeScript 函数：输入当前快照、操作列表及已核定的权限上下文，输出新快照、受影响节点和跳过原因。复用现有 `assertCanvasGraph`、`syncReferences`、`versionContent`、`createCanvasHistory`，使 Agent 编辑与浏览器使用同一套画布规则及 `CanvasHistory.schema=1`；先不改浏览器组件。数据库读取、回执与保存从计算函数中移走，接到 Go 资源接口。此函数只计算，不持久化，不调用生成供应商。
+
+Go 当前 `resource.SaveCanvas` 已按项目行锁、`baseVersion` 和 `requestId` 保存整张快照。为 Agent 增加受保护的提交入口：Go 从任务/运行令牌得出所有者与项目，校验修改权限、实际快照差异与操作清单一致，并在同一事务内写项目快照、版本、删除节点记录和工具回执。Go 不需要复刻布局、连线更新与历史补丁算法，但要拒绝越权修改、已删除节点复活和跳过版本检查的提交；由 TypeScript 计算器校验 `CanvasHistory.schema=1` 并用原有撤销/重做实现做回归测试。删除节点时还须通知 Go 生成模块取消未提交请求并防止迟到结果回写。Agent 专用调用不对浏览器公开，尚未具备 Go 任务授权时只做隔离的接口与逻辑测试，不切生产流量。
+
+工具读取 `(snapshot, version)` 后在 TypeScript 中计算，提交时使用稳定的 `taskId + callId` 作为请求身份。若响应丢失，先用原请求重试或查询回执；若确认为版本冲突，重新读取最新快照并重新计算该批操作，最多有限次数，不把旧快照整体覆盖上去。若目标节点已删除则跳过并返回说明；已有节点内容只有本轮引用或持久确认后可改。每批操作生成一个现有格式的撤销历史记录。画布编辑遵循 [ADR-0009](../adr/0009-agent-canvas-history-and-conflicts.md) 与 [ADR-0011](../adr/0011-agent-preserves-existing-content.md)。
 
 `generate_*` 工具由 Go 先规范化模型、输入、目标节点和预计新增节点，持久化确认快照；用户批准的是该快照的摘要。批准后使用稳定请求 ID 创建 Go 生成任务，任何重试先查已有回执。供应商提交结果不明交给生成模块待核实；Agent 不自行重复付费请求。结果保存与画布附着由 Go 生成/资源模块负责。`ask_question`、`read_canvas`、`read_reference` 与技能读取也经 Go 按任务所有者授权；内置只读技能可先随 Runner 打包，个人技能库再迁移。
 
 ## 实施顺序与验收
 
-1. **Go 控制面**：任务/消息/事件/确认表、命令接口、领取与租约、outbox/SSE。用假 Runner 验证幂等、并发项目、同项目唯一活动任务、断线和崩溃恢复。
-2. **Go 工具面**：先实现语义画布编辑及回执，再接只读、脚本和生成工具；用假 Pi 调用验证授权、人工确认、旧运行令牌、重试与“结果不覆盖旧内容”。
+1. **画布工具优先**：提取 TypeScript 画布操作计算器；Go 增加受保护的快照提交、权限核验和回执查询。用现有 Agent 编辑案例及浏览器历史用例做相同输入的结果比对，验证并发人工编辑、提交响应丢失、节点删除、撤销重做及不同用户隔离。此阶段不切换前端或生产 Agent。
+2. **Go 控制面**：任务/消息/事件/确认表、命令接口、领取与租约、outbox/SSE。把第一步的假任务授权换为真实运行令牌；用假 Runner 验证幂等、同项目唯一活动任务和崩溃恢复。
 3. **Node Pi Runner**：从 Next.js 提取固定版本 Pi 运行时，改为通过 Go 内部接口/MCP 操作；用假模型验证完整对话、工具调用、停止和继续。接口与逻辑测试先行，前端暂不动。
 4. **历史导入与切换**：只读导出 SQLite 的 Agent 消息、任务、步骤、确认和生成批次；活动任务导入为 `interrupted`，保留供应商任务 ID，绝不重新提交。停写、导入、核对后再把前端调用层切到 Go；禁止 Next.js 与 Go 同写同一 Agent 任务。
 
@@ -59,5 +63,5 @@ Go 在同一事务中写任务变更、不可变事件和 outbox。RabbitMQ 消�
 
 - 当前侧栏的消息和快照 JSON 契约、事件流方式及旧任务导入字段。
 - Pi 0.73.1 的事件与中断行为；上游 scope 已变化，升级需单独回归，不与迁移混做。
-- 画布历史在 Go 中的存储格式及 `CanvasAgentService.apply` 与现有资源保存回执如何共用事务。
+- TypeScript 计算器与 Go 提交入口之间的操作清单、快照差异、回执和冲突错误契约；现有历史仍由 TypeScript 生成并由 Go 原样存储。
 - 内部 Runner 认证、模型凭据下发方式及部署拓扑；Runner 不接收用户 JWT 或任意项目 ID 的直接写权限。
