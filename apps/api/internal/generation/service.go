@@ -23,10 +23,11 @@ const (
 )
 
 var (
-	ErrInvalid   = errors.New("invalid generation input")
-	ErrForbidden = errors.New("forbidden")
-	ErrNotFound  = errors.New("task not found")
-	ErrConflict  = errors.New("idempotency conflict")
+	ErrInvalid            = errors.New("invalid generation input")
+	ErrForbidden          = errors.New("forbidden")
+	ErrNotFound           = errors.New("task not found")
+	ErrConflict           = errors.New("idempotency conflict")
+	ErrSubmissionRejected = errors.New("provider rejected submission before execution")
 )
 
 type Actor struct {
@@ -40,6 +41,7 @@ type Input struct {
 	Prompt       string   `json:"prompt"`
 	Width        int      `json:"width"`
 	Height       int      `json:"height"`
+	Seed         int64    `json:"seed,omitempty"`
 }
 type Task struct {
 	ID        string    `json:"id"`
@@ -65,7 +67,7 @@ type Service struct {
 }
 
 func (s Service) Create(ctx context.Context, actor Actor, key string, input Input) (Task, error) {
-	if actor.ID == "" || len(key) < 1 || len(key) > 200 || strings.TrimSpace(input.ProjectID) == "" || strings.TrimSpace(input.Prompt) == "" || len(input.Prompt) > 8000 || input.Width < 256 || input.Width > 4096 || input.Height < 256 || input.Height > 4096 || input.Model != "runninghub/krea2" {
+	if actor.ID == "" || len(key) < 1 || len(key) > 200 || strings.TrimSpace(input.ProjectID) == "" || strings.TrimSpace(input.Prompt) == "" || len(input.Prompt) > 8000 || input.Width < 64 || input.Width > 8192 || input.Height < 64 || input.Height > 8192 || input.Width%8 != 0 || input.Height%8 != 0 || input.Model != "runninghub/krea2" || len(input.ReferenceIDs) > 0 || input.Seed != 0 {
 		return Task{}, ErrInvalid
 	}
 	if s.Resources == nil {
@@ -78,20 +80,15 @@ func (s Service) Create(ctx context.Context, actor Actor, key string, input Inpu
 	if !ok {
 		return Task{}, ErrForbidden
 	}
-	for _, id := range input.ReferenceIDs {
-		if id == "" {
-			return Task{}, ErrInvalid
-		}
-		ok, err = s.Resources.OwnsReference(ctx, actor.ID, id)
-		if err != nil {
-			return Task{}, err
-		}
-		if !ok {
-			return Task{}, ErrForbidden
-		}
-	}
 	b, _ := json.Marshal(input)
 	h := sha256.Sum256(b)
+	var seedBytes [6]byte
+	if _, err := rand.Read(seedBytes[:]); err != nil {
+		return Task{}, err
+	}
+	for _, part := range seedBytes {
+		input.Seed = input.Seed<<8 | int64(part)
+	}
 	return s.Store.Create(ctx, actor.ID, key, hex.EncodeToString(h[:]), input)
 }
 func (s Service) Get(ctx context.Context, a Actor, id string) (Task, error) {

@@ -32,12 +32,16 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	publisher := queue.Publisher{DB: db, Rabbit: rabbit}
-	worker := queue.Worker{Store: postgres.New(db), Rabbit: rabbit, Provider: queue.SimulatedProvider{}}
+	store := postgres.New(db)
+	worker := queue.SubmissionWorker{Store: store, Rabbit: rabbit, Provider: queue.Krea2{BaseURL: os.Getenv("RUNNINGHUB_BASE_URL"), APIKey: os.Getenv("RUNNINGHUB_API_KEY")}}
 	result := make(chan error, 1)
 	go func() { result <- worker.Run(ctx) }()
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
+		if err := store.RecoverExpiredSubmissions(ctx); err != nil {
+			slog.Warn("submission recovery retry", "reason", err.Error())
+		}
 		if err := publisher.PublishPending(ctx); err != nil {
 			slog.Warn("outbox publish retry", "reason", err.Error())
 		}

@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"blow-flow/api/internal/generation/postgres"
 	"context"
 	"errors"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -76,6 +77,14 @@ func (r *Rabbit) Consume(ctx context.Context, process func(context.Context, stri
 			err := process(ctx, string(msg.Body))
 			if err != nil {
 				_ = msg.Nack(false, true)
+				if errors.Is(err, postgres.ErrNoCapacity) {
+					select {
+					case <-ctx.Done():
+						return nil
+					case <-time.After(200 * time.Millisecond):
+					}
+					continue
+				}
 				return err
 			}
 			if err = msg.Ack(false); err != nil {
