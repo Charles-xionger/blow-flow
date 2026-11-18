@@ -166,6 +166,7 @@ RunningHub 任务结果接口已经提供 `consumeCoins`、`consumeMoney`、`thi
 - 生成任务迁移必须保留批准、幂等、租约隔离、供应商任务 ID 和结果保存语义；
 - 管理后台只通过 API 操作；
 - 任务指标来自权威任务事件，成本指标来自成本记录；
+- Go 生成迁移使用 RabbitMQ 分发任务、Redis 广播进度变化，PostgreSQL 保存权威任务与事件；前端在 API 与执行链路验证完成前保持现状，详见 [迁移设计](../architecture/go-generation-migration.md)；
 - Sentry、Langfuse 和普通日志只作诊断，不作为任务或成本账的权威来源。
 
 迁移采用停写窗口：停止新写入和新生成提交，备份 SQLite 与对象存储清单，创建初始所有者，导入并校验标识与关系，切换流量，并在明确窗口内保留回滚能力。已经取得供应商任务 ID 的任务只恢复查询，绝不因迁移重新提交。

@@ -18,9 +18,10 @@ No business tables are added in the foundation; the integration suite exercises
 migration application and repeatability with fixture SQL in a temporary schema.
 
 Existing ADR 0002/0003 describe SQLite-based workers and notifications. Those
-remain the behavior of the legacy application during migration. PostgreSQL and
-later MQ supersede their storage/transport choices only when each domain cuts
-over; preserve approval, idempotency, lease fencing and saved-result semantics.
+remain the behavior of the legacy application during migration. ADR-0021 and
+the Go generation migration design specify PostgreSQL, RabbitMQ and Redis for
+the generation domain after cutover; preserve approval, idempotency, lease
+fencing and saved-result semantics.
 
 ## Migration invariants
 
