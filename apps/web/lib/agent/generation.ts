@@ -30,12 +30,12 @@ export function registerGenerationTools(service: AgentService, generation: Gener
     db.exec('CREATE TABLE IF NOT EXISTS agent_generation_batches(id TEXT PRIMARY KEY, task_id TEXT NOT NULL, data TEXT NOT NULL)');
     const save = (batch: Batch) => db.prepare('INSERT INTO agent_generation_batches VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data').run(batch.id, batch.taskId, JSON.stringify(batch));
     const batches = (taskId?: string): Batch[] => (taskId ? db.prepare('SELECT data FROM agent_generation_batches WHERE task_id=?').all(taskId) : db.prepare('SELECT data FROM agent_generation_batches').all() as unknown[]).map(row => JSON.parse((row as {data:string}).data));
-    service.generationSummary = projectId => batches().filter(batch => batch.projectId === projectId).map(batch => ({ id:batch.id, taskId:batch.taskId, status:batch.status, items:batch.items.map(item => ({nodeId:item.request.nodeId,note:item.note,task:item.taskId ? generation.get(item.taskId) : undefined})) }));
     service.generationPending = taskId => batches(taskId).some(batch => batch.items.some(item => {
         if (!item.taskId) return false;
         const task = generation.get(item.taskId);
         return !!item.nextSaveRetry || ['queued','submitting','running'].includes(task.status) || task.status === 'succeeded' && ['pending','saving'].includes(task.saveStatus);
     }));
+    service.generationSummary = projectId => batches().filter(batch => batch.projectId === projectId).map(batch => ({ id:batch.id, taskId:batch.taskId, status:batch.status, items:batch.items.map(item => ({nodeId:item.request.nodeId,note:item.note,task:item.taskId ? generation.get(item.taskId) : undefined})) }));
     function revoke(taskId: string) {
         for (const batch of batches(taskId)) {
             generation.cancelRequests(batch.items.map(item => item.request.requestId));
@@ -88,7 +88,6 @@ export function registerGenerationTools(service: AgentService, generation: Gener
                 }
             }
             if (changed) save(batch);
-            service.wakeAfterGeneration(batch.taskId);
         }
         }).immediate();
     }

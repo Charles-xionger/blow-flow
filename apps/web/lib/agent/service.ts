@@ -5,6 +5,7 @@ import type Database from 'better-sqlite3';
 import { randomUUID, createHash } from 'node:crypto';
 import type { AgentMessage, AgentRuntime, AgentTask, AgentSnapshot, AgentTool, AgentReference } from './types';
 import { redactedFailure } from './redact';
+import { GENERATION_HANDOFF_MESSAGE } from './generation-handoff';
 const active = new Set(['queued', 'running', 'waiting', 'interrupted']);
 export class AgentService {
     private workerId = randomUUID();
@@ -19,6 +20,9 @@ export class AgentService {
             const rows = this.db.prepare("SELECT data FROM agent_tasks WHERE status IN ('running','queued','waiting')").all() as {data:string}[];
             for (const row of rows) {
                 const task: AgentTask = JSON.parse(row.data);
+                if (task.status === 'waiting' && task.awaitingGeneration) {
+                    task.status = 'completed'; delete task.awaitingGeneration; delete task.workerId; delete task.runId; this.save(task); continue;
+                }
                 if (task.status === 'waiting' && !task.awaitingGeneration) continue;
                 if (!task.workerId && task.status !== 'running') continue;
                 const owner = task.workerId ? this.db.prepare('SELECT lease_until FROM agent_workers WHERE id=?').get(task.workerId) as {lease_until:number}|undefined : undefined;
@@ -46,14 +50,6 @@ export class AgentService {
 
     generationSummary?: (projectId: string) => AgentSnapshot['generations'];
     generationPending?: (taskId: string) => boolean;
-    wakeAfterGeneration(taskId: string) {
-        this.db.transaction(() => {
-            const task = this.task(taskId);
-            if (task.status === 'waiting' && task.awaitingGeneration && !this.generationPending?.(taskId)) {
-                task.status = 'queued'; delete task.awaitingGeneration; this.save(task);
-            }
-        }).immediate();
-    }
     private tools = new Map<string, AgentTool>();
     private validator = new AjvJsonSchemaValidator();
     private lifecycle: { send?: (task: AgentTask) => void; answer?: (task: AgentTask, text: string) => void; stop?: (task: AgentTask) => void; tick?: () => void }[] = [];
@@ -136,6 +132,8 @@ export class AgentService {
             if (task.question && !task.question.answer)
                 task.question.cancelled = true;
             this.save(task);
+        } else if (task.status === 'completed' && this.generationPending?.(task.id)) {
+            this.lifecycle.forEach(h => h.stop?.(task));
         } return task; });
     }
     answer(projectId: string, input: {
@@ -254,9 +252,10 @@ export class AgentService {
             const current = this.task(task.id);
             if (this.isExecuting(task)) {
                 const hasMessages = this.snapshot(task.projectId).messages.some(m => m.taskId === task.id && m.role === 'user' && !seen.has(m.id));
-                const pendingGeneration = this.generationPending?.(task.id);
-                current.status = hasMessages ? 'queued' : pendingGeneration ? 'waiting' : 'completed';
-                if (!hasMessages && pendingGeneration) current.awaitingGeneration = true;
+                const messages = this.snapshot(task.projectId).messages;
+                const hasHandoff = messages.some(message => message.runId === current.runId && message.role === 'assistant' && message.text.includes(GENERATION_HANDOFF_MESSAGE));
+                if (!hasMessages && this.generationPending?.(task.id) && !hasHandoff) this.message(current, 'assistant', GENERATION_HANDOFF_MESSAGE);
+                current.status = hasMessages ? 'queued' : 'completed';
                 this.save(current);
             }
             }).immediate();
