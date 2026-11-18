@@ -19,15 +19,20 @@ type IdentityVerifier interface {
 }
 
 type LocalAdminAuthenticator interface {
-	Authenticate(email, password, otp string) (account.Identity, error)
+	Authenticate(email, password string) (account.Identity, error)
 	Issue(account.Identity) (string, error)
+}
+
+type ImageCaptcha interface {
+	Generate() (id, image string, err error)
+	Verify(id, answer string) bool
 }
 
 type AccountService interface {
 	Resolve(context.Context, account.Identity) (account.User, error)
-	ListUsers(context.Context, account.User, account.AuthProof, account.ListUsersQuery) (account.UserPage, error)
+	ListUsers(context.Context, account.User, account.ListUsersQuery) (account.UserPage, error)
 	DisableUser(context.Context, account.User, account.AuthProof, string, string) (account.User, error)
-	ListAuditEvents(context.Context, account.User, account.AuthProof, account.ListAuditQuery) (account.AuditPage, error)
+	ListAuditEvents(context.Context, account.User, account.ListAuditQuery) (account.AuditPage, error)
 	RecordAdminLogin(context.Context, account.User) error
 }
 
@@ -35,6 +40,7 @@ type Dependencies struct {
 	Ping             Ping
 	IdentityVerifier IdentityVerifier
 	LocalAdmin       LocalAdminAuthenticator
+	Captcha          ImageCaptcha
 	Accounts         AccountService
 }
 

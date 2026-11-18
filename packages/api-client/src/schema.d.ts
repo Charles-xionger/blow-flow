@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/auth/captcha": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Create a single-use image challenge for administrator login */
+        get: operations["getLoginCaptcha"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/admin/login": {
         parameters: {
             query?: never;
@@ -13,7 +30,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Authenticate the local bootstrap administrator with password and TOTP */
+        /** Authenticate the local bootstrap administrator with password and image CAPTCHA */
         post: operations["loginAdministrator"];
         delete?: never;
         options?: never;
@@ -66,7 +83,7 @@ export interface paths {
         put?: never;
         /**
          * Disable a user account and append an audit event
-         * @description Requires MFA and authentication no more than ten minutes old.
+         * @description Requires authentication no more than ten minutes old.
          */
         post: operations["disableUser"];
         delete?: never;
@@ -140,7 +157,7 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description Account, role, email verification, or MFA policy rejected the operation */
+        /** @description Account, role, email verification, or recent authentication policy rejected the operation */
         Forbidden: {
             headers: {
                 [name: string]: unknown;
@@ -205,6 +222,41 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    getLoginCaptcha: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Image challenge valid for ten minutes */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        /** @description PNG data URL */
+                        image: string;
+                    };
+                };
+            };
+            /** @description CAPTCHA generation rate limited */
+            429: {
+                headers: {
+                    "Retry-After"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     loginAdministrator: {
         parameters: {
             query?: never;
@@ -218,7 +270,8 @@ export interface operations {
                     /** Format: email */
                     email: string;
                     password: string;
-                    otp: string;
+                    captchaId: string;
+                    captchaAnswer: string;
                 };
             };
         };

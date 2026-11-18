@@ -29,10 +29,10 @@
 
 - 个人用户账户，不建设组织和团队；
 - 邮箱注册、邮箱验证、密码登录和找回密码；
-- Go API 负责账户登录、凭据验证、MFA 和短期 JWT 签发；
+- Go API 负责账户登录、凭据验证、图片验证码和短期 JWT 签发；
 - Go API 使用稳定的本地用户 ID 归属创作资源；
 - 首版只有 `user` 和 `admin` 两种角色；
-- 管理员强制 MFA，敏感操作要求近期重新验证；
+- 管理员使用密码和一次性图片验证码登录，敏感操作要求最近 10 分钟内完成登录；
 - 用户禁用后立即撤销会话并禁止新生成；
 - 项目、文件夹、上传素材、生成任务、生成结果、角色和个人技能必须归属资源所有者；
 - 所有资源授权由 API 校验，不能只依靠前端隐藏入口；
@@ -180,7 +180,7 @@ RunningHub 任务结果接口已经提供 `consumeCoins`、`consumeMoney`、`thi
 
 ## 7. 实施顺序
 
-1. PostgreSQL 账户、认证、本地用户 ID、管理员 MFA 和资源归属；
+1. PostgreSQL 账户、认证、本地用户 ID、管理员图片验证码和资源归属；
 2. 历史数据迁移与资源隔离；
 3. 生成任务事件、RunningHub 用量和字节成本采集；
 4. `apps/admin` 的只读总览、任务与成本页面；
@@ -194,7 +194,7 @@ RunningHub 任务结果接口已经提供 `consumeCoins`、`consumeMoney`、`thi
 
 - 普通用户无法访问其他用户的项目、素材、任务或结果；
 - 普通用户无法进入管理后台；
-- 管理员敏感操作要求 MFA 并留下审计；
+- 管理员敏感操作要求近期登录并留下审计；
 - 禁用账户立即撤销会话并阻止新生成；
 - 相同请求 ID 并发提交仍只创建一个生成任务；
 - 迁移保留项目、节点、任务、媒体关联和供应商任务 ID；
@@ -212,4 +212,5 @@ RunningHub 任务结果接口已经提供 `consumeCoins`、`consumeMoney`、`thi
 - [ADR-0003：使用 SSE 同步生成任务的最新状态](../adr/0003-generation-status-notifications.md)
 - [ADR-0016：在当前任务状态之外追加不可变任务事件](../adr/0016-append-generation-task-events.md)
 - [ADR-0019：Go API 自建认证并签发 JWT](../adr/0019-local-jwt-authentication.md)
+- [ADR-0020：管理员使用密码与图片验证码登录](../adr/0020-admin-password-image-captcha.md)
 - [ADR-0018：不建设平台积分与用户计费体系](../adr/0018-do-not-build-platform-credits.md)

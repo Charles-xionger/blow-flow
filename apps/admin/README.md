@@ -6,7 +6,7 @@
 
 ## 本地运行
 
-1. 在仓库根目录执行 `pnpm db:up` 和 `pnpm admin:setup`。后者会补齐本地 API/数据库默认地址，并生成强密码、TOTP 密钥及签名密钥，写入忽略提交的 `apps/api/.env.local`；登录信息写入 `apps/api/.admin-login.local`，验证器二维码写入 `apps/api/.admin-totp-qr.local.png`。这两个权限为 `0600` 的文件都含敏感信息，仅用于本地开发。若旧 `ai-flow` PostgreSQL 已在运行，使用 `POSTGRES_VOLUME_NAME=blow-flow_postgres-data POSTGRES_PORT=15433 pnpm db:up`，再将 `apps/api/.env.local` 中的 `DATABASE_URL` 端口改为 `15433`，以免两个容器共用数据卷。
+1. 在仓库根目录执行 `pnpm db:up` 和 `pnpm admin:setup`。后者会补齐本地 API/数据库默认地址，并生成强密码及签名密钥，写入忽略提交的 `apps/api/.env.local`；登录信息写入权限为 `0600` 的 `apps/api/.admin-login.local`。这些文件含敏感信息，仅用于本地开发。若旧 `ai-flow` PostgreSQL 已在运行，使用 `POSTGRES_VOLUME_NAME=blow-flow_postgres-data POSTGRES_PORT=15433 pnpm db:up`，再将 `apps/api/.env.local` 中的 `DATABASE_URL` 端口改为 `15433`，以免两个容器共用数据卷。
 2. 在终端加载 API 环境变量，然后迁移并启动 Go API：
 
    ```sh
@@ -17,10 +17,10 @@
    pnpm dev:api
    ```
 
-3. 在另一终端运行 `pnpm dev:admin`，打开 `http://127.0.0.1:3218/`。密码见 `apps/api/.admin-login.local`，用 Google Authenticator、Microsoft Authenticator 等验证器扫描 `apps/api/.admin-totp-qr.local.png`；本地调试也可以运行 `pnpm admin:code` 获取当前验证码。已有本地管理员可运行 `pnpm admin:qr` 补生成二维码，无须重置密码或密钥。二维码与密钥不要放到网页、公开存储或版本库。
+3. 在另一终端运行 `pnpm dev:admin`，打开 `http://127.0.0.1:3218/`。密码见 `apps/api/.admin-login.local`；输入页面显示的图片验证码即可提交登录。
 
 Admin 开发服务器把 `/v1` 代理到 `apps/admin/.env.local` 的 `API_URL`（默认 `127.0.0.1:8080`）。生产部署也须将同源 `/v1` 代理至 Go API。未完成本地管理员配置时，开发模式可使用 `?preview` 查看页面结构；此模式不请求管理接口，也不会进入生产构建。
 
-登录令牌保存在浏览器 `sessionStorage`，有效期 15 分钟；退出会清除当前浏览器的令牌。Go API 在每次受保护请求中查询账户状态，禁用账户会立即失去 Go API 的访问权限。现有 `apps/web` 生成链路尚未迁移到该授权边界。当前本地引导仅创建首位管理员，尚未提供公开注册、密码找回或 MFA 恢复流程。
+登录前 Go API 会签发一次性四位图片验证码。登录令牌保存在浏览器 `sessionStorage`，有效期 15 分钟；退出会清除当前浏览器的令牌。Go API 在每次受保护请求中查询账户状态，禁用账户会立即失去 Go API 的访问权限；禁用用户要求最近 10 分钟内完成登录。现有 `apps/web` 生成链路尚未迁移到该授权边界。当前本地引导仅创建首位管理员，尚未提供公开注册或密码找回流程。
 
 普通创作用户的注册属于 `apps/web` 的账户入口，不在管理员后台提供自行注册。开放注册前还需要完成邮箱验证、资源所有者迁移与授权隔离，以及产品文档要求的注册和生成安全门槛；否则新账户仍会访问现有固定本地身份的创作资源。

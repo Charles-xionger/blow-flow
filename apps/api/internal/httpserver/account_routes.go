@@ -19,6 +19,7 @@ const (
 
 func registerAccountRoutes(router *gin.Engine, dependencies Dependencies) {
 	v1 := router.Group("/v1")
+	v1.GET("/auth/captcha", newImageCaptcha(dependencies))
 	v1.POST("/auth/admin/login", adminLogin(dependencies))
 	v1.Use(authenticate(dependencies.IdentityVerifier, dependencies.Accounts))
 	v1.GET("/me", func(c *gin.Context) {
@@ -37,7 +38,7 @@ func registerAccountRoutes(router *gin.Engine, dependencies Dependencies) {
 			writeAccountError(c, account.ErrInvalidArgument)
 			return
 		}
-		page, err := dependencies.Accounts.ListUsers(c.Request.Context(), currentUser(c), currentProof(c), account.ListUsersQuery{Limit: limit, Cursor: c.Query("cursor"), Status: status})
+		page, err := dependencies.Accounts.ListUsers(c.Request.Context(), currentUser(c), account.ListUsersQuery{Limit: limit, Cursor: c.Query("cursor"), Status: status})
 		if err != nil {
 			writeAccountError(c, err)
 			return
@@ -65,7 +66,7 @@ func registerAccountRoutes(router *gin.Engine, dependencies Dependencies) {
 			writeAccountError(c, account.ErrInvalidArgument)
 			return
 		}
-		page, err := dependencies.Accounts.ListAuditEvents(c.Request.Context(), currentUser(c), currentProof(c), account.ListAuditQuery{Limit: limit, Cursor: c.Query("cursor")})
+		page, err := dependencies.Accounts.ListAuditEvents(c.Request.Context(), currentUser(c), account.ListAuditQuery{Limit: limit, Cursor: c.Query("cursor")})
 		if err != nil {
 			writeAccountError(c, err)
 			return
@@ -111,7 +112,7 @@ func currentUser(c *gin.Context) account.User {
 func currentProof(c *gin.Context) account.AuthProof {
 	value, _ := c.Get(accountIdentityKey)
 	identity, _ := value.(account.Identity)
-	return account.AuthProof{MFA: identity.MFA, AuthenticatedAt: identity.AuthenticatedAt}
+	return account.AuthProof{AuthenticatedAt: identity.AuthenticatedAt}
 }
 
 func parseLimit(value string) (int, error) {
@@ -147,10 +148,8 @@ func writeAccountError(c *gin.Context, err error) {
 		status, code = http.StatusForbidden, "account_disabled"
 	case errors.Is(err, account.ErrForbidden):
 		status, code = http.StatusForbidden, "forbidden"
-	case errors.Is(err, account.ErrMFARequired):
-		status, code = http.StatusForbidden, "mfa_required"
-	case errors.Is(err, account.ErrRecentMFARequired):
-		status, code = http.StatusForbidden, "recent_mfa_required"
+	case errors.Is(err, account.ErrRecentAuthenticationRequired):
+		status, code = http.StatusForbidden, "recent_auth_required"
 	case errors.Is(err, account.ErrCannotDisableSelf):
 		status, code = http.StatusConflict, "cannot_disable_self"
 	case errors.Is(err, account.ErrInvalidArgument):

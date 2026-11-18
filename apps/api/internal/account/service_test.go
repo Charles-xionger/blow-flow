@@ -63,7 +63,7 @@ func TestResolveBootstrapsOnlyConfiguredInitialAdministrator(t *testing.T) {
 
 	for _, subject := range []string{"member-subject", "owner-subject"} {
 		_, err := service.Resolve(context.Background(), Identity{
-			Issuer: "https://identity.example", Subject: subject, Email: subject + "@example.com", EmailVerified: true, MFA: true,
+			Issuer: "https://identity.example", Subject: subject, Email: subject + "@example.com", EmailVerified: true,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -85,18 +85,18 @@ func TestResolveBootstrapsOnlyConfiguredInitialAdministrator(t *testing.T) {
 	}
 }
 
-func TestAdministratorAuthenticationRequiresMFA(t *testing.T) {
+func TestAdministratorCanResolveAfterPasswordAuthentication(t *testing.T) {
 	repo := repositoryStub{resolve: func(context.Context, Identity, IdentityProvisioning) (User, error) {
 		return User{ID: "admin-1", Role: RoleAdmin, Status: StatusActive}, nil
 	}}
 	service := NewService(repo, InitialAdministrator{}, time.Now)
 	_, err := service.Resolve(context.Background(), Identity{Issuer: "https://identity.example", Subject: "admin", Email: "admin@example.com", EmailVerified: true})
-	if !errors.Is(err, ErrMFARequired) {
-		t.Fatalf("Resolve() error = %v, want ErrMFARequired", err)
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
 	}
 }
 
-func TestDisableUserRequiresAdministratorMFAAndRecentAuthentication(t *testing.T) {
+func TestDisableUserRequiresRecentAuthentication(t *testing.T) {
 	now := time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)
 	called := 0
 	repo := repositoryStub{disable: func(_ context.Context, change DisableUser) (User, error) {
@@ -110,20 +110,20 @@ func TestDisableUserRequiresAdministratorMFAAndRecentAuthentication(t *testing.T
 	admin := User{ID: "admin-1", Role: RoleAdmin, Status: StatusActive}
 
 	proofs := []AuthProof{
-		{MFA: false, AuthenticatedAt: now},
-		{MFA: true, AuthenticatedAt: now.Add(-11 * time.Minute)},
+		{},
+		{AuthenticatedAt: now.Add(-11 * time.Minute)},
 	}
 	for _, proof := range proofs {
 		_, err := service.DisableUser(context.Background(), admin, proof, "user-2", "abuse")
-		if !errors.Is(err, ErrRecentMFARequired) {
-			t.Fatalf("ChangeStatus() error = %v, want ErrRecentMFARequired", err)
+		if !errors.Is(err, ErrRecentAuthenticationRequired) {
+			t.Fatalf("ChangeStatus() error = %v, want ErrRecentAuthenticationRequired", err)
 		}
 	}
 	if called != 0 {
-		t.Fatal("status mutation happened without recent MFA")
+		t.Fatal("status mutation happened without recent authentication")
 	}
 
-	_, err := service.DisableUser(context.Background(), admin, AuthProof{MFA: true, AuthenticatedAt: now.Add(-9 * time.Minute)}, "user-2", "abuse")
+	_, err := service.DisableUser(context.Background(), admin, AuthProof{AuthenticatedAt: now.Add(-9 * time.Minute)}, "user-2", "abuse")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestAdministratorCannotDisableOwnAccount(t *testing.T) {
 		return User{}, nil
 	}}, InitialAdministrator{}, func() time.Time { return now })
 	admin := User{ID: "admin-1", Role: RoleAdmin, Status: StatusActive}
-	_, err := service.DisableUser(context.Background(), admin, AuthProof{MFA: true, AuthenticatedAt: now}, admin.ID, "mistake")
+	_, err := service.DisableUser(context.Background(), admin, AuthProof{AuthenticatedAt: now}, admin.ID, "mistake")
 	if !errors.Is(err, ErrCannotDisableSelf) {
 		t.Fatalf("DisableUser() error = %v, want ErrCannotDisableSelf", err)
 	}

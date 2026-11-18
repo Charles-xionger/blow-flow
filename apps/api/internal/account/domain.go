@@ -20,14 +20,13 @@ const (
 )
 
 var (
-	ErrEmailUnverified   = errors.New("email is not verified")
-	ErrAccountDisabled   = errors.New("account is disabled")
-	ErrForbidden         = errors.New("operation is forbidden")
-	ErrMFARequired       = errors.New("multi-factor authentication is required")
-	ErrRecentMFARequired = errors.New("recent multi-factor authentication is required")
-	ErrCannotDisableSelf = errors.New("administrator cannot disable own account")
-	ErrInvalidArgument   = errors.New("invalid argument")
-	ErrNotFound          = errors.New("resource not found")
+	ErrEmailUnverified              = errors.New("email is not verified")
+	ErrAccountDisabled              = errors.New("account is disabled")
+	ErrForbidden                    = errors.New("operation is forbidden")
+	ErrRecentAuthenticationRequired = errors.New("recent authentication is required")
+	ErrCannotDisableSelf            = errors.New("administrator cannot disable own account")
+	ErrInvalidArgument              = errors.New("invalid argument")
+	ErrNotFound                     = errors.New("resource not found")
 )
 
 type Identity struct {
@@ -35,7 +34,6 @@ type Identity struct {
 	Subject         string
 	Email           string
 	EmailVerified   bool
-	MFA             bool
 	AuthenticatedAt time.Time
 }
 
@@ -51,7 +49,6 @@ type IdentityProvisioning struct {
 }
 
 type AuthProof struct {
-	MFA             bool
 	AuthenticatedAt time.Time
 }
 

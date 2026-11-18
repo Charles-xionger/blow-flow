@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import type { components } from '@blow-flow/api-client'
 import { Activity, ShieldCheck, Sparkles } from 'lucide-react'
-import { clearSession as removeStoredSession, getSession, login } from './auth'
+import { clearSession as removeStoredSession, getSession, loadCaptcha, login } from './auth'
 import { adminClient } from './api'
 import { mayEnterAdmin } from './access'
 import { AdminConsole } from './admin-console'
@@ -17,7 +17,10 @@ export function AdminApp() {
   const [account, setAccount] = useState<Account | null>(null)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [otp, setOtp] = useState('')
+  const [captcha, setCaptcha] = useState<{ id: string; image: string } | null>(null)
+  const [captchaAnswer, setCaptchaAnswer] = useState('')
+  const [captchaBusy, setCaptchaBusy] = useState(false)
+  const [captchaError, setCaptchaError] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -27,6 +30,16 @@ export function AdminApp() {
     setToken(null)
     setAccount(null)
     setError('会话已失效，请重新登录。')
+  }, [])
+
+  const refreshCaptcha = useCallback(async () => {
+    setCaptchaBusy(true)
+    setCaptcha(null)
+    setCaptchaAnswer('')
+    setCaptchaError('')
+    try { setCaptcha(await loadCaptcha()) }
+    catch (cause) { setCaptchaError(cause instanceof Error ? cause.message : '图片验证码加载失败，请点图片重试。') }
+    finally { setCaptchaBusy(false) }
   }, [])
 
   useEffect(() => {
@@ -47,6 +60,10 @@ export function AdminApp() {
   }, [preview, clearSession])
 
   useEffect(() => {
+    if (!preview && !loading && !token) void refreshCaptcha()
+  }, [preview, loading, token, refreshCaptcha])
+
+  useEffect(() => {
     if (!token) return
     const timer = window.setInterval(() => {
       const session = getSession()
@@ -60,18 +77,19 @@ export function AdminApp() {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (!captcha) return
     setBusy(true)
     setError('')
     try {
-      const session = await login(email.trim(), password, otp.trim())
+      const session = await login(email.trim(), password, captcha.id, captchaAnswer.trim())
       if (!mayEnterAdmin(session.user.role, session.user.status, false)) throw new Error('当前账户没有管理员权限。')
       setToken(session.accessToken)
       setAccount(session.user)
       setPassword('')
-      setOtp('')
     } catch (cause) {
       removeStoredSession()
       setError(cause instanceof Error ? cause.message : '登录失败，请重试。')
+      void refreshCaptcha()
     } finally { setBusy(false) }
   }
 
@@ -96,23 +114,14 @@ export function AdminApp() {
       <div className='flex items-center gap-2 text-sm font-semibold text-slate-900 lg:invisible'><img src='/brand/blow-flow-mark.png' alt='' className='size-7' /> Blow Flow</div>
       <div className='flex flex-1 items-center justify-center py-10'>
         <Card className='w-full max-w-md border-0 bg-transparent shadow-none'>
-          <CardHeader className='px-0'><div className='mb-5 grid size-12 place-items-center rounded-2xl bg-slate-950 text-white shadow-lg shadow-slate-900/20'><ShieldCheck className='size-6' /></div><CardTitle className='text-3xl font-semibold tracking-tight'>登录生成运营后台</CardTitle><CardDescription className='pt-1 text-sm leading-6'>仅限内部管理员。使用账户密码和验证器中的动态验证码登录。</CardDescription></CardHeader>
+          <CardHeader className='px-0'><div className='mb-5 grid size-12 place-items-center rounded-2xl bg-slate-950 text-white shadow-lg shadow-slate-900/20'><ShieldCheck className='size-6' /></div><CardTitle className='text-3xl font-semibold tracking-tight'>登录生成运营后台</CardTitle><CardDescription className='pt-1 text-sm leading-6'>仅限内部管理员。使用账户密码和图片验证码登录。</CardDescription></CardHeader>
           <CardContent className='px-0'><form className='space-y-5' onSubmit={event => void submit(event)}>
             <label className='block space-y-2 text-sm font-medium'>邮箱<Input type='email' autoComplete='username' required value={email} onChange={event => setEmail(event.target.value)} placeholder='admin@example.com' className='h-11 bg-white' /></label>
             <label className='block space-y-2 text-sm font-medium'>密码<Input type='password' autoComplete='current-password' required value={password} onChange={event => setPassword(event.target.value)} className='h-11 bg-white' /></label>
-            <label className='block space-y-2 text-sm font-medium'>动态验证码<Input inputMode='numeric' pattern='[0-9]{6}' maxLength={6} autoComplete='one-time-code' required value={otp} onChange={event => setOtp(event.target.value)} placeholder='验证器中的 6 位数字' className='h-11 bg-white' /></label>
+            <div className='space-y-2 text-sm font-medium'><label htmlFor='captcha-answer'>图片验证码</label><div className='flex items-center gap-2'><Input id='captcha-answer' inputMode='numeric' pattern='[0-9]{4}' maxLength={4} required value={captchaAnswer} onChange={event => setCaptchaAnswer(event.target.value)} placeholder='4 位数字' className='h-16 min-w-0 flex-1 bg-white' /><button type='button' aria-label='换一张图片验证码' title='点击换一张' disabled={captchaBusy} onClick={() => void refreshCaptcha()} className='flex h-16 w-48 shrink-0 items-center justify-center overflow-hidden rounded-md border border-slate-200 bg-white hover:border-slate-400 disabled:cursor-wait'>{captcha ? <img src={captcha.image} alt='图片验证码' className='h-full w-full object-fill' /> : <span className='text-xs text-slate-500'>{captchaBusy ? '加载中…' : '点击重试'}</span>}</button></div><p className='text-xs font-normal text-slate-500'>看不清？点击图片换一张。</p>{captchaError && <p role='alert' className='text-xs font-normal text-destructive'>{captchaError}</p>}</div>
             {error && <p role='alert' className='text-sm text-destructive'>{error}</p>}
-            <Button className='h-11 w-full' disabled={busy} type='submit'>{busy ? '登录中…' : '登录'}</Button>
+            <Button className='h-11 w-full' disabled={busy || captchaBusy || !captcha} type='submit'>{busy ? '登录中…' : '登录'}</Button>
           </form>
-          <details className='mt-6 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 open:pb-4'>
-            <summary className='cursor-pointer font-medium text-slate-800'>动态验证码从哪里获取？</summary>
-            {import.meta.env.DEV ? <ol className='mt-3 list-decimal space-y-2 pl-5 leading-6'>
-              <li>在项目根目录运行 <code className='rounded bg-slate-100 px-1 py-0.5'>pnpm admin:qr</code>。</li>
-              <li>打开生成的二维码图片，用手机验证器 App 扫码。<code className='mt-1 block break-all rounded bg-slate-100 px-2 py-1 text-xs'>apps/api/.admin-totp-qr.local.png</code></li>
-              <li>回到这里，输入 App 显示的 6 位数字。以后登录也从该 App 获取。</li>
-            </ol> : <p className='mt-3 leading-6'>打开已绑定的手机验证器 App，输入其中显示的 6 位数字。如尚未绑定，请联系部署维护人员。</p>}
-            {import.meta.env.DEV && <p className='mt-3 leading-6'>本机调试可运行 <code className='rounded bg-slate-100 px-1 py-0.5'>pnpm admin:code</code> 查看当前验证码。二维码只保存在本机，不会显示在公开登录页。</p>}
-          </details>
           <p className='mt-6 text-center text-xs leading-5 text-slate-500'>普通创作用户的注册将在创作端开放，后台不提供自行注册。</p>
           </CardContent>
         </Card>

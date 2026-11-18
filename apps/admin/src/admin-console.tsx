@@ -130,7 +130,7 @@ export function AdminConsole({ token, account, preview, onSignOut, onUnauthorize
       const result = await adminClient(token).POST('/admin/users/{userId}/disable', { params: { path: { userId: disableTarget.id } }, body: { reason } })
       if (result.error) {
         if (result.response.status === 401) onUnauthorized()
-        else if (result.error.error === 'recent_mfa_required') setDisableError('需要近期完成 MFA，请重新登录后再试。')
+        else if (result.error.error === 'recent_auth_required') setDisableError('登录已超过 10 分钟，请重新登录后再试。')
         else setDisableError('禁用失败，请检查账户状态后重试。')
         return
       }

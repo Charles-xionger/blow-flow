@@ -95,11 +95,11 @@ func TestAccountRepositoryOwnsIdentityStatusAndAuditTransaction(t *testing.T) {
 	if secondCandidate.Role != account.RoleUser {
 		t.Fatalf("second initial-administrator candidate role = %q", secondCandidate.Role)
 	}
-	localAdmin, err := repository.ResolveIdentity(context.Background(), account.Identity{Issuer: "blow-flow-local", Subject: "bootstrap-admin", Email: "admin@example.com", EmailVerified: true, MFA: true}, account.IdentityProvisioning{MayBecomeInitialAdministrator: true, LinkExistingAdministratorByEmail: true})
+	localAdmin, err := repository.ResolveIdentity(context.Background(), account.Identity{Issuer: "blow-flow-local", Subject: "bootstrap-admin", Email: "admin@example.com", EmailVerified: true}, account.IdentityProvisioning{MayBecomeInitialAdministrator: true, LinkExistingAdministratorByEmail: true})
 	if err != nil || localAdmin.ID != users[0].ID {
 		t.Fatalf("local admin identity did not link to existing administrator: %+v, %v", localAdmin, err)
 	}
-	_, err = repository.ResolveIdentity(context.Background(), account.Identity{Issuer: "blow-flow-local", Subject: "other-bootstrap", Email: "stranger@example.com", EmailVerified: true, MFA: true}, account.IdentityProvisioning{MayBecomeInitialAdministrator: true, LinkExistingAdministratorByEmail: true})
+	_, err = repository.ResolveIdentity(context.Background(), account.Identity{Issuer: "blow-flow-local", Subject: "other-bootstrap", Email: "stranger@example.com", EmailVerified: true}, account.IdentityProvisioning{MayBecomeInitialAdministrator: true, LinkExistingAdministratorByEmail: true})
 	if !errors.Is(err, account.ErrForbidden) {
 		t.Fatalf("unmatched local identity was not rejected: %v", err)
 	}

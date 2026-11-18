@@ -46,14 +46,11 @@ func (s *Service) Resolve(ctx context.Context, identity Identity) (User, error) 
 	if user.Status == StatusDisabled {
 		return User{}, ErrAccountDisabled
 	}
-	if user.Role == RoleAdmin && !identity.MFA {
-		return User{}, ErrMFARequired
-	}
 	return user, nil
 }
 
-func (s *Service) ListUsers(ctx context.Context, actor User, proof AuthProof, query ListUsersQuery) (UserPage, error) {
-	if err := requireAdministrator(actor, proof); err != nil {
+func (s *Service) ListUsers(ctx context.Context, actor User, query ListUsersQuery) (UserPage, error) {
+	if err := requireAdministrator(actor); err != nil {
 		return UserPage{}, err
 	}
 	if query.Status != "" && query.Status != StatusActive && query.Status != StatusDisabled {
@@ -64,12 +61,12 @@ func (s *Service) ListUsers(ctx context.Context, actor User, proof AuthProof, qu
 }
 
 func (s *Service) DisableUser(ctx context.Context, actor User, proof AuthProof, targetID string, reason string) (User, error) {
-	if err := requireAdministrator(actor, proof); err != nil {
+	if err := requireAdministrator(actor); err != nil {
 		return User{}, err
 	}
 	now := s.now().UTC()
 	if proof.AuthenticatedAt.IsZero() || proof.AuthenticatedAt.After(now) || now.Sub(proof.AuthenticatedAt) > recentAuthenticationWindow {
-		return User{}, ErrRecentMFARequired
+		return User{}, ErrRecentAuthenticationRequired
 	}
 	if strings.TrimSpace(targetID) == "" || strings.TrimSpace(reason) == "" {
 		return User{}, ErrInvalidArgument
@@ -82,8 +79,8 @@ func (s *Service) DisableUser(ctx context.Context, actor User, proof AuthProof, 
 	})
 }
 
-func (s *Service) ListAuditEvents(ctx context.Context, actor User, proof AuthProof, query ListAuditQuery) (AuditPage, error) {
-	if err := requireAdministrator(actor, proof); err != nil {
+func (s *Service) ListAuditEvents(ctx context.Context, actor User, query ListAuditQuery) (AuditPage, error) {
+	if err := requireAdministrator(actor); err != nil {
 		return AuditPage{}, err
 	}
 	query.Limit = normalizedLimit(query.Limit)
@@ -97,12 +94,9 @@ func (s *Service) RecordAdminLogin(ctx context.Context, user User) error {
 	return s.repository.AppendAdminLogin(ctx, user.ID, s.now().UTC())
 }
 
-func requireAdministrator(actor User, proof AuthProof) error {
+func requireAdministrator(actor User) error {
 	if actor.Status != StatusActive || actor.Role != RoleAdmin {
 		return ErrForbidden
-	}
-	if !proof.MFA {
-		return ErrRecentMFARequired
 	}
 	return nil
 }

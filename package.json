@@ -11,8 +11,6 @@
     "dev:all": "turbo run dev:all --parallel",
     "dev:api": "pnpm --filter @blow-flow/api dev",
     "admin:setup": "pnpm --filter @blow-flow/api admin:setup",
-    "admin:code": "pnpm --filter @blow-flow/api admin:code",
-    "admin:qr": "pnpm --filter @blow-flow/api admin:qr",
     "dev:admin": "pnpm --filter @blow-flow/admin dev",
     "dev:stop": "pnpm --filter @blow-flow/web dev:stop",
     "build": "turbo run build",

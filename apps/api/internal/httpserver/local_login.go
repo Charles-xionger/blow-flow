@@ -20,6 +20,29 @@ type loginLimiter struct {
 	attempt loginAttempt
 }
 
+type captchaIssueLimiter struct {
+	mu      sync.Mutex
+	tokens  float64
+	updated time.Time
+}
+
+func (l *captchaIssueLimiter) allow() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := time.Now()
+	if l.updated.IsZero() {
+		l.tokens = 10
+	} else {
+		l.tokens = min(10, l.tokens+now.Sub(l.updated).Seconds())
+	}
+	l.updated = now
+	if l.tokens < 1 {
+		return false
+	}
+	l.tokens--
+	return true
+}
+
 func (l *loginLimiter) fail() time.Duration {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -48,20 +71,30 @@ func (l *loginLimiter) clear() {
 func adminLogin(dependencies Dependencies) gin.HandlerFunc {
 	limiter := &loginLimiter{}
 	return func(c *gin.Context) {
-		if dependencies.LocalAdmin == nil || dependencies.Accounts == nil {
+		if dependencies.LocalAdmin == nil || dependencies.Accounts == nil || dependencies.Captcha == nil {
 			c.JSON(http.StatusServiceUnavailable, errorBody(c, "service_unavailable"))
 			return
 		}
 		var body struct {
-			Email    string `json:"email"`
-			Password string `json:"password"`
-			OTP      string `json:"otp"`
+			Email         string `json:"email"`
+			Password      string `json:"password"`
+			CaptchaID     string `json:"captchaId"`
+			CaptchaAnswer string `json:"captchaAnswer"`
 		}
-		if decodeJSON(c, &body) != nil || len(body.Email) > 320 || len(body.Password) > 1024 || len(body.OTP) != 6 {
+		if decodeJSON(c, &body) != nil || len(body.CaptchaID) > 128 {
 			c.JSON(http.StatusBadRequest, errorBody(c, "invalid_request"))
 			return
 		}
-		identity, err := dependencies.LocalAdmin.Authenticate(strings.TrimSpace(body.Email), body.Password, body.OTP)
+		if !dependencies.Captcha.Verify(body.CaptchaID, body.CaptchaAnswer) {
+			throttleLogin(c, limiter.fail())
+			c.JSON(http.StatusUnauthorized, errorBody(c, "invalid_captcha"))
+			return
+		}
+		if len(body.Email) > 320 || len(body.Password) > 1024 {
+			c.JSON(http.StatusBadRequest, errorBody(c, "invalid_request"))
+			return
+		}
+		identity, err := dependencies.LocalAdmin.Authenticate(strings.TrimSpace(body.Email), body.Password)
 		if err != nil {
 			throttleLogin(c, limiter.fail())
 			c.JSON(http.StatusUnauthorized, errorBody(c, "invalid_credentials"))
@@ -85,6 +118,28 @@ func adminLogin(dependencies Dependencies) gin.HandlerFunc {
 		limiter.clear()
 		c.Header("Cache-Control", "no-store")
 		c.JSON(http.StatusOK, gin.H{"accessToken": token, "expiresIn": 900, "user": user})
+	}
+}
+
+func newImageCaptcha(dependencies Dependencies) gin.HandlerFunc {
+	limiter := &captchaIssueLimiter{}
+	return func(c *gin.Context) {
+		if dependencies.Captcha == nil {
+			c.JSON(http.StatusServiceUnavailable, errorBody(c, "service_unavailable"))
+			return
+		}
+		if !limiter.allow() {
+			c.Header("Retry-After", "1")
+			c.JSON(http.StatusTooManyRequests, errorBody(c, "rate_limited"))
+			return
+		}
+		id, image, err := dependencies.Captcha.Generate()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, errorBody(c, "internal_error"))
+			return
+		}
+		c.Header("Cache-Control", "no-store")
+		c.JSON(http.StatusOK, gin.H{"id": id, "image": image})
 	}
 }
 

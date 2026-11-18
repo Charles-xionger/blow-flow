@@ -3,11 +3,11 @@ module blow-flow/api
 go 1.24.0
 
 require (
+	github.com/dchest/captcha v1.1.0
 	github.com/getsentry/sentry-go v0.36.2
 	github.com/getsentry/sentry-go/gin v0.36.2
 	github.com/gin-gonic/gin v1.11.0
 	github.com/pressly/goose/v3 v3.26.0
-	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	golang.org/x/crypto v0.40.0
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.31.1

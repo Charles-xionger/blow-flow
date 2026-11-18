@@ -15,6 +15,7 @@ import (
 	accountpostgres "blow-flow/api/internal/account/postgres"
 	"blow-flow/api/internal/database"
 	"blow-flow/api/internal/httpserver"
+	"blow-flow/api/internal/identity/imagecaptcha"
 	localauth "blow-flow/api/internal/identity/localauth"
 	"blow-flow/api/internal/telemetry"
 	"github.com/getsentry/sentry-go"
@@ -35,6 +36,7 @@ func run() error {
 	var accounts *account.Service
 	var identityVerifier httpserver.IdentityVerifier
 	var localAdmin httpserver.LocalAdminAuthenticator
+	var captcha httpserver.ImageCaptcha
 	if dsn := os.Getenv("DATABASE_URL"); dsn != "" {
 		db, pool, err := database.Open(dsn)
 		if err != nil {
@@ -46,12 +48,13 @@ func run() error {
 				if err != nil {
 					return err
 				}
-				adminAuth, err := localauth.New(localauth.Config{Email: os.Getenv("ADMIN_AUTH_EMAIL"), PasswordHash: os.Getenv("ADMIN_AUTH_PASSWORD_HASH"), TOTPSecret: os.Getenv("ADMIN_AUTH_TOTP_SECRET"), SigningKey: key}, time.Now)
+				adminAuth, err := localauth.New(localauth.Config{Email: os.Getenv("ADMIN_AUTH_EMAIL"), PasswordHash: os.Getenv("ADMIN_AUTH_PASSWORD_HASH"), SigningKey: key}, time.Now)
 				if err != nil {
 					return err
 				}
 				identityVerifier = adminAuth
 				localAdmin = adminAuth
+				captcha = imagecaptcha.New()
 				repository := accountpostgres.New(db, time.Now)
 				accounts = account.NewService(repository, account.InitialAdministrator{Issuer: localauth.Issuer, Subject: localauth.Subject, LinkExistingByEmail: true}, time.Now)
 				ping = func(ctx context.Context) error { return database.Check(ctx, pool) }
@@ -68,7 +71,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	server := &http.Server{Handler: httpserver.NewWithDependencies(httpserver.Dependencies{Ping: ping, Accounts: accounts, IdentityVerifier: identityVerifier, LocalAdmin: localAdmin}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
+	server := &http.Server{Handler: httpserver.NewWithDependencies(httpserver.Dependencies{Ping: ping, Accounts: accounts, IdentityVerifier: identityVerifier, LocalAdmin: localAdmin, Captcha: captcha}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	done := make(chan error, 1)

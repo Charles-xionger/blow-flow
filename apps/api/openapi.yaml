@@ -8,10 +8,34 @@ servers:
 security:
   - bearerAuth: []
 paths:
+  /auth/captcha:
+    get:
+      operationId: getLoginCaptcha
+      summary: Create a single-use image challenge for administrator login
+      security: []
+      responses:
+        "200":
+          description: Image challenge valid for ten minutes
+          headers:
+            Cache-Control: { schema: { type: string } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, image]
+                properties:
+                  id: { type: string }
+                  image: { type: string, description: PNG data URL }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "429":
+          description: CAPTCHA generation rate limited
+          headers:
+            Retry-After: { schema: { type: string } }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
   /auth/admin/login:
     post:
       operationId: loginAdministrator
-      summary: Authenticate the local bootstrap administrator with password and TOTP
+      summary: Authenticate the local bootstrap administrator with password and image CAPTCHA
       security: []
       requestBody:
         required: true
@@ -20,11 +44,12 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [email, password, otp]
+              required: [email, password, captchaId, captchaAnswer]
               properties:
                 email: { type: string, format: email }
                 password: { type: string }
-                otp: { type: string, minLength: 6, maxLength: 6 }
+                captchaId: { type: string }
+                captchaAnswer: { type: string, minLength: 4, maxLength: 4 }
       responses:
         "200":
           description: Short-lived administrator access token
@@ -92,7 +117,7 @@ paths:
     post:
       operationId: disableUser
       summary: Disable a user account and append an audit event
-      description: Requires MFA and authentication no more than ten minutes old.
+      description: Requires authentication no more than ten minutes old.
       parameters:
         - name: userId
           in: path
@@ -203,7 +228,7 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
     Forbidden:
-      description: Account, role, email verification, or MFA policy rejected the operation
+      description: Account, role, email verification, or recent authentication policy rejected the operation
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
