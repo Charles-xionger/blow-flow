@@ -4,7 +4,7 @@
 
 ## 结论
 
-保留 TypeScript 的 Pi Agent 运行循环，最终移出 Next.js 进程，作为独立的 `apps/agent-runner` Node Worker 运行。画布操作仍由 TypeScript 画布逻辑计算；Go API 持有创作助手的身份、任务、消息、确认、资源授权、快照提交和进度状态。PostgreSQL 是权威存储，RabbitMQ 只唤醒 Runner，Redis 只通知 SSE。浏览器仍只与应用 API 通信。这里的“迁移到 Go”不要求重新实现 Pi 或把画布编辑规则复制成第二套 Go 实现。
+保留现有独立 Node Worker 中的 TypeScript Pi Agent 运行循环；后续可从 `apps/web` 目录整理到 `apps/agent-runner`，目录调整不是迁移前置。Pi 与工具之间继续使用进程内 MCP。画布操作仍由 TypeScript 画布逻辑计算；Go API 持有创作助手的身份、任务、消息、确认、资源授权、快照提交和进度状态。PostgreSQL 是权威存储，RabbitMQ 只唤醒 Worker，Redis 只通知 SSE。浏览器仍只与应用 API 通信。这里的“迁移到 Go”不要求重新实现 Pi、另建远程 MCP 服务或把画布编辑规则复制成第二套 Go 实现。
 
 Pi 当前通过 `@mariozechner/pi-agent-core` 和 `@mariozechner/pi-ai` 在 `apps/web/lib/agent/runtime.ts` 执行模型调用和工具循环；仓库固定版本为 0.73.1。`apps/web/lib/agent/service.ts` 自行实现 SQLite 任务、消息、步骤、租约和确认；`apps/web/lib/agent/mcp.ts` 使用进程内 MCP transport。普通画布编辑规则主要在浏览器的 TypeScript 代码中，Agent 专用编辑在服务端 TypeScript 的 `apps/web/lib/agent/canvas.ts` 中组合这些规则。Runner 最终保留 Pi、画布操作计算、模型适配、提示词构建与事件转换，不再直接访问 SQLite、画布数据库或生成任务数据库。Pi 上游包升级与本迁移分开验证。
 
@@ -13,9 +13,9 @@ Pi 当前通过 `@mariozechner/pi-agent-core` 和 `@mariozechner/pi-ai` 在 `app
                          │                   │
                          │ outbox            └──Redis Pub/Sub──> Go SSE
                          v
-                       RabbitMQ ──唤醒──> Node Pi Runner + TS 画布操作计算
-                                             │ 领取、心跳、事件与版本化快照提交
-                                             ├───────────────────────> Go 内部接口/MCP
+                       RabbitMQ ──唤醒──> Node Pi Worker
+                                             │ Pi ↔ 进程内 MCP ↔ TS 画布工具
+                                             ├──Go 内部接口：领取、心跳、事件、快照提交
                                              └──模型流式调用──────────> 模型供应商
 ```
 
@@ -28,7 +28,7 @@ Pi 当前通过 `@mariozechner/pi-agent-core` 和 `@mariozechner/pi-ai` 在 `app
 | Go 资源与生成模块 | 校验所有权与编辑授权、按版本提交完整快照及回执、执行生成确认与提交 | 重新实现浏览器/Agent 的画布操作算法 |
 | PostgreSQL | 权威任务、消息、步骤、确认、工具回执与 outbox | 高频 token 广播队列 |
 
-Runner 与 Go 的外部 seam 保持少量操作：`Claim(taskId)` 领取并取得运行令牌与上下文；`Heartbeat(runId)` 续租并获知停止/等待；`AppendEvents(runId, events)` 按序持久化消息和步骤；`ReadCanvas(projectId)` 读取当前快照及版本；`CommitCanvasEdit(runId, callId, baseVersion, operations, nextSnapshot)` 提交经 TypeScript 计算的编辑；`Finish(runId, outcome)` 结束本轮。其他工具通过应用内 MCP 向 Pi 暴露，MCP handler 转发到 Go 或调用画布操作计算器。内部接口使用服务身份认证；Go 从已领取的任务推导用户和项目，拒绝 Runner 自报的所有者。每次写操作检查运行令牌，旧 Runner 不得覆盖新运行。
+Worker 与 Go 的外部 seam 保持少量操作：`Claim(taskId)` 领取并取得运行令牌与上下文；`Heartbeat(runId)` 续租并获知停止/等待；`AppendEvents(runId, events)` 按序持久化消息和步骤；`ReadCanvas(projectId)` 读取当前快照及版本；`CommitCanvasEdit(runId, callId, baseVersion, operations, nextSnapshot)` 提交经 TypeScript 计算的编辑；`Finish(runId, outcome)` 结束本轮。工具仍通过现有进程内 MCP 向 Pi 暴露，MCP handler 调用 TypeScript 画布计算器或 Go 内部接口。此设计不开放 MCP 网络端点；Codex 连接活动浏览器画布属于另一项功能。内部 Go 接口使用服务身份认证；Go 从已领取的任务推导用户和项目，拒绝 Worker 自报的所有者。每次写操作检查运行令牌，旧 Worker 不得覆盖新运行。
 
 公开接口可沿用当前侧栏的 `snapshot/send/continue/answer/stop` 语义，Go 提供 `GET /v1/agent/projects/{projectId}`、`POST /v1/agent/projects/{projectId}/commands` 与 `GET /v1/agent/projects/{projectId}/events`。命令包含 `requestId`；相同 ID、相同请求返回原结果，复用 ID 改内容报冲突。SSE 发送数据库事件游标；Redis 丢通知后按游标补查。具体 JSON 字段以当前前端契约和接口测试固定，切换前不改前端。
 
@@ -56,7 +56,7 @@ Pi 只能读取服务端已提交快照。当前侧栏发消息前调用 `canvas
 
 1. **画布工具优先**：提取 TypeScript 画布操作计算器；Go 增加受保护的快照提交、权限核验和回执查询。用现有 Agent 编辑案例及浏览器历史用例做相同输入的结果比对，验证并发人工编辑、提交响应丢失、节点删除、撤销重做及不同用户隔离。此阶段不切换前端或生产 Agent。
 2. **Go 控制面**：任务/消息/事件/确认表、命令接口、领取与租约、outbox/SSE。把第一步的假任务授权换为真实运行令牌；用假 Runner 验证幂等、同项目唯一活动任务和崩溃恢复。
-3. **Node Pi Runner**：从 Next.js 提取固定版本 Pi 运行时，改为通过 Go 内部接口/MCP 操作；用假模型验证完整对话、工具调用、停止和继续。接口与逻辑测试先行，前端暂不动。
+3. **现有 Node Pi Worker 改接 Go**：保留固定版本 Pi 和进程内 MCP，把 SQLite 任务/资源访问换成 Go 内部接口；用假模型验证完整对话、工具调用、停止和继续。接口与逻辑测试先行，前端暂不动。最后再整理 Worker 的目录归属。
 4. **历史导入与切换**：只读导出 SQLite 的 Agent 消息、任务、步骤、确认和生成批次；活动任务导入为 `interrupted`，保留供应商任务 ID，绝不重新提交。停写、导入、核对后再把前端调用层切到 Go；禁止 Next.js 与 Go 同写同一 Agent 任务。
 
 验收需包含 RabbitMQ 重复/丢失通知、Runner 崩溃、租约过期、确认后断网、工具执行后回执响应丢失、人工同时编辑、目标节点删除、已有结果保护、供应商提交不明和跨用户访问。性能上分别限制单任务轮次与工具次数、模型超时、Runner 并发和事件写入频率。独立测试服务不得复用当前预览服务。
