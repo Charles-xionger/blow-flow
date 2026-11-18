@@ -23,6 +23,13 @@ func (s *deliveryStoreFake) ClaimDelivery(_ context.Context, id string) (postgre
 	s.claim.Status = s.status
 	return s.claim, true, nil
 }
+func (s *deliveryStoreFake) BeginOperation(context.Context, postgres.DeliveryClaim, string) (bool, error) {
+	return true, nil
+}
+func (s *deliveryStoreFake) RecordOperation(context.Context, postgres.DeliveryClaim, string, error) error {
+	return nil
+}
+func (s *deliveryStoreFake) DeferOperation(context.Context, postgres.DeliveryClaim) error { return nil }
 func (s *deliveryStoreFake) DueDeliveries(context.Context, int) ([]string, error) {
 	return []string{s.claim.TaskID}, nil
 }

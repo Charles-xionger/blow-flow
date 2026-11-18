@@ -79,11 +79,9 @@ func (s *Store) ClaimSubmission(ctx context.Context, id string) (Submission, boo
 			return err
 		}
 		for _, limit := range scopeLimits {
-			column := "owner_id"
-			if limit.Scope == "model" {
-				column = "model"
-			} else if limit.Scope == "connection" {
-				column = "connection_id"
+			column, err := scopeColumn(limit.Scope)
+			if err != nil {
+				return err
 			}
 			var n int64
 			if err := tx.Raw(`SELECT count(*) FROM generation_tasks WHERE `+column+`=(SELECT `+column+` FROM generation_tasks WHERE id=?) AND status IN ('submitting','running','saving','save_failed','wait_timeout','needs_review')`, id).Scan(&n).Error; err != nil {

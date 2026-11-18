@@ -55,12 +55,16 @@ func (s *Store) Create(ctx context.Context, owner, key, hash string, input gener
 		}
 		for _, limit := range limits {
 			var n int64
-			where, value := "owner_id", owner
+			where, err := scopeColumn(limit.Scope)
+			if err != nil {
+				return err
+			}
+			value := owner
 			switch limit.Scope {
 			case "model":
-				where, value = "model", input.Model
+				value = input.Model
 			case "connection":
-				where, value = "connection_id", "runninghub-international"
+				value = "runninghub-international"
 			}
 			if err := tx.Raw(`SELECT count(*) FROM generation_tasks WHERE status='queued' AND `+where+`=?`, value).Scan(&n).Error; err != nil {
 				return err
@@ -76,12 +80,17 @@ func (s *Store) Create(ctx context.Context, owner, key, hash string, input gener
 				}
 			}
 		}
-		result := tx.Exec(`INSERT INTO generation_tasks(id,owner_id,project_id,model,input_snapshot,input_hash,idempotency_key,status,created_at,updated_at) VALUES(?,?,?,?,?::jsonb,?,?,'queued',?,?) ON CONFLICT(owner_id,idempotency_key) DO NOTHING`, id, owner, input.ProjectID, input.Model, string(data), hash, key, now, now)
+		result := tx.Exec(`INSERT INTO generation_tasks(id,owner_id,project_id,node_id,model,input_snapshot,input_hash,idempotency_key,status,created_at,updated_at) VALUES(?,?,?,?,?,?::jsonb,?,?,'queued',?,?) ON CONFLICT(owner_id,idempotency_key) DO NOTHING`, id, owner, input.ProjectID, input.NodeID, input.Model, string(data), hash, key, now, now)
 		if result.Error != nil {
 			return result.Error
 		}
 		if result.RowsAffected == 0 {
 			return nil
+		}
+		if input.NodeID != "" {
+			if err := tx.Exec(`INSERT INTO generation_node_results(owner_id,project_id,node_id,task_id) VALUES(?,?,?,?) ON CONFLICT(owner_id,project_id,node_id) DO UPDATE SET task_id=excluded.task_id,result_url='',updated_at=now()`, owner, input.ProjectID, input.NodeID, id).Error; err != nil {
+				return err
+			}
 		}
 		if err := tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,stage,occurred_at) VALUES(?,'created','queued',?)`, id, now).Error; err != nil {
 			return err
@@ -92,13 +101,13 @@ func (s *Store) Create(ctx context.Context, owner, key, hash string, input gener
 		return generation.Task{}, err
 	}
 	var row struct {
-		ID, InputHash                      string
-		Status                             generation.Status
-		ProjectID, Model, ResultURL, Stage string
-		CreatedAt, UpdatedAt               time.Time
-		Version                            int64
+		ID, InputHash                              string
+		Status                                     generation.Status
+		ProjectID, NodeID, Model, ResultURL, Stage string
+		CreatedAt, UpdatedAt                       time.Time
+		Version                                    int64
 	}
-	err = s.DB.WithContext(ctx).Raw(`SELECT t.id,input_hash,status,stage,project_id,model,result_url,created_at,updated_at,COALESCE((SELECT max(id) FROM generation_task_events WHERE task_id=t.id),0) AS version FROM generation_tasks t WHERE owner_id=? AND idempotency_key=?`, owner, key).Scan(&row).Error
+	err = s.DB.WithContext(ctx).Raw(`SELECT t.id,input_hash,status,stage,project_id,node_id,model,result_url,created_at,updated_at,COALESCE((SELECT max(id) FROM generation_task_events WHERE task_id=t.id),0) AS version FROM generation_tasks t WHERE owner_id=? AND idempotency_key=?`, owner, key).Scan(&row).Error
 	if err != nil {
 		return generation.Task{}, err
 	}
@@ -108,24 +117,24 @@ func (s *Store) Create(ctx context.Context, owner, key, hash string, input gener
 	if row.ID == id {
 		s.notify(ctx, id)
 	}
-	return generation.Task{ID: row.ID, Version: row.Version, Status: row.Status, Stage: row.Stage, ProjectID: row.ProjectID, Model: row.Model, ResultURL: row.ResultURL, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}, nil
+	return generation.Task{ID: row.ID, Version: row.Version, Status: row.Status, Stage: row.Stage, ProjectID: row.ProjectID, NodeID: row.NodeID, Model: row.Model, ResultURL: row.ResultURL, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}, nil
 }
 func (s *Store) Get(ctx context.Context, id string) (generation.Task, string, error) {
 	var r struct {
-		ID, OwnerID, ProjectID, Model, ResultURL, Stage, FailureCode string
-		Percent                                                      *float64
-		Status                                                       generation.Status
-		CreatedAt, UpdatedAt                                         time.Time
-		Version                                                      int64
+		ID, OwnerID, ProjectID, NodeID, Model, ResultURL, Stage, FailureCode string
+		Percent                                                              *float64
+		Status                                                               generation.Status
+		CreatedAt, UpdatedAt                                                 time.Time
+		Version                                                              int64
 	}
-	tx := s.DB.WithContext(ctx).Raw(`SELECT t.id,owner_id,project_id,model,result_url,status,stage,percent,COALESCE(failure_code,'') AS failure_code,created_at,updated_at,COALESCE((SELECT max(id) FROM generation_task_events WHERE task_id=t.id),0) AS version FROM generation_tasks t WHERE id=?`, id).Scan(&r)
+	tx := s.DB.WithContext(ctx).Raw(`SELECT t.id,owner_id,project_id,node_id,model,result_url,status,stage,percent,COALESCE(failure_code,'') AS failure_code,created_at,updated_at,COALESCE((SELECT max(id) FROM generation_task_events WHERE task_id=t.id),0) AS version FROM generation_tasks t WHERE id=?`, id).Scan(&r)
 	if tx.Error != nil {
 		return generation.Task{}, "", tx.Error
 	}
 	if tx.RowsAffected == 0 {
 		return generation.Task{}, "", generation.ErrNotFound
 	}
-	return generation.Task{ID: r.ID, Version: r.Version, ProjectID: r.ProjectID, Model: r.Model, ResultURL: r.ResultURL, Status: r.Status, Stage: r.Stage, Percent: r.Percent, FailureCode: r.FailureCode, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}, r.OwnerID, nil
+	return generation.Task{ID: r.ID, Version: r.Version, ProjectID: r.ProjectID, NodeID: r.NodeID, Model: r.Model, ResultURL: r.ResultURL, Status: r.Status, Stage: r.Stage, Percent: r.Percent, FailureCode: r.FailureCode, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}, r.OwnerID, nil
 }
 func (s *Store) Cancel(ctx context.Context, id, owner string) (generation.Task, error) {
 	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

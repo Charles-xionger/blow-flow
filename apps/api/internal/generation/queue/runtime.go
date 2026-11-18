@@ -72,28 +72,51 @@ type SubmissionWorker struct {
 }
 
 func (w SubmissionWorker) Run(ctx context.Context) error {
-	return w.Rabbit.Consume(ctx, func(ctx context.Context, id string) error {
-		claim, ok, err := w.Store.ClaimSubmission(ctx, id)
-		if err != nil {
-			return err
+	return w.Rabbit.Consume(ctx, w.ProcessOne)
+}
+
+func (w SubmissionWorker) ProcessOne(ctx context.Context, id string) error {
+	claim, ok, err := w.Store.ClaimSubmission(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+	allowed, err := w.Store.CheckSubmission(ctx, id, claim.Token)
+	if errors.Is(err, postgres.ErrSubmitCircuitOpen) {
+		if requeueErr := w.Store.RequeueSubmission(ctx, id, claim.Token); requeueErr != nil {
+			return requeueErr
 		}
-		if !ok {
-			return nil
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return w.Store.ResolveSubmission(ctx, id, claim.Token, "", generation.ErrSubmissionRejected)
+	}
+	providerID, submitErr := w.Provider.Submit(ctx, claim.Input)
+	return w.Store.ResolveSubmission(ctx, id, claim.Token, providerID, submitErr)
+}
+
+// ProcessDue recovers queued tasks even when a published Rabbit wakeup was
+// lost. The bounded database scan also revisits tasks after capacity or grants
+// change; ClaimSubmission remains the sole authority for paid submission.
+func (w SubmissionWorker) ProcessDue(ctx context.Context) error {
+	ids, err := w.Store.DueQueued(ctx, 25)
+	if err != nil {
+		return err
+	}
+	var failures []error
+	for _, id := range ids {
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
-		allowed, err := w.Store.CheckSubmission(ctx, id, claim.Token)
-		if errors.Is(err, postgres.ErrSubmitCircuitOpen) {
-			if requeueErr := w.Store.RequeueSubmission(ctx, id, claim.Token); requeueErr != nil {
-				return requeueErr
-			}
-			return err
+		err := w.ProcessOne(ctx, id)
+		if err != nil && !errors.Is(err, postgres.ErrNoCapacity) && !errors.Is(err, postgres.ErrSubmitCircuitOpen) {
+			failures = append(failures, err)
 		}
-		if err != nil {
-			return err
-		}
-		if !allowed {
-			return w.Store.ResolveSubmission(ctx, id, claim.Token, "", generation.ErrSubmissionRejected)
-		}
-		providerID, submitErr := w.Provider.Submit(ctx, claim.Input)
-		return w.Store.ResolveSubmission(ctx, id, claim.Token, providerID, submitErr)
-	})
+	}
+	return errors.Join(failures...)
 }

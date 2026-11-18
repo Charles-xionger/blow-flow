@@ -25,7 +25,7 @@ func (s *Store) Operations(ctx context.Context, actor string) (generation.Operat
 		if err := tx.Raw(`SELECT COALESCE(stage,'') AS stage,COALESCE(avg(extract(epoch FROM (next_at-occurred_at))),0) AS average_seconds,count(*) AS samples FROM (SELECT stage,occurred_at,lead(occurred_at) OVER (PARTITION BY task_id ORDER BY id) AS next_at FROM generation_task_events) e WHERE next_at IS NOT NULL GROUP BY stage ORDER BY stage`).Scan(&out.Stages).Error; err != nil {
 			return err
 		}
-		if err := tx.Raw(`SELECT event_type AS code,count(*) AS count FROM generation_task_events WHERE event_type IN ('rejected','submission_uncertain','provider_failed','save_retry','save_unavailable','wait_timeout') GROUP BY event_type ORDER BY event_type`).Scan(&out.Failures).Error; err != nil {
+		if err := tx.Raw(`SELECT event_type AS code,count(*) AS count FROM generation_task_events WHERE event_type IN ('rejected','submission_uncertain','provider_failed','query_retry','query_exhausted','save_retry','save_exhausted','save_unavailable','wait_timeout') GROUP BY event_type ORDER BY event_type`).Scan(&out.Failures).Error; err != nil {
 			return err
 		}
 		if err := tx.Raw(`SELECT worker_id AS id,seen_at FROM generation_worker_heartbeats ORDER BY seen_at DESC`).Scan(&out.Workers).Error; err != nil {
