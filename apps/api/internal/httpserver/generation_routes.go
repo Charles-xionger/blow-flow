@@ -130,6 +130,12 @@ func generationError(c *gin.Context, err error) {
 		status, code = 404, "not_found"
 	case errors.Is(err, generation.ErrConflict):
 		status, code = 409, "idempotency_conflict"
+	case errors.Is(err, generation.ErrUserQueueFull):
+		status, code = 429, "user_queue_full"
+	case errors.Is(err, generation.ErrModelQueueFull):
+		status, code = 429, "model_queue_full"
+	case errors.Is(err, generation.ErrConnectionQueueFull):
+		status, code = 503, "connection_queue_full"
 	}
 	c.JSON(status, errorBody(c, code))
 }

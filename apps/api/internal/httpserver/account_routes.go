@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"blow-flow/api/internal/account"
+	"blow-flow/api/internal/generation"
 	"github.com/gin-gonic/gin"
 )
 
@@ -28,6 +30,21 @@ func registerAccountRoutes(router *gin.Engine, dependencies Dependencies) {
 	})
 
 	admin := v1.Group("/admin")
+	admin.GET("/generation/operations", func(c *gin.Context) {
+		service, ok := dependencies.Generation.(interface {
+			Operations(context.Context, generation.Actor) (generation.Operations, error)
+		})
+		if !ok {
+			c.JSON(503, errorBody(c, "service_unavailable"))
+			return
+		}
+		result, err := service.Operations(c.Request.Context(), generationActor(c))
+		if err != nil {
+			generationError(c, err)
+			return
+		}
+		c.JSON(200, result)
+	})
 	admin.GET("/users", func(c *gin.Context) {
 		limit, err := parseLimit(c.Query("limit"))
 		if err != nil {

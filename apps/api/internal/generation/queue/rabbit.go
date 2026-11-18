@@ -77,7 +77,7 @@ func (r *Rabbit) Consume(ctx context.Context, process func(context.Context, stri
 			err := process(ctx, string(msg.Body))
 			if err != nil {
 				_ = msg.Nack(false, true)
-				if errors.Is(err, postgres.ErrNoCapacity) {
+				if errors.Is(err, postgres.ErrNoCapacity) || errors.Is(err, postgres.ErrSubmitCircuitOpen) {
 					select {
 					case <-ctx.Done():
 						return nil

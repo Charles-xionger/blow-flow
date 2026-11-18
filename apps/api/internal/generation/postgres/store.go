@@ -32,6 +32,50 @@ func (s *Store) Create(ctx context.Context, owner, key, hash string, input gener
 		return generation.Task{}, err
 	}
 	err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Serialize admissions across API instances on the connection's limit row.
+		var priorHash string
+		if err := tx.Raw(`SELECT input_hash FROM generation_tasks WHERE owner_id=? AND idempotency_key=?`, owner, key).Scan(&priorHash).Error; err != nil {
+			return err
+		}
+		if priorHash != "" {
+			if priorHash != hash {
+				return generation.ErrConflict
+			}
+			return nil
+		}
+		var limits []struct {
+			Scope     string
+			MaxQueued int
+		}
+		if err := tx.Raw(`SELECT scope,max_queued FROM generation_queue_limits WHERE (scope='user' AND key IN (?, '*')) OR (scope='model' AND key IN (?, '*')) OR (scope='connection' AND key IN ('runninghub-international','*')) ORDER BY scope,key FOR UPDATE`, owner, input.Model).Scan(&limits).Error; err != nil {
+			return err
+		}
+		if len(limits) == 0 {
+			return errors.New("missing generation queue limits")
+		}
+		for _, limit := range limits {
+			var n int64
+			where, value := "owner_id", owner
+			switch limit.Scope {
+			case "model":
+				where, value = "model", input.Model
+			case "connection":
+				where, value = "connection_id", "runninghub-international"
+			}
+			if err := tx.Raw(`SELECT count(*) FROM generation_tasks WHERE status='queued' AND `+where+`=?`, value).Scan(&n).Error; err != nil {
+				return err
+			}
+			if n >= int64(limit.MaxQueued) {
+				switch limit.Scope {
+				case "user":
+					return generation.ErrUserQueueFull
+				case "model":
+					return generation.ErrModelQueueFull
+				default:
+					return generation.ErrConnectionQueueFull
+				}
+			}
+		}
 		result := tx.Exec(`INSERT INTO generation_tasks(id,owner_id,project_id,model,input_snapshot,input_hash,idempotency_key,status,created_at,updated_at) VALUES(?,?,?,?,?::jsonb,?,?,'queued',?,?) ON CONFLICT(owner_id,idempotency_key) DO NOTHING`, id, owner, input.ProjectID, input.Model, string(data), hash, key, now, now)
 		if result.Error != nil {
 			return result.Error

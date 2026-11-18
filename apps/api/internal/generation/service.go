@@ -23,11 +23,14 @@ const (
 )
 
 var (
-	ErrInvalid            = errors.New("invalid generation input")
-	ErrForbidden          = errors.New("forbidden")
-	ErrNotFound           = errors.New("task not found")
-	ErrConflict           = errors.New("idempotency conflict")
-	ErrSubmissionRejected = errors.New("provider rejected submission before execution")
+	ErrInvalid             = errors.New("invalid generation input")
+	ErrForbidden           = errors.New("forbidden")
+	ErrNotFound            = errors.New("task not found")
+	ErrConflict            = errors.New("idempotency conflict")
+	ErrSubmissionRejected  = errors.New("provider rejected submission before execution")
+	ErrUserQueueFull       = errors.New("user generation queue full")
+	ErrModelQueueFull      = errors.New("model generation queue full")
+	ErrConnectionQueueFull = errors.New("connection generation queue full")
 )
 
 type Actor struct {
@@ -61,6 +64,34 @@ type Event struct {
 	Type       string    `json:"type"`
 	Stage      string    `json:"stage,omitempty"`
 	OccurredAt time.Time `json:"occurredAt"`
+}
+type Operations struct {
+	QueueLength       int64             `json:"queueLength"`
+	OldestWaitSeconds float64           `json:"oldestWaitSeconds"`
+	NeedsReview       int64             `json:"needsReview"`
+	Stages            []StageMetric     `json:"stages"`
+	Failures          []FailureMetric   `json:"failures"`
+	Workers           []WorkerHeartbeat `json:"workers"`
+	Circuits          []CircuitStatus   `json:"circuits"`
+}
+type StageMetric struct {
+	Stage          string  `json:"stage"`
+	AverageSeconds float64 `json:"averageSeconds"`
+	Samples        int64   `json:"samples"`
+}
+type FailureMetric struct {
+	Code  string `json:"code"`
+	Count int64  `json:"count"`
+}
+type WorkerHeartbeat struct {
+	ID     string    `json:"id"`
+	SeenAt time.Time `json:"seenAt"`
+}
+type CircuitStatus struct {
+	ConnectionID        string `json:"connectionId"`
+	Operation           string `json:"operation"`
+	State               string `json:"state"`
+	ConsecutiveFailures int    `json:"consecutiveFailures"`
 }
 type Resources interface {
 	OwnsProject(context.Context, string, string) (bool, error)
@@ -147,6 +178,18 @@ func (s Service) Resume(ctx context.Context, a Actor, id string) (Task, error) {
 		return Task{}, err
 	}
 	return s.Get(ctx, a, id)
+}
+func (s Service) Operations(ctx context.Context, a Actor) (Operations, error) {
+	if !a.Admin || a.ID == "" {
+		return Operations{}, ErrForbidden
+	}
+	source, ok := s.Store.(interface {
+		Operations(context.Context, string) (Operations, error)
+	})
+	if !ok {
+		return Operations{}, ErrNotFound
+	}
+	return source.Operations(ctx, a.ID)
 }
 func NewID() (string, error) {
 	var b [16]byte

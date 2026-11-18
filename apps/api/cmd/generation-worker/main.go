@@ -2,6 +2,7 @@ package main
 
 import (
 	"blow-flow/api/internal/database"
+	"blow-flow/api/internal/generation"
 	"blow-flow/api/internal/generation/postgres"
 	"blow-flow/api/internal/generation/progress"
 	"blow-flow/api/internal/generation/queue"
@@ -34,6 +35,10 @@ func run() error {
 	defer stop()
 	publisher := queue.Publisher{DB: db, Rabbit: rabbit}
 	store := postgres.New(db)
+	workerID, err := generation.NewID()
+	if err != nil {
+		return err
+	}
 	if raw := os.Getenv("REDIS_URL"); raw != "" {
 		client, dialErr := progress.Dial(raw)
 		if dialErr != nil {
@@ -63,6 +68,9 @@ func run() error {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
+		if err := store.Heartbeat(ctx, workerID); err != nil && ctx.Err() == nil {
+			slog.Warn("worker heartbeat retry", "reason", err.Error())
+		}
 		if err := store.RecoverExpiredSubmissions(ctx); err != nil {
 			slog.Warn("submission recovery retry", "reason", err.Error())
 		}

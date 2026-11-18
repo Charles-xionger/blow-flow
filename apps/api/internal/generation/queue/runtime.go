@@ -4,6 +4,7 @@ import (
 	"blow-flow/api/internal/generation"
 	"blow-flow/api/internal/generation/postgres"
 	"context"
+	"errors"
 	"gorm.io/gorm"
 	"time"
 )
@@ -80,6 +81,12 @@ func (w SubmissionWorker) Run(ctx context.Context) error {
 			return nil
 		}
 		allowed, err := w.Store.CheckSubmission(ctx, id, claim.Token)
+		if errors.Is(err, postgres.ErrSubmitCircuitOpen) {
+			if requeueErr := w.Store.RequeueSubmission(ctx, id, claim.Token); requeueErr != nil {
+				return requeueErr
+			}
+			return err
+		}
 		if err != nil {
 			return err
 		}
