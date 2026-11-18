@@ -24,6 +24,11 @@ test('assistant persists questions, references and background replies after clos
  const persisted=await (await page.request.get(`/api/agent/${projectId}`)).json();
  expect(persisted.messages[0].references).toContainEqual({url:assetUrl,assetId:'images/reference.png',name:'character.png',mimeType:'image/png'});
  await page.getByRole('button',{name:'儿童',exact:true}).click();await expect(page.getByLabel('助手消息')).toContainText('收到：儿童');
+ const toolActivities=page.getByRole('group',{name:'工具调用',exact:true});
+ await expect(toolActivities).toHaveCount(2);
+ await expect(toolActivities.first()).toContainText('已调用 ask_question');
+ await expect(toolActivities.last()).toContainText('已调用 read_canvas');
+ await expect(toolActivities.last()).toContainText('1 个调用');
  await page.getByLabel('创作要求').fill('在后台继续');await page.getByRole('button',{name:'发送',exact:true}).click();await expect(page.getByLabel('助手消息')).toContainText('在后台继续');
  await page.close();const reopened=await context.newPage();await reopened.goto(url);await reopened.getByRole('button',{name:'创作助手',exact:true}).click();await expect(reopened.getByLabel('助手消息')).toContainText('收到：在后台继续');
  await reopened.getByLabel('创作要求').fill('请提问');await reopened.getByRole('button',{name:'发送',exact:true}).click();await expect(reopened.getByText('故事面向谁？')).toBeVisible();await reopened.getByRole('button',{name:'停止',exact:true}).click();await expect(reopened.getByRole('status').filter({hasText:'已停止'})).toBeVisible();
@@ -164,12 +169,19 @@ test('assistant-ui composer selects skills with dollar or slash, renders tools a
  await input.pressSequentially(' 请写一个短场景');
  await page.getByRole('button',{name:'发送',exact:true}).click();
  await expect(page.getByLabel('助手消息')).toContainText('技能：剧本创作');
- const readCanvasTool=page.getByLabel('工具调用').filter({hasText:'read_canvas'});
- const readCanvasResult=readCanvasTool.getByLabel('工具结果');
- await expect(readCanvasTool).toContainText('已完成');
- await expect(readCanvasResult).toBeHidden();
- await readCanvasTool.locator('summary').click();
- await expect(readCanvasResult).toContainText('nodes');
+ const toolActivity=page.getByRole('group',{name:'工具调用',exact:true}).filter({hasText:'read_canvas'});
+ await expect(toolActivity).toContainText('已调用 read_canvas');
+ await expect(toolActivity).toContainText('1 个调用');
+ await expect(toolActivity.getByRole('list',{name:'工具调用列表'})).toBeHidden();
+ await expect(toolActivity.getByLabel('工具结果')).toHaveCount(0);
+ await toolActivity.locator('summary').click();
+ await expect(toolActivity.getByRole('list',{name:'工具调用列表'})).toBeVisible();
+ await expect(toolActivity.getByRole('listitem')).toContainText(['read_canvas']);
+ await input.fill('测试分段工具');
+ await page.getByRole('button',{name:'发送',exact:true}).click();
+ await expect(page.getByLabel('助手消息')).toContainText('开始读取画布');
+ await expect(page.getByLabel('助手消息')).toContainText('收到：测试分段工具');
+ await expect(page.getByRole('group',{name:'工具调用',exact:true})).toHaveCount(2);
 
  await input.fill('/');
  const slashSkills=page.getByRole('listbox',{name:'选择创作技能'});

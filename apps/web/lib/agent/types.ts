@@ -10,6 +10,8 @@ export interface AgentReference {
 export interface AgentMessage {
     id: string;
     taskId: string;
+    /** Worker run that produced an assistant reply; used to keep tool activity with its turn. */
+    runId?: string;
     role: 'user' | 'assistant';
     text: string;
     references: AgentReference[];
@@ -25,6 +27,9 @@ export interface AgentQuestion {
 }
 export interface AgentStep {
     id: string;
+    /** Worker run that started this call; absent on records created before turn grouping. */
+    runId?: string;
+    createdAt?: number;
     name: string;
     args: Record<string, unknown>;
     result?: unknown;

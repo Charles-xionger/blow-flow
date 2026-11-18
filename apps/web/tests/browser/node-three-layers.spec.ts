@@ -655,9 +655,12 @@ test('图生图：生成中节点展示区显示进度，控制台的按钮不�
   await expect(panel.getByRole('button', { name: '生成中' })).toBeDisabled();
 });
 
-const videoAsset = 'https://video-fixture.test/result.mp4';
-async function openVideoNode(page: Page, request: APIRequestContext, type: 'textToVideo' | 'imageToVideo' | 'startEndToVideo', data: Record<string, unknown> = {}, sources: Record<string, unknown>[] = []) {
-  await page.route('https://video-fixture.test/**', route => route.fulfill({ path: 'tests/fixtures/h3/reference.mp4', contentType: 'video/mp4', headers: { 'access-control-allow-origin': '*' } }));
+const videoAsset = 'https://video-fixture.oss-cn-hangzhou.aliyuncs.com/result.mp4';
+async function openVideoNode(page: Page, request: APIRequestContext, type: 'textToVideo' | 'imageToVideo' | 'startEndToVideo', data: Record<string, unknown> = {}, sources: Record<string, unknown>[] = [], select = true) {
+  await page.route('https://video-fixture.oss-cn-hangzhou.aliyuncs.com/**', route => {
+    const snapshot = new URL(route.request().url()).searchParams.has('x-oss-process');
+    return route.fulfill({ path: snapshot ? 'tests/fixtures/h3/reference.png' : 'tests/fixtures/h3/reference.mp4', contentType: snapshot ? 'image/png' : 'video/mp4', headers: { 'access-control-allow-origin': '*' } });
+  });
   const id = crypto.randomUUID();
   expect((await request.put(`/api/workflow/${id}`, { data: { id, requestId: crypto.randomUUID(), baseVersion: 0, snapshot: { name: '视频', nodes: [
     { id: 'video', type, position: { x: 520, y: 120 }, data: { type, label: '视频', model: type === 'textToVideo' ? 'Sora 2' : 'sora-2', prompt: '海浪', ...data } }, ...sources,
@@ -667,7 +670,7 @@ async function openVideoNode(page: Page, request: APIRequestContext, type: 'text
   const node = page.locator('.react-flow__node[data-id="video"]');
   await expect(page.getByRole('region', { name: '节点控制台' })).toHaveCount(0);
   await expect(page.locator('.tiptap')).toHaveCount(0);
-  await node.click();
+  if (select) await node.click();
   return { node, panel: page.getByRole('region', { name: '节点控制台' }), toolbar: page.getByRole('toolbar', { name: '节点工具栏' }) };
 }
 const captureVideo = async (page: Page, path: string, response: Record<string, unknown> = { success: false, error: '测试已捕获' }) => {
@@ -707,12 +710,25 @@ test('文生视频：提示词为空时不能运行', async ({ page, request }) 
   await expect(panel.getByRole('button', { name: '生成', exact: true })).toBeDisabled();
 });
 
-test('视频节点工具栏：没有结果时不可用，有结果时可以预览和下载；展示区保留播放器', async ({ page, request }) => {
+test('视频节点工具栏：节点展示区先加载首帧，悬停播放并在移出后停止；仍可预览和下载', async ({ page, request }) => {
   const empty = await openVideoNode(page, request, 'textToVideo');
   for (const name of ['预览', '下载']) await expect(empty.toolbar.getByRole('button', { name, exact: true })).toBeDisabled();
   await expect(empty.toolbar.getByRole('button', { name: '保存为角色' })).toHaveCount(0);
-  const { node, toolbar } = await openVideoNode(page, request, 'imageToVideo', { videoSrc: videoAsset });
-  await expect(node.locator('video')).toHaveAttribute('controls', '');
+  const videoRequests: string[] = [];
+  page.on('request', request => { if (request.url() === videoAsset) videoRequests.push(request.url()); });
+  const { node, toolbar } = await openVideoNode(page, request, 'imageToVideo', { videoSrc: videoAsset }, [], false);
+  const cover = node.getByRole('img', { name: '视频封面' });
+  await expect(cover).toHaveAttribute('src', `${videoAsset}?x-oss-process=video/snapshot,t_0,f_jpg`);
+  await expect(node.locator('video')).toHaveCount(0);
+  expect(videoRequests).toEqual([]);
+  await cover.hover();
+  await expect(node.locator('video')).toHaveAttribute('src', videoAsset);
+  await expect.poll(() => videoRequests.length).toBeGreaterThan(0);
+  await page.mouse.move(5, 5);
+  await expect(node.locator('video')).toHaveCount(0);
+  await expect(cover).toBeVisible();
+  await node.getByText('视频', { exact: true }).first().click();
+  await expect(toolbar).toBeVisible();
   await toolbar.getByRole('button', { name: '预览', exact: true }).click();
   await expect(page.locator('body > div.fixed video')).toHaveAttribute('src', videoAsset);
   await page.keyboard.press('Escape');

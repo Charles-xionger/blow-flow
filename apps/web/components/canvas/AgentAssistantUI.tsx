@@ -12,12 +12,11 @@ import {
   type AppendMessage,
   type TextMessagePartProps,
   type ThreadMessageLike,
-  type ToolCallMessagePartProps,
 } from '@assistant-ui/react';
 import { ArrowDown, ArrowUp, Check, ChevronRight, Copy, FileText, ImagePlus, Loader2, RotateCcw, Square, X } from 'lucide-react';
 import { useMemo, useState, type ReactNode } from 'react';
 import { BrandMark } from '@/components/ui/brand-mark';
-import type { AgentMessage, AgentReference, AgentTask } from '@/lib/agent/types';
+import type { AgentMessage, AgentReference, AgentStep, AgentTask } from '@/lib/agent/types';
 import type { SkillSummary } from '@/lib/agent/skills';
 import { AgentComposerEditor, sameSkillSelection } from './AgentComposerEditor';
 import styles from './AgentSidebar.module.css';
@@ -34,48 +33,87 @@ function messageStatus(task?: AgentTask): ThreadMessageLike['status'] {
   return { type: 'complete', reason: 'stop' };
 }
 
-function toolParts(task?: AgentTask) {
-  return (task?.steps ?? []).map(step => ({
-    type: 'tool-call' as const,
-    toolCallId: step.id,
-    toolName: step.name,
-    argsText: JSON.stringify(step.args),
-    ...(step.status === 'completed' ? { result: step.result ?? { ok: true } } : {}),
-    ...(step.status === 'failed' ? { result: step.result ?? { error: '工具执行失败' }, isError: true } : {}),
-  }));
+type ToolActivity = Pick<AgentStep, 'id' | 'name' | 'status'>;
+const emptyToolActivities: ToolActivity[] = [];
+const legacyRun = Symbol('legacy-run');
+type RunKey = string | typeof legacyRun;
+
+function toolActivities(steps: AgentStep[] = []): ToolActivity[] {
+  return steps.map(({ id, name, status }) => ({ id, name, status }));
 }
 
 function threadMessages(messages: AgentMessage[], tasks: AgentTask[]): ThreadMessageLike[] {
   const byTask = new Map(tasks.map(task => [task.id, task]));
   const latestByTask = new Map<string, AgentMessage>();
-  for (const message of messages) latestByTask.set(message.taskId, message);
+  const latestAssistantByRun = new Map<string, Map<string, string>>();
+  const consumedRuns = new Map<string, Set<RunKey>>();
+  const markRunConsumed = (taskId: string, runKey: RunKey) => {
+    const runs = consumedRuns.get(taskId) ?? new Set<RunKey>();
+    runs.add(runKey);
+    consumedRuns.set(taskId, runs);
+  };
+  for (const message of messages) {
+    latestByTask.set(message.taskId, message);
+    if (message.role === 'assistant' && message.runId) {
+      const runs = latestAssistantByRun.get(message.taskId) ?? new Map<string, string>();
+      runs.set(message.runId, message.id);
+      latestAssistantByRun.set(message.taskId, runs);
+    }
+  }
   const converted = messages.map(message => {
     const task = byTask.get(message.taskId);
-    const tools = message.role === 'assistant' && latestByTask.get(message.taskId)?.id === message.id ? toolParts(task) : [];
+    let tools: ToolActivity[] = [];
+    if (message.role === 'assistant' && message.runId && latestAssistantByRun.get(message.taskId)?.get(message.runId) === message.id) {
+      tools = toolActivities(task?.steps.filter(step => step.runId === message.runId));
+      markRunConsumed(message.taskId, message.runId);
+    } else if (message.role === 'assistant' && latestByTask.get(message.taskId)?.id === message.id) {
+      tools = toolActivities(task?.steps.filter(step => !step.runId));
+      if (tools.length) markRunConsumed(message.taskId, legacyRun);
+    }
     return {
       id: message.id,
       role: message.role,
       createdAt: new Date(message.createdAt),
       status: message.role === 'assistant' ? messageStatus(task) : undefined,
-      content: [...tools, { type: 'text' as const, text: message.text }] as Exclude<ThreadMessageLike['content'], string>,
-      metadata: { custom: { references: message.references, taskId: message.taskId } },
+      content: [{ type: 'text' as const, text: message.text }],
+      metadata: { custom: { references: message.references, taskId: message.taskId, tools } },
     } satisfies ThreadMessageLike;
   });
   for (const task of tasks) {
-    if (latestByTask.get(task.id)?.role === 'assistant' || (!task.steps.length && task.status !== 'failed')) continue;
-    converted.push({
-      id: `task-status-${task.id}`,
-      role: 'assistant',
-      createdAt: new Date(task.createdAt),
-      status: messageStatus(task),
-      content: [
-        ...toolParts(task),
-        ...(task.error ? [{ type: 'text' as const, text: task.error }] : []),
-      ] as Exclude<ThreadMessageLike['content'], string>,
-      metadata: { custom: { taskId: task.id, references: [] } },
-    });
+    const groups = new Map<RunKey, AgentStep[]>();
+    for (const step of task.steps) {
+      const runId = step.runId ?? legacyRun;
+      if (consumedRuns.get(task.id)?.has(runId)) continue;
+      const group = groups.get(runId) ?? [];
+      group.push(step);
+      groups.set(runId, group);
+    }
+    const orphanRuns = [...groups.entries()];
+    for (const [runId, steps] of orphanRuns) {
+      const latest = latestByTask.get(task.id);
+      const createdAt = steps[0].createdAt ?? (runId === legacyRun && latest ? latest.createdAt + 1 : task.createdAt);
+      converted.push({
+        id: `task-tools-${task.id}-${runId === legacyRun ? 'legacy' : `run-${runId}`}`,
+        role: 'assistant',
+        createdAt: new Date(createdAt),
+        status: messageStatus(task),
+        content: task.error && runId === orphanRuns.at(-1)?.[0] ? [{ type: 'text' as const, text: task.error }] : [],
+        metadata: { custom: { taskId: task.id, references: [], tools: toolActivities(steps) } },
+      });
+    }
+    if (!orphanRuns.length && latestByTask.get(task.id)?.role !== 'assistant' && task.status === 'failed') {
+      const latest = latestByTask.get(task.id);
+      converted.push({
+        id: `task-status-${task.id}`,
+        role: 'assistant',
+        createdAt: new Date((latest?.createdAt ?? task.createdAt) + 1),
+        status: messageStatus(task),
+        content: task.error ? [{ type: 'text' as const, text: task.error }] : [],
+        metadata: { custom: { taskId: task.id, references: [], tools: [] } },
+      });
+    }
   }
-  return converted;
+  return converted.toSorted((left, right) => left.createdAt.getTime() - right.createdAt.getTime());
 }
 
 function SkillText({ text }: TextMessagePartProps) {
@@ -90,11 +128,36 @@ function SkillText({ text }: TextMessagePartProps) {
   return <p>{parts}</p>;
 }
 
-function ToolCall({ toolName, result, isError }: ToolCallMessagePartProps) {
-  const state = result === undefined ? '执行中' : isError ? '失败' : '已完成';
-  return <details aria-label="工具调用" className={styles.toolCall} data-error={isError || undefined}>
-    <summary><ChevronRight aria-hidden="true" className={styles.toolDisclosure} size={13}/>{result === undefined ? <Loader2 size={13} className="animate-spin"/> : isError ? <X size={13}/> : <Check size={13}/>}<span>{toolName}</span><small>{state}</small></summary>
-    {result !== undefined ? <pre aria-label="工具结果" className={styles.toolResult}>{JSON.stringify(result, null, 2)}</pre> : null}
+function ToolStatusIcon({ status }: Pick<ToolActivity, 'status'>) {
+  if (status === 'running') return <Loader2 aria-hidden="true" size={13} className="animate-spin"/>;
+  if (status === 'failed') return <X aria-hidden="true" size={13}/>;
+  return <Check aria-hidden="true" size={13}/>;
+}
+
+function ToolActivityGroup({ tools }: { tools: ToolActivity[] }) {
+  if (!tools.length) return null;
+  const latest = tools.at(-1)!;
+  const failed = tools.findLast(tool => tool.status === 'failed');
+  const highlighted = failed ?? latest;
+  const label = highlighted.status === 'running'
+    ? `正在调用 ${highlighted.name}`
+    : highlighted.status === 'failed'
+      ? `${highlighted.name} 调用失败`
+      : `已调用 ${highlighted.name}`;
+  return <details aria-label="工具调用" className={styles.toolActivity} data-error={failed ? true : undefined}>
+    <summary>
+      <ChevronRight aria-hidden="true" className={styles.toolDisclosure} size={13}/>
+      <ToolStatusIcon status={highlighted.status}/>
+      <span>{label}</span>
+      <small>{tools.length} 个调用</small>
+    </summary>
+    <div aria-label="工具调用列表" role="list">
+      {tools.map(tool => <p key={tool.id} role="listitem">
+        <ToolStatusIcon status={tool.status}/>
+        <span>{tool.name}</span>
+        <small>{tool.status === 'running' ? '执行中' : tool.status === 'failed' ? '失败' : '已完成'}</small>
+      </p>)}
+    </div>
   </details>;
 }
 
@@ -102,13 +165,15 @@ function ChatMessage() {
   const role = useAuiState(state => state.message.role);
   const createdAt = useAuiState(state => state.message.createdAt);
   const references = useAuiState(state => (state.message.metadata.custom?.references as AgentReference[] | undefined) ?? emptyReferences);
+  const tools = useAuiState(state => (state.message.metadata.custom?.tools as ToolActivity[] | undefined) ?? emptyToolActivities);
   return <MessagePrimitive.Root className={role === 'user' ? styles.userMessage : styles.assistantMessage}>
     <div className={styles.messageLabel}>
       {role === 'assistant' ? <BrandMark size={16}/> : null}<span>{role === 'user' ? '你' : '创作助手'}</span>
       <time dateTime={createdAt.toISOString()}>{createdAt.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time>
     </div>
     <div className={styles.messageBody}>
-      <MessagePrimitive.Parts components={{ Text: SkillText, tools: { Fallback: ToolCall } }}/>
+      <ToolActivityGroup tools={tools}/>
+      <MessagePrimitive.Parts components={{ Text: SkillText }}/>
       {references.length > 0 ? <div className={styles.references}>{references.map((reference, index) => <span key={index}>{reference.nodeId ? <FileText size={12}/> : <ImagePlus size={12}/>}参考：{reference.name || reference.nodeId || '图片'}</span>)}</div> : null}
     </div>
     <ActionBarPrimitive.Root className={styles.messageActions}>

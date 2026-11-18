@@ -44,24 +44,19 @@
 .references > span, .references button { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 4px 8px; border: 1px solid var(--border); border-radius: 7px; font-size: 10px; color: var(--muted-foreground); background: var(--background); overflow-wrap: anywhere; }
 .references button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .references svg { flex-shrink: 0; }
-.steps { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 16px; color: var(--muted-foreground); font-size: 11px; }
-.steps summary { display: flex; align-items: center; gap: 8px; padding: 10px 12px; cursor: pointer; list-style: none; }
-.steps summary::-webkit-details-marker { display: none; }
-.steps summary span { flex: 1; }
-.steps[open] summary > svg:last-child { transform: rotate(180deg); }
-.steps > div { padding: 0 12px 8px; }
-.steps p { display: flex; align-items: center; gap: 8px; padding: 6px 0; overflow-wrap: anywhere; }
-.steps p span { flex: 1; min-width: 0; }
-.steps p svg { flex-shrink: 0; }
-.toolCall { padding: 8px 10px; margin: 6px 0; border: 1px solid var(--border); border-radius: 9px; color: var(--muted-foreground); font-size: 11px; }
-.toolCall summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; }
-.toolCall summary::-webkit-details-marker { display: none; }
+.toolActivity { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 12px; color: var(--muted-foreground); font-size: 11px; }
+.toolActivity summary { display: flex; align-items: center; gap: 8px; padding: 9px 10px; cursor: pointer; list-style: none; }
+.toolActivity summary::-webkit-details-marker { display: none; }
+.toolActivity summary span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toolActivity summary small, .toolActivity p small { flex-shrink: 0; font-size: 10px; }
 .toolDisclosure { flex-shrink: 0; transition: transform 120ms ease; }
-.toolCall[open] .toolDisclosure { transform: rotate(90deg); }
-.toolCall span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.toolCall small { font-size: 10px; }
-.toolCall[data-error='true'] { color: var(--destructive); }
-.toolResult { margin: 6px 0 0; max-height: 8rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; color: var(--muted-foreground); }
+.toolActivity[open] .toolDisclosure { transform: rotate(90deg); }
+.toolActivity > div { padding: 0 10px 8px; border-top: 1px solid var(--border); }
+.toolActivity p { display: flex; align-items: center; gap: 8px; padding: 7px 0; overflow-wrap: anywhere; }
+.toolActivity p + p { border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+.toolActivity p span { flex: 1; min-width: 0; }
+.toolActivity svg { flex-shrink: 0; }
+.toolActivity[data-error='true'] summary { color: var(--destructive); }
 .progress { padding: 12px; margin-bottom: 12px; border-radius: 10px; background: var(--muted); font-size: 11px; line-height: 1.8; overflow-wrap: anywhere; }
 .question { padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--muted); line-height: 1.7; overflow-wrap: anywhere; }
 .question > p { margin-bottom: 10px; }

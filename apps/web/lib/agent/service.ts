@@ -88,7 +88,7 @@ export class AgentService {
         }[]).map(r => JSON.parse(r.data)), messages: (this.db.prepare('SELECT data FROM agent_messages WHERE project_id=? ORDER BY rowid').all(projectId) as {
             data: string;
         }[]).map(r => JSON.parse(r.data)) }; }
-    private message(task: AgentTask, role: 'user' | 'assistant', text: string, references: AgentReference[] = []) { const message: AgentMessage = { id: randomUUID(), taskId: task.id, role, text, references, createdAt: Date.now() }; this.db.prepare('INSERT INTO agent_messages VALUES(?,?,?,?)').run(message.id, task.projectId, task.id, JSON.stringify(message)); return message; }
+    private message(task: AgentTask, role: 'user' | 'assistant', text: string, references: AgentReference[] = []) { const message: AgentMessage = { id: randomUUID(), taskId: task.id, ...(role === 'assistant' && task.runId ? {runId:task.runId} : {}), role, text, references, createdAt: Date.now() }; this.db.prepare('INSERT INTO agent_messages VALUES(?,?,?,?)').run(message.id, task.projectId, task.id, JSON.stringify(message)); return message; }
     private request(projectId: string, requestId: string, input: unknown, apply: () => AgentTask) {
         if (!requestId || requestId.length > 200)
             throw new Error('Request identity required');
@@ -185,7 +185,7 @@ export class AgentService {
             }
             if (!this.isExecuting(task)) throw new Error('Task is not running');
             if (existing) existing.status = 'running';
-            else task.steps.push({id:callId, name, args, status:'running'});
+            else task.steps.push({id:callId, runId:task.runId, createdAt:Date.now(), name, args, status:'running'});
             this.save(task);
             return {task, completed:false};
         }).immediate();

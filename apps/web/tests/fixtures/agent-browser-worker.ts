@@ -29,6 +29,7 @@ async function main(){for(;;){const worked=await service.runNext(async c=>{
   }
   if(input.text.startsWith('测试局部整理')) await c.tool('canvas-layout', 'layout_canvas', { ids: ['shot-1', 'shot-2'], direction: 'DOWN' });
 
+  if(input.text==='测试分段工具')c.reply('开始读取画布');
   const canvas=await c.tool(`canvas-${c.task.steps.length}`,'read_canvas',{}) as {nodes:unknown[]};
   c.reply(`已读取 ${canvas.nodes.length} 个节点；收到：${input.text}`);
 });await generationWorker.tick();if(!worked)await new Promise(resolve=>setTimeout(resolve,100));}}
