@@ -12,6 +12,7 @@ type Account = { id: string; email: string; role: string; status: string; create
 type AuditEvent = { id: string; action: string; actorId: string; targetId: string; occurredAt: string }
 
 export function AdminApp() {
+  const preview = import.meta.env.DEV && new URLSearchParams(window.location.search).has('preview')
   const [session, setSession] = useState<User | null>(null)
   const [account, setAccount] = useState<Account | null>(null)
   const [section, setSection] = useState<Section>('overview')
@@ -23,6 +24,7 @@ export function AdminApp() {
   useEffect(() => {
     let active = true
     async function load() {
+      if (preview) { setLoading(false); return }
       if (!auth) { setError('请配置托管身份服务与 API 地址。'); setLoading(false); return }
       try {
         const current = await initialSession()
@@ -35,7 +37,7 @@ export function AdminApp() {
     }
     void load()
     return () => { active = false }
-  }, [])
+  }, [preview])
 
   useEffect(() => {
     if (!auth || !session) return
@@ -70,7 +72,7 @@ export function AdminApp() {
   }, [session, section])
 
   if (loading) return <div className="grid min-h-svh place-items-center">正在验证管理员身份…</div>
-  if (!session || !account) return <div className="grid min-h-svh place-items-center p-6"><Card className="w-full max-w-md"><CardHeader><CardTitle>生成运营后台</CardTitle><CardDescription>{error || '请使用管理员账户登录并完成 MFA。'}</CardDescription></CardHeader><CardContent>{auth && <Button onClick={() => void signIn()}>管理员登录</Button>}</CardContent></Card></div>
+  if ((!session || !account) && !preview) return <div className="grid min-h-svh place-items-center p-6"><Card className="w-full max-w-md"><CardHeader><CardTitle>生成运营后台</CardTitle><CardDescription>{error || '请使用管理员账户登录并完成 MFA。'}</CardDescription></CardHeader><CardContent>{auth && <Button onClick={() => void signIn()}>管理员登录</Button>}</CardContent></Card></div>
 
   const menu: { id: Section; title: string; icon: typeof Activity }[] = [
     { id: 'overview', title: '总览', icon: ChartNoAxesCombined },
@@ -82,11 +84,11 @@ export function AdminApp() {
   const title = menu.find(item => item.id === section)?.title
   return <div className="flex min-h-svh bg-background text-foreground">
     <aside className="hidden w-64 shrink-0 border-r bg-sidebar p-4 md:block"><div className="mb-8 px-3 text-lg font-semibold">Blow Flow <span className="block text-xs font-normal text-muted-foreground">生成运营后台</span></div><nav className="space-y-1">{menu.map(item => <button key={item.id} onClick={() => setSection(item.id)} className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-accent ${section === item.id ? 'bg-accent font-medium' : ''}`}><item.icon size={18}/>{item.title}</button>)}</nav></aside>
-    <div className="min-w-0 flex-1"><header className="flex items-center justify-between border-b px-6 py-4"><div className="font-semibold">{title}</div><div className="flex items-center gap-3 text-sm"><span>{account.email}</span><Button variant="outline" size="sm" onClick={() => void auth?.signoutRedirect()}><LogOut/>退出</Button></div></header><nav className="flex gap-2 overflow-x-auto border-b p-3 md:hidden">{menu.map(item => <Button key={item.id} size="sm" variant={section === item.id ? 'default' : 'ghost'} onClick={() => setSection(item.id)}>{item.title}</Button>)}</nav><main className="mx-auto max-w-6xl space-y-6 p-6"><div><h1 className="text-2xl font-semibold">{title}</h1><p className="text-sm text-muted-foreground">内部生成运营与账户管理</p></div>{error && <p role="alert" className="text-destructive">{error}</p>}
+    <div className="min-w-0 flex-1"><header className="flex items-center justify-between border-b px-6 py-4"><div className="font-semibold">{title}</div><div className="flex items-center gap-3 text-sm"><span>{account?.email ?? '本地预览'}</span><Button variant="outline" size="sm" onClick={() => preview ? window.location.assign('/') : void auth?.signoutRedirect()}><LogOut/>{preview ? '退出预览' : '退出'}</Button></div></header><nav className="flex gap-2 overflow-x-auto border-b p-3 md:hidden">{menu.map(item => <Button key={item.id} size="sm" variant={section === item.id ? 'default' : 'ghost'} onClick={() => setSection(item.id)}>{item.title}</Button>)}</nav><main className="mx-auto max-w-6xl space-y-6 p-6">{preview && <p role="status" className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">开发预览：仅展示后台页面，不会请求管理数据。</p>}<div><h1 className="text-2xl font-semibold">{title}</h1><p className="text-sm text-muted-foreground">内部生成运营与账户管理</p></div>{error && <p role="alert" className="text-destructive">{error}</p>}
       {section === 'overview' && <Card><CardHeader><CardTitle>运营总览</CardTitle><CardDescription>任务事件与成本数据迁移后将在这里呈现。</CardDescription></CardHeader></Card>}
       {(section === 'tasks' || section === 'cost') && <Card><CardHeader><CardTitle>{title}</CardTitle><CardDescription>Go API 尚未提供该领域的权威数据接口。</CardDescription></CardHeader></Card>}
-      {section === 'users' && <Card><CardHeader><CardTitle>用户账户</CardTitle><CardDescription>来自 Go API 的本地账户</CardDescription></CardHeader><CardContent><div className="space-y-2">{users.map(user => <div className="flex justify-between gap-4 border-b py-3 text-sm" key={user.id}><span>{user.email}</span><span>{user.role} · {user.status}</span></div>)}{users.length === 0 && <p className="text-sm text-muted-foreground">暂无账户记录</p>}</div></CardContent></Card>}
-      {section === 'audit' && <Card><CardHeader><CardTitle>审计记录</CardTitle><CardDescription>管理员操作事件</CardDescription></CardHeader><CardContent><div className="space-y-2">{events.map(event => <div className="flex justify-between gap-4 border-b py-3 text-sm" key={event.id}><span>{event.action} · {event.targetId}</span><time>{new Date(event.occurredAt).toLocaleString()}</time></div>)}{events.length === 0 && <p className="text-sm text-muted-foreground">暂无审计事件</p>}</div></CardContent></Card>}
+      {section === 'users' && <Card><CardHeader><CardTitle>用户账户</CardTitle><CardDescription>来自 Go API 的本地账户</CardDescription></CardHeader><CardContent><div className="space-y-2">{users.map(user => <div className="flex justify-between gap-4 border-b py-3 text-sm" key={user.id}><span>{user.email}</span><span>{user.role} · {user.status}</span></div>)}{users.length === 0 && <p className="text-sm text-muted-foreground">{preview ? '预览模式不加载账户数据' : '暂无账户记录'}</p>}</div></CardContent></Card>}
+      {section === 'audit' && <Card><CardHeader><CardTitle>审计记录</CardTitle><CardDescription>管理员操作事件</CardDescription></CardHeader><CardContent><div className="space-y-2">{events.map(event => <div className="flex justify-between gap-4 border-b py-3 text-sm" key={event.id}><span>{event.action} · {event.targetId}</span><time>{new Date(event.occurredAt).toLocaleString()}</time></div>)}{events.length === 0 && <p className="text-sm text-muted-foreground">{preview ? '预览模式不加载审计数据' : '暂无审计事件'}</p>}</div></CardContent></Card>}
     </main></div>
   </div>
 }

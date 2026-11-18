@@ -16,4 +16,4 @@
 
 针对所选身份服务配置 `VITE_OIDC_API_AUDIENCE`、`VITE_OIDC_SCOPE` 和 `VITE_OIDC_MFA_ACR`，确保返回的访问令牌满足 API 的 audience 与 MFA 映射。上线前须用真实身份服务完成一次授权码回调和 `/v1/me` 往返验证。
 
-从仓库根目录运行 `pnpm dev:admin`；`pnpm dev:all` 也会启动管理端。入口先调用 `/v1/me` 验证本地管理员角色；用户与审计页面调用 Go API。任务、成本和总览目前是明确的待接入状态，直到生成领域迁移后才展示权威数据。`pnpm build` 会构建该独立应用，产物在 `apps/admin/dist`。
+从仓库根目录运行 `pnpm dev:admin`；`pnpm dev:all` 也会启动管理端。尚未配置身份服务时，可打开 `http://127.0.0.1:3218/?preview` 查看仅在 Vite 开发模式启用的静态页面预览；预览不请求管理接口，也不展示真实数据。正式入口先调用 `/v1/me` 验证本地管理员角色；用户与审计页面调用 Go API。任务、成本和总览目前是明确的待接入状态，直到生成领域迁移后才展示权威数据。`pnpm build` 会构建该独立应用，产物在 `apps/admin/dist`。
