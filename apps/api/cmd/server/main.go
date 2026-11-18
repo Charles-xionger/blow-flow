@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"log/slog"
 	"net"
 	"net/http"
@@ -14,7 +15,7 @@ import (
 	accountpostgres "blow-flow/api/internal/account/postgres"
 	"blow-flow/api/internal/database"
 	"blow-flow/api/internal/httpserver"
-	oidcauth "blow-flow/api/internal/identity/oidc"
+	localauth "blow-flow/api/internal/identity/localauth"
 	"blow-flow/api/internal/telemetry"
 	"github.com/getsentry/sentry-go"
 )
@@ -33,29 +34,29 @@ func run() error {
 	var ping httpserver.Ping
 	var accounts *account.Service
 	var identityVerifier httpserver.IdentityVerifier
+	var localAdmin httpserver.LocalAdminAuthenticator
 	if dsn := os.Getenv("DATABASE_URL"); dsn != "" {
 		db, pool, err := database.Open(dsn)
 		if err != nil {
 			slog.Warn("database configuration unavailable")
 		} else {
 			defer pool.Close()
-			issuer, audience := os.Getenv("OIDC_ISSUER"), os.Getenv("OIDC_AUDIENCE")
-			if issuer != "" && audience != "" {
-				providerContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				verifier, verifyErr := oidcauth.New(providerContext, issuer, audience, oidcauth.Profile{
-					MFAAuthenticationMethod: os.Getenv("OIDC_MFA_AMR"),
-					MFAAssuranceContext:     os.Getenv("OIDC_ADMIN_ACR"),
-				})
-				cancel()
-				if verifyErr != nil {
-					return verifyErr
+			if os.Getenv("ADMIN_AUTH_EMAIL") != "" {
+				key, err := base64.RawStdEncoding.DecodeString(os.Getenv("AUTH_SIGNING_KEY"))
+				if err != nil {
+					return err
 				}
-				identityVerifier = verifier
+				adminAuth, err := localauth.New(localauth.Config{Email: os.Getenv("ADMIN_AUTH_EMAIL"), PasswordHash: os.Getenv("ADMIN_AUTH_PASSWORD_HASH"), TOTPSecret: os.Getenv("ADMIN_AUTH_TOTP_SECRET"), SigningKey: key}, time.Now)
+				if err != nil {
+					return err
+				}
+				identityVerifier = adminAuth
+				localAdmin = adminAuth
 				repository := accountpostgres.New(db, time.Now)
-				accounts = account.NewService(repository, account.InitialAdministrator{Issuer: issuer, Subject: os.Getenv("INITIAL_ADMIN_SUBJECT")}, time.Now)
+				accounts = account.NewService(repository, account.InitialAdministrator{Issuer: localauth.Issuer, Subject: localauth.Subject, LinkExistingByEmail: true}, time.Now)
 				ping = func(ctx context.Context) error { return database.Check(ctx, pool) }
 			} else {
-				slog.Warn("account API unavailable: OIDC_ISSUER and OIDC_AUDIENCE are required")
+				slog.Warn("account API unavailable: local admin authentication is not configured")
 			}
 		}
 	}
@@ -67,7 +68,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	server := &http.Server{Handler: httpserver.NewWithDependencies(httpserver.Dependencies{Ping: ping, Accounts: accounts, IdentityVerifier: identityVerifier}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
+	server := &http.Server{Handler: httpserver.NewWithDependencies(httpserver.Dependencies{Ping: ping, Accounts: accounts, IdentityVerifier: identityVerifier, LocalAdmin: localAdmin}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	done := make(chan error, 1)

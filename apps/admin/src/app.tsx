@@ -1,94 +1,104 @@
-import { useEffect, useState } from 'react'
-import type { User } from 'oidc-client-ts'
-import { Activity, ChartNoAxesCombined, ClipboardList, Coins, LogOut, ShieldCheck, Users } from 'lucide-react'
-import { auth, initialSession, signIn } from './auth'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import type { components } from '@blow-flow/api-client'
+import { clearSession as removeStoredSession, getSession, login } from './auth'
 import { adminClient } from './api'
 import { mayEnterAdmin } from './access'
+import { AdminConsole } from './admin-console'
 import { Button } from './components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './components/ui/card'
+import { Input } from './components/ui/input'
 
-type Section = 'overview' | 'tasks' | 'cost' | 'users' | 'audit'
-type Account = { id: string; email: string; role: string; status: string; createdAt: string }
-type AuditEvent = { id: string; action: string; actorId: string; targetId: string; occurredAt: string }
+type Account = components['schemas']['User']
 
 export function AdminApp() {
   const preview = import.meta.env.DEV && new URLSearchParams(window.location.search).has('preview')
-  const [session, setSession] = useState<User | null>(null)
+  const [token, setToken] = useState<string | null>(null)
   const [account, setAccount] = useState<Account | null>(null)
-  const [section, setSection] = useState<Section>('overview')
-  const [users, setUsers] = useState<Account[]>([])
-  const [events, setEvents] = useState<AuditEvent[]>([])
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [otp, setOtp] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+
+  const clearSession = useCallback(() => {
+    removeStoredSession()
+    setToken(null)
+    setAccount(null)
+    setError('会话已失效，请重新登录。')
+  }, [])
 
   useEffect(() => {
     let active = true
     async function load() {
       if (preview) { setLoading(false); return }
-      if (!auth) { setError('请配置托管身份服务与 API 地址。'); setLoading(false); return }
+      const session = getSession()
+      if (!session) { setLoading(false); return }
       try {
-        const current = await initialSession()
-        if (window.location.pathname === '/auth/callback') window.history.replaceState({}, '', '/')
-        if (!current || current.expired) { setLoading(false); return }
-        const result = await adminClient(current.access_token).GET('/me')
-        if (result.error || !mayEnterAdmin(result.data?.user.role, result.data?.user.status, Boolean(current.expired))) throw new Error('当前账户没有管理员权限或尚未完成 MFA。')
-        if (active) { setSession(current); setAccount(result.data.user); setLoading(false) }
-      } catch { if (active) { setError('身份验证失败。请重新登录并完成 MFA。'); setLoading(false) } }
+        const result = await adminClient(session.accessToken).GET('/me')
+        if (result.error || !mayEnterAdmin(result.data?.user.role, result.data?.user.status, session.expiresAt <= Date.now())) throw new Error('forbidden')
+        if (active) { setToken(session.accessToken); setAccount(result.data.user) }
+      } catch { if (active) clearSession() }
+      finally { if (active) setLoading(false) }
     }
     void load()
     return () => { active = false }
-  }, [preview])
+  }, [preview, clearSession])
 
   useEffect(() => {
-    if (!auth || !session) return
-    const manager = auth
-    const clear = () => { setSession(null); setAccount(null); setUsers([]); setEvents([]); setError('会话已失效，请重新登录。') }
-    manager.events.addAccessTokenExpired(clear)
-    manager.events.addUserSignedOut(clear)
+    if (!token) return
     const timer = window.setInterval(() => {
-      void adminClient(session.access_token).GET('/me').then(result => {
-        if (result.error || !mayEnterAdmin(result.data?.user.role, result.data?.user.status, Boolean(session.expired))) clear()
-      }).catch(clear)
+      const session = getSession()
+      if (!session) { clearSession(); return }
+      void adminClient(token).GET('/me').then(result => {
+        if (result.error || !mayEnterAdmin(result.data?.user.role, result.data?.user.status, false)) clearSession()
+      }).catch(clearSession)
     }, 30_000)
-    return () => {
-      manager.events.removeAccessTokenExpired(clear)
-      manager.events.removeUserSignedOut(clear)
-      window.clearInterval(timer)
-    }
-  }, [session])
+    return () => window.clearInterval(timer)
+  }, [token, clearSession])
 
-  useEffect(() => {
-    if (!session || (section !== 'users' && section !== 'audit')) return
-    let active = true
-    const client = adminClient(session.access_token)
-    const request = section === 'users' ? client.GET('/admin/users') : client.GET('/admin/audit-events')
-    void request.then(result => {
-      if (!active) return
-      if (result.error) { setError('管理数据加载失败，请检查登录状态。'); if (result.response.status === 401 || result.response.status === 403) { setSession(null); setAccount(null); setUsers([]); setEvents([]) } return }
-      if (section === 'users' && result.data && 'users' in result.data) setUsers(result.data.users)
-      if (section === 'audit' && result.data && 'events' in result.data) setEvents(result.data.events)
-    })
-    return () => { active = false }
-  }, [session, section])
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setBusy(true)
+    setError('')
+    try {
+      const session = await login(email.trim(), password, otp.trim())
+      if (!mayEnterAdmin(session.user.role, session.user.status, false)) throw new Error('当前账户没有管理员权限。')
+      setToken(session.accessToken)
+      setAccount(session.user)
+      setPassword('')
+      setOtp('')
+    } catch (cause) {
+      removeStoredSession()
+      setError(cause instanceof Error ? cause.message : '登录失败，请重试。')
+    } finally { setBusy(false) }
+  }
 
-  if (loading) return <div className="grid min-h-svh place-items-center">正在验证管理员身份…</div>
-  if ((!session || !account) && !preview) return <div className="grid min-h-svh place-items-center p-6"><Card className="w-full max-w-md"><CardHeader><CardTitle>生成运营后台</CardTitle><CardDescription>{error || '请使用管理员账户登录并完成 MFA。'}</CardDescription></CardHeader><CardContent>{auth && <Button onClick={() => void signIn()}>管理员登录</Button>}</CardContent></Card></div>
-
-  const menu: { id: Section; title: string; icon: typeof Activity }[] = [
-    { id: 'overview', title: '总览', icon: ChartNoAxesCombined },
-    { id: 'tasks', title: '任务', icon: ClipboardList },
-    { id: 'cost', title: '供应商成本', icon: Coins },
-    { id: 'users', title: '用户', icon: Users },
-    { id: 'audit', title: '审计记录', icon: ShieldCheck },
-  ]
-  const title = menu.find(item => item.id === section)?.title
-  return <div className="flex min-h-svh bg-background text-foreground">
-    <aside className="hidden w-64 shrink-0 border-r bg-sidebar p-4 md:block"><div className="mb-8 px-3 text-lg font-semibold">Blow Flow <span className="block text-xs font-normal text-muted-foreground">生成运营后台</span></div><nav className="space-y-1">{menu.map(item => <button key={item.id} onClick={() => setSection(item.id)} className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-accent ${section === item.id ? 'bg-accent font-medium' : ''}`}><item.icon size={18}/>{item.title}</button>)}</nav></aside>
-    <div className="min-w-0 flex-1"><header className="flex items-center justify-between border-b px-6 py-4"><div className="font-semibold">{title}</div><div className="flex items-center gap-3 text-sm"><span>{account?.email ?? '本地预览'}</span><Button variant="outline" size="sm" onClick={() => preview ? window.location.assign('/') : void auth?.signoutRedirect()}><LogOut/>{preview ? '退出预览' : '退出'}</Button></div></header><nav className="flex gap-2 overflow-x-auto border-b p-3 md:hidden">{menu.map(item => <Button key={item.id} size="sm" variant={section === item.id ? 'default' : 'ghost'} onClick={() => setSection(item.id)}>{item.title}</Button>)}</nav><main className="mx-auto max-w-6xl space-y-6 p-6">{preview && <p role="status" className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">开发预览：仅展示后台页面，不会请求管理数据。</p>}<div><h1 className="text-2xl font-semibold">{title}</h1><p className="text-sm text-muted-foreground">内部生成运营与账户管理</p></div>{error && <p role="alert" className="text-destructive">{error}</p>}
-      {section === 'overview' && <Card><CardHeader><CardTitle>运营总览</CardTitle><CardDescription>任务事件与成本数据迁移后将在这里呈现。</CardDescription></CardHeader></Card>}
-      {(section === 'tasks' || section === 'cost') && <Card><CardHeader><CardTitle>{title}</CardTitle><CardDescription>Go API 尚未提供该领域的权威数据接口。</CardDescription></CardHeader></Card>}
-      {section === 'users' && <Card><CardHeader><CardTitle>用户账户</CardTitle><CardDescription>来自 Go API 的本地账户</CardDescription></CardHeader><CardContent><div className="space-y-2">{users.map(user => <div className="flex justify-between gap-4 border-b py-3 text-sm" key={user.id}><span>{user.email}</span><span>{user.role} · {user.status}</span></div>)}{users.length === 0 && <p className="text-sm text-muted-foreground">{preview ? '预览模式不加载账户数据' : '暂无账户记录'}</p>}</div></CardContent></Card>}
-      {section === 'audit' && <Card><CardHeader><CardTitle>审计记录</CardTitle><CardDescription>管理员操作事件</CardDescription></CardHeader><CardContent><div className="space-y-2">{events.map(event => <div className="flex justify-between gap-4 border-b py-3 text-sm" key={event.id}><span>{event.action} · {event.targetId}</span><time>{new Date(event.occurredAt).toLocaleString()}</time></div>)}{events.length === 0 && <p className="text-sm text-muted-foreground">{preview ? '预览模式不加载审计数据' : '暂无审计事件'}</p>}</div></CardContent></Card>}
-    </main></div>
+  if (loading) return <div className='grid min-h-svh place-items-center'>正在验证管理员身份…</div>
+  if (!preview && (!token || !account)) return <div className='grid min-h-svh place-items-center bg-muted/40 p-6'>
+    <Card className='w-full max-w-md shadow-lg'>
+      <CardHeader><div className='mb-2 grid size-10 place-items-center rounded-lg bg-primary text-primary-foreground font-bold'>B</div><CardTitle className='text-xl'>登录生成运营后台</CardTitle><CardDescription>使用内部管理员账户与动态验证码登录。</CardDescription></CardHeader>
+      <CardContent><form className='space-y-4' onSubmit={event => void submit(event)}>
+        <label className='block space-y-2 text-sm font-medium'>邮箱<Input type='email' autoComplete='username' required value={email} onChange={event => setEmail(event.target.value)} placeholder='admin@example.com' /></label>
+        <label className='block space-y-2 text-sm font-medium'>密码<Input type='password' autoComplete='current-password' required value={password} onChange={event => setPassword(event.target.value)} /></label>
+        <label className='block space-y-2 text-sm font-medium'>动态验证码<Input inputMode='numeric' pattern='[0-9]{6}' maxLength={6} autoComplete='one-time-code' required value={otp} onChange={event => setOtp(event.target.value)} placeholder='6 位验证码' /></label>
+        {error && <p role='alert' className='text-sm text-destructive'>{error}</p>}
+        <Button className='w-full' disabled={busy} type='submit'>{busy ? '登录中…' : '登录'}</Button>
+      </form></CardContent>
+    </Card>
   </div>
+
+  return <AdminConsole
+    token={token ?? undefined}
+    account={account ?? undefined}
+    preview={preview}
+    onUnauthorized={clearSession}
+    onSignOut={() => {
+      if (preview) { window.location.assign('/'); return }
+      removeStoredSession()
+      setToken(null)
+      setAccount(null)
+      setError('')
+    }}
+  />
 }

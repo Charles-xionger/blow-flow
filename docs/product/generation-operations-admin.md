@@ -29,8 +29,8 @@
 
 - 个人用户账户，不建设组织和团队；
 - 邮箱注册、邮箱验证、密码登录和找回密码；
-- 使用支持 OIDC/OAuth 的托管身份服务处理凭据、会话和 MFA；
-- Go API 使用稳定的本地用户 ID，外部身份主体只作为可替换映射；
+- Go API 负责账户登录、凭据验证、MFA 和短期 JWT 签发；
+- Go API 使用稳定的本地用户 ID 归属创作资源；
 - 首版只有 `user` 和 `admin` 两种角色；
 - 管理员强制 MFA，敏感操作要求近期重新验证；
 - 用户禁用后立即撤销会话并禁止新生成；
@@ -211,5 +211,5 @@ RunningHub 任务结果接口已经提供 `consumeCoins`、`consumeMoney`、`thi
 - [ADR-0002：使用持久化后台任务执行图片与视频生成](../adr/0002-persistent-generation-tasks.md)
 - [ADR-0003：使用 SSE 同步生成任务的最新状态](../adr/0003-generation-status-notifications.md)
 - [ADR-0016：在当前任务状态之外追加不可变任务事件](../adr/0016-append-generation-task-events.md)
-- [ADR-0017：托管身份服务不拥有业务用户标识](../adr/0017-keep-business-identity-local.md)
+- [ADR-0019：Go API 自建认证并签发 JWT](../adr/0019-local-jwt-authentication.md)
 - [ADR-0018：不建设平台积分与用户计费体系](../adr/0018-do-not-build-platform-credits.md)

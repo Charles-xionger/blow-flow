@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/auth/admin/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Authenticate the local bootstrap administrator with password and TOTP */
+        post: operations["loginAdministrator"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/me": {
         parameters: {
             query?: never;
@@ -11,7 +28,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Resolve the hosted identity to its local user account */
+        /** Resolve the signed access token to its local user account */
         get: operations["getCurrentUser"];
         put?: never;
         post?: never;
@@ -188,6 +205,44 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    loginAdministrator: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: email */
+                    email: string;
+                    password: string;
+                    otp: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Short-lived administrator access token */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        accessToken: string;
+                        /** @description Seconds until token expiry */
+                        expiresIn: number;
+                        user: components["schemas"]["User"];
+                    };
+                };
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     getCurrentUser: {
         parameters: {
             query?: never;

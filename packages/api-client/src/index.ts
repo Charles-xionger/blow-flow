@@ -9,3 +9,7 @@ export function createAPIClient(baseUrl: string, accessToken: string) {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
 }
+
+export function createPublicAPIClient(baseUrl: string) {
+  return createClient<paths>({ baseUrl });
+}

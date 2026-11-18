@@ -4,6 +4,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -94,6 +95,14 @@ func TestAccountRepositoryOwnsIdentityStatusAndAuditTransaction(t *testing.T) {
 	if secondCandidate.Role != account.RoleUser {
 		t.Fatalf("second initial-administrator candidate role = %q", secondCandidate.Role)
 	}
+	localAdmin, err := repository.ResolveIdentity(context.Background(), account.Identity{Issuer: "blow-flow-local", Subject: "bootstrap-admin", Email: "admin@example.com", EmailVerified: true, MFA: true}, account.IdentityProvisioning{MayBecomeInitialAdministrator: true, LinkExistingAdministratorByEmail: true})
+	if err != nil || localAdmin.ID != users[0].ID {
+		t.Fatalf("local admin identity did not link to existing administrator: %+v, %v", localAdmin, err)
+	}
+	_, err = repository.ResolveIdentity(context.Background(), account.Identity{Issuer: "blow-flow-local", Subject: "other-bootstrap", Email: "stranger@example.com", EmailVerified: true, MFA: true}, account.IdentityProvisioning{MayBecomeInitialAdministrator: true, LinkExistingAdministratorByEmail: true})
+	if !errors.Is(err, account.ErrForbidden) {
+		t.Fatalf("unmatched local identity was not rejected: %v", err)
+	}
 	changed, err := repository.DisableUser(context.Background(), account.DisableUser{ActorID: users[0].ID, TargetID: member.ID, Reason: "abuse", At: now.Add(time.Minute)})
 	if err != nil {
 		t.Fatal(err)
@@ -110,6 +119,13 @@ func TestAccountRepositoryOwnsIdentityStatusAndAuditTransaction(t *testing.T) {
 	}
 	if page.Events[0].Metadata["reason"] != "abuse" {
 		t.Fatalf("audit metadata = %+v", page.Events[0].Metadata)
+	}
+	if err := repository.AppendAdminLogin(context.Background(), users[0].ID, now.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	page, err = repository.ListAuditEvents(context.Background(), account.ListAuditQuery{Limit: 10})
+	if err != nil || len(page.Events) != 2 || page.Events[0].Action != "admin.logged_in" {
+		t.Fatalf("login audit events = %+v, error = %v", page.Events, err)
 	}
 
 	usersPage, err := repository.ListUsers(context.Background(), account.ListUsersQuery{Limit: 1})

@@ -10,11 +10,56 @@ import (
 	"time"
 
 	"blow-flow/api/internal/account"
+	"blow-flow/api/internal/identity/localauth"
 )
 
 type verifierStub struct {
 	identity account.Identity
 	err      error
+}
+
+func TestLocalAdminLoginIssuesTokenForRealAccountRoutes(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	hash, err := localauth.PasswordHash("test-password-long-enough")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := localauth.NewTOTPSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth, err := localauth.New(localauth.Config{Email: "admin@example.com", PasswordHash: hash, TOTPSecret: secret, SigningKey: []byte(strings.Repeat("k", 32))}, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, err := localauth.CurrentTOTPCode(secret, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := NewWithDependencies(Dependencies{Accounts: &accountServiceStub{resolved: account.User{ID: "admin-1", Email: "admin@example.com", Role: account.RoleAdmin, Status: account.StatusActive}}, IdentityVerifier: auth, LocalAdmin: auth})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/admin/login", strings.NewReader(`{"email":"admin@example.com","password":"test-password-long-enough","otp":"`+code+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("login status = %d body=%s", w.Code, w.Body.String())
+	}
+	var response struct {
+		AccessToken string `json:"accessToken"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.AccessToken == "" || w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("login did not return a protected token")
+	}
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/v1/admin/users", nil)
+	req.Header.Set("Authorization", "Bearer "+response.AccessToken)
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("admin route status = %d body=%s", w.Code, w.Body.String())
+	}
 }
 
 func (v verifierStub) Verify(context.Context, string) (account.Identity, error) {
@@ -41,6 +86,7 @@ func (s *accountServiceStub) DisableUser(_ context.Context, _ account.User, _ ac
 func (s *accountServiceStub) ListAuditEvents(context.Context, account.User, account.AuthProof, account.ListAuditQuery) (account.AuditPage, error) {
 	return account.AuditPage{Events: []account.AuditEvent{{ID: "audit-1"}}}, nil
 }
+func (s *accountServiceStub) RecordAdminLogin(context.Context, account.User) error { return nil }
 
 func TestAccountRoutesRequireBearerAuthentication(t *testing.T) {
 	router := NewWithDependencies(Dependencies{Accounts: &accountServiceStub{}, IdentityVerifier: verifierStub{}})

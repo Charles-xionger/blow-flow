@@ -40,12 +40,14 @@ type Identity struct {
 }
 
 type InitialAdministrator struct {
-	Issuer  string
-	Subject string
+	Issuer              string
+	Subject             string
+	LinkExistingByEmail bool
 }
 
 type IdentityProvisioning struct {
-	MayBecomeInitialAdministrator bool
+	MayBecomeInitialAdministrator    bool
+	LinkExistingAdministratorByEmail bool
 }
 
 type AuthProof struct {

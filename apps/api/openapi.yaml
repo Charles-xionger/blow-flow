@@ -8,10 +8,44 @@ servers:
 security:
   - bearerAuth: []
 paths:
+  /auth/admin/login:
+    post:
+      operationId: loginAdministrator
+      summary: Authenticate the local bootstrap administrator with password and TOTP
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email, password, otp]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+                otp: { type: string, minLength: 6, maxLength: 6 }
+      responses:
+        "200":
+          description: Short-lived administrator access token
+          headers:
+            Cache-Control: { schema: { type: string } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accessToken, expiresIn, user]
+                properties:
+                  accessToken: { type: string }
+                  expiresIn: { type: integer, description: Seconds until token expiry }
+                  user: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
   /me:
     get:
       operationId: getCurrentUser
-      summary: Resolve the hosted identity to its local user account
+      summary: Resolve the signed access token to its local user account
       responses:
         "200":
           description: Current local user

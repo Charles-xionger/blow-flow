@@ -12,6 +12,7 @@ type repositoryStub struct {
 	list    func(context.Context, ListUsersQuery) (UserPage, error)
 	disable func(context.Context, DisableUser) (User, error)
 	audit   func(context.Context, ListAuditQuery) (AuditPage, error)
+	login   func(context.Context, string, time.Time) error
 }
 
 func (r repositoryStub) ResolveIdentity(ctx context.Context, identity Identity, provisioning IdentityProvisioning) (User, error) {
@@ -25,6 +26,12 @@ func (r repositoryStub) DisableUser(ctx context.Context, command DisableUser) (U
 }
 func (r repositoryStub) ListAuditEvents(ctx context.Context, query ListAuditQuery) (AuditPage, error) {
 	return r.audit(ctx, query)
+}
+func (r repositoryStub) AppendAdminLogin(ctx context.Context, userID string, at time.Time) error {
+	if r.login != nil {
+		return r.login(ctx, userID, at)
+	}
+	return nil
 }
 
 func TestResolveRejectsUnverifiedIdentity(t *testing.T) {

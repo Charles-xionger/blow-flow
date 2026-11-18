@@ -1,55 +1,33 @@
 # Go API
 
-The Go API is being built by migrating one complete domain at a time. It does
-not share authoritative writes with the legacy TypeScript implementation.
+Go API 按完整领域逐步接管现有 TypeScript 实现的业务写入。当前已迁移账户领域，生成与画布数据仍由 `apps/web` 持有；两边不能同时成为同一业务数据的权威写入者。
 
-## Current domain boundary
+## 模块边界
 
-The account domain is the first migrated vertical slice:
+1. `internal/identity/localauth` 验证本地管理员密码和 TOTP，并签发、校验 15 分钟的 HS256 JWT。
+2. `internal/account` 定义本地用户账户、角色、状态和管理员操作规则，不依赖 Gin、GORM 或认证实现。
+3. `internal/account/postgres` 维护身份映射、账户状态及追加式审计记录。
+4. `internal/httpserver` 暴露 `openapi.yaml` 定义的版本化接口。
 
-1. `internal/identity/oidc` verifies hosted identity tokens. It does not own
-   business users or authorization.
-2. `internal/account` contains account vocabulary and application rules. It
-   depends only on its repository interface.
-3. `internal/account/postgres` is the PostgreSQL adapter. It owns identity
-   mapping, account state and append-only administrator audit writes.
-4. `internal/httpserver` is the versioned HTTP adapter described by
-   `openapi.yaml`.
+账户数据保存在 PostgreSQL。初始管理员首次通过本地认证后，账户仓储以固定本地主体创建管理员；如果已有管理员且邮箱与本地配置精确对应、唯一且账户正常，则把本地主体绑定到原有管理员，不改变其本地用户 ID。否则拒绝登录，不会自动提升另一账户。API 在每次受保护请求中重新查询账户状态，因此禁用账户会立即失去 Go API 的访问权限。管理操作要求 MFA，禁用用户还要求最近 10 分钟内完成认证。
 
-Dependency direction is HTTP/OIDC/PostgreSQL adapters → account module. The
-account module does not import Gin, GORM or an identity-provider SDK.
+## 本地配置
 
-Generation and canvas data remain authoritative in `apps/web` until their full
-transaction boundaries move. Do not add Go writes to the legacy SQLite tables
-or create a second generation-task writer during the transition.
+`DATABASE_URL` 连接 PostgreSQL。`pnpm admin:setup` 生成 `ADMIN_AUTH_EMAIL`、Argon2id 密码哈希、TOTP 密钥及 32 字节签名密钥，写入忽略提交的 `apps/api/.env.local`。登录信息保存在 `apps/api/.admin-login.local`，只用于本机开发；密钥不能提交到仓库。API 不自动加载 dotenv，启动或迁移前需在 shell 中加载配置：
 
-## Runtime configuration
+```sh
+set -a
+source apps/api/.env.local
+set +a
+pnpm db:up
+pnpm db:migrate
+pnpm dev:api
+```
 
-- `DATABASE_URL`: PostgreSQL connection used by the API.
-- `OIDC_ISSUER`: exact issuer used for discovery and token validation.
-- `OIDC_AUDIENCE`: required JWT access-token audience for this API.
-- `OIDC_MFA_AMR` / `OIDC_ADMIN_ACR`: selected provider profile values that
-  prove MFA through the token's `amr` or `acr` claims; at least one is required.
-- `INITIAL_ADMIN_SUBJECT`: optional external subject promoted to `admin` only
-  when its local account is first created, its issuer matches `OIDC_ISSUER`, and
-  no administrator exists yet. Changing this value cannot create a second
-  initial administrator.
+迁移是独立步骤，API 启动时不会执行 DDL。数据库或本地认证配置缺失时，存活探针仍可用，但就绪探针返回未就绪，账户接口拒绝访问。
 
-This slice intentionally supports the selected provider's signed JWT access-token
-profile, including `email`, `email_verified`, `auth_time`, and configured
-`amr`/`acr` claims. Opaque OAuth tokens require a future introspection adapter;
-they are not accepted implicitly. The admin client must request an MFA step-up before sensitive
-operations. The API independently requires the `mfa` authentication-method
-claim and an `auth_time` no more than ten minutes old.
+## 当前范围
 
-Migrations are a separate deployment step (`pnpm db:migrate`); API startup never
-runs DDL. Without complete database and OIDC configuration, health remains
-available but readiness is false and account routes fail closed.
+`POST /v1/auth/admin/login` 使用密码和 TOTP 登录，失败响应在单进程内逐步延迟，不会因代理共享 IP 而锁定正常登录；`GET /v1/me`、用户列表、禁用用户、审计记录均使用签名令牌和本地账户授权。成功登录也会追加审计事件。密码存储采用带随机盐的 Argon2id；TOTP 不接受同一进程内的同一步重放。
 
-## Deliberately incomplete in this slice
-
-The protected historical-resource import, project/task ownership enforcement,
-hosted-provider session revocation, generation authorization, and audit events
-for admin login, sensitive-content access and task operations are not yet
-implemented. They must arrive with the complete owning domain rather than by
-dual-writing legacy SQLite and PostgreSQL.
+这只是首位管理员的本地引导。公开注册、邮箱验证、找回密码、MFA 恢复、跨实例共享的登录限流与 TOTP 重放状态、签名密钥轮换、主动撤销已签发令牌、历史资源归属迁移和生成授权尚未完成。生产开放前必须补齐对应账户能力和运维流程。

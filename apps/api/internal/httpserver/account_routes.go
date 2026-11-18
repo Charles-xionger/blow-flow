@@ -19,6 +19,7 @@ const (
 
 func registerAccountRoutes(router *gin.Engine, dependencies Dependencies) {
 	v1 := router.Group("/v1")
+	v1.POST("/auth/admin/login", adminLogin(dependencies))
 	v1.Use(authenticate(dependencies.IdentityVerifier, dependencies.Accounts))
 	v1.GET("/me", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"user": currentUser(c)})

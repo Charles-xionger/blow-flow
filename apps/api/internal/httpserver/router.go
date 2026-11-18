@@ -18,16 +18,23 @@ type IdentityVerifier interface {
 	Verify(context.Context, string) (account.Identity, error)
 }
 
+type LocalAdminAuthenticator interface {
+	Authenticate(email, password, otp string) (account.Identity, error)
+	Issue(account.Identity) (string, error)
+}
+
 type AccountService interface {
 	Resolve(context.Context, account.Identity) (account.User, error)
 	ListUsers(context.Context, account.User, account.AuthProof, account.ListUsersQuery) (account.UserPage, error)
 	DisableUser(context.Context, account.User, account.AuthProof, string, string) (account.User, error)
 	ListAuditEvents(context.Context, account.User, account.AuthProof, account.ListAuditQuery) (account.AuditPage, error)
+	RecordAdminLogin(context.Context, account.User) error
 }
 
 type Dependencies struct {
 	Ping             Ping
 	IdentityVerifier IdentityVerifier
+	LocalAdmin       LocalAdminAuthenticator
 	Accounts         AccountService
 }
 

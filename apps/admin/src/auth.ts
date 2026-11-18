@@ -1,29 +1,37 @@
-import { UserManager } from 'oidc-client-ts'
+import type { components } from '@blow-flow/api-client'
+import { publicClient } from './api'
 
-const issuer = import.meta.env.VITE_OIDC_ISSUER
-const clientId = import.meta.env.VITE_OIDC_CLIENT_ID
-const audience = import.meta.env.VITE_OIDC_API_AUDIENCE
-const mfaAcr = import.meta.env.VITE_OIDC_MFA_ACR
+type Account = components['schemas']['User']
+type AdminSession = { accessToken: string; expiresAt: number; user: Account }
+const storageKey = 'blow-flow-admin-session'
 
-export const auth = issuer && clientId ? new UserManager({
-  authority: issuer,
-  client_id: clientId,
-  redirect_uri: `${window.location.origin}/auth/callback`,
-  post_logout_redirect_uri: window.location.origin,
-  response_type: 'code',
-  scope: import.meta.env.VITE_OIDC_SCOPE || 'openid email profile',
-  extraQueryParams: audience ? { audience } : undefined,
-}) : null
-
-let callbackSession: ReturnType<NonNullable<typeof auth>['signinRedirectCallback']> | undefined
-
-export function initialSession() {
-  if (!auth) return Promise.resolve(null)
-  if (window.location.pathname !== '/auth/callback') return auth.getUser()
-  callbackSession ??= auth.signinRedirectCallback()
-  return callbackSession
+export function getSession(): AdminSession | null {
+  try {
+    const value = window.sessionStorage.getItem(storageKey)
+    if (!value) return null
+    const session = JSON.parse(value) as AdminSession
+    if (!session.accessToken || !session.user || !Number.isFinite(session.expiresAt) || session.expiresAt <= Date.now()) {
+      clearSession()
+      return null
+    }
+    return session
+  } catch {
+    clearSession()
+    return null
+  }
 }
 
-export function signIn() {
-  return auth?.signinRedirect(mfaAcr ? { acr_values: mfaAcr } : undefined)
+export async function login(email: string, password: string, otp: string): Promise<AdminSession> {
+  const result = await publicClient.POST('/auth/admin/login', { body: { email, password, otp } })
+  if (result.error || !result.data) {
+    if (result.response.status === 503) throw new Error('Go API 尚未配置管理员登录。')
+    throw new Error('邮箱、密码或动态验证码不正确。')
+  }
+  const session = { accessToken: result.data.accessToken, expiresAt: Date.now() + result.data.expiresIn * 1000, user: result.data.user }
+  window.sessionStorage.setItem(storageKey, JSON.stringify(session))
+  return session
+}
+
+export function clearSession() {
+  window.sessionStorage.removeItem(storageKey)
 }

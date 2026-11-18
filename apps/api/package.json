@@ -4,6 +4,8 @@
   "scripts": {
     "dev": "go run ./cmd/server",
     "dev:all": "go run ./cmd/server",
+    "admin:setup": "go run ./cmd/local-admin-setup",
+    "admin:code": "go run ./cmd/local-admin-setup code",
     "build": "go build -o bin/api ./cmd/server",
     "typecheck": "go vet ./...",
     "lint": "node ../../scripts/go-format.mjs",

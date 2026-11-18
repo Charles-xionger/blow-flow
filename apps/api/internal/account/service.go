@@ -13,6 +13,7 @@ type Repository interface {
 	ListUsers(context.Context, ListUsersQuery) (UserPage, error)
 	DisableUser(context.Context, DisableUser) (User, error)
 	ListAuditEvents(context.Context, ListAuditQuery) (AuditPage, error)
+	AppendAdminLogin(context.Context, string, time.Time) error
 }
 
 type Service struct {
@@ -36,7 +37,8 @@ func (s *Service) Resolve(ctx context.Context, identity Identity) (User, error) 
 		return User{}, ErrEmailUnverified
 	}
 	provisioning := IdentityProvisioning{MayBecomeInitialAdministrator: s.initialAdministrator.Issuer != "" &&
-		identity.Issuer == s.initialAdministrator.Issuer && identity.Subject == s.initialAdministrator.Subject}
+		identity.Issuer == s.initialAdministrator.Issuer && identity.Subject == s.initialAdministrator.Subject,
+		LinkExistingAdministratorByEmail: s.initialAdministrator.LinkExistingByEmail && identity.Issuer == s.initialAdministrator.Issuer && identity.Subject == s.initialAdministrator.Subject}
 	user, err := s.repository.ResolveIdentity(ctx, identity, provisioning)
 	if err != nil {
 		return User{}, err
@@ -86,6 +88,13 @@ func (s *Service) ListAuditEvents(ctx context.Context, actor User, proof AuthPro
 	}
 	query.Limit = normalizedLimit(query.Limit)
 	return s.repository.ListAuditEvents(ctx, query)
+}
+
+func (s *Service) RecordAdminLogin(ctx context.Context, user User) error {
+	if user.Role != RoleAdmin || user.Status != StatusActive {
+		return ErrForbidden
+	}
+	return s.repository.AppendAdminLogin(ctx, user.ID, s.now().UTC())
 }
 
 func requireAdministrator(actor User, proof AuthProof) error {

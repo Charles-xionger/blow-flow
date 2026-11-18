@@ -72,5 +72,6 @@ next-env.d.ts
 **/dist/
 **/data/*.db*
 !**/.env.example
+**/.admin-login.local
 packages/evals/results/
 **/.langfuse/

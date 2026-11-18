@@ -78,6 +78,21 @@ func (r *Repository) ResolveIdentity(ctx context.Context, identity account.Ident
 			}
 			if administratorCount == 0 {
 				role = account.RoleAdmin
+			} else if provisioning.LinkExistingAdministratorByEmail {
+				var matches []userRow
+				if err := tx.Table("users u").Select("u.id, u.email, u.status, ur.role, u.created_at, u.updated_at").
+					Joins("JOIN user_roles ur ON ur.user_id = u.id").
+					Where("ur.role = ? AND lower(u.email) = ?", account.RoleAdmin, strings.ToLower(identity.Email)).Limit(2).Scan(&matches).Error; err != nil {
+					return err
+				}
+				if len(matches) != 1 || matches[0].Status != string(account.StatusActive) {
+					return account.ErrForbidden
+				}
+				if err := tx.Create(&identityModel{Issuer: identity.Issuer, Subject: identity.Subject, UserID: matches[0].ID, CreatedAt: now, LastSeenAt: now}).Error; err != nil {
+					return err
+				}
+				resolved = matches[0].toDomain()
+				return nil
 			}
 		}
 		userID, err := newUUID()
@@ -193,6 +208,14 @@ func (r *Repository) ListAuditEvents(ctx context.Context, query account.ListAudi
 		page.Events = append(page.Events, account.AuditEvent{ID: row.ID, ActorID: row.ActorID, Action: row.Action, TargetType: row.TargetType, TargetID: row.TargetID, Metadata: metadata, OccurredAt: row.OccurredAt})
 	}
 	return page, nil
+}
+
+func (r *Repository) AppendAdminLogin(ctx context.Context, userID string, at time.Time) error {
+	id, err := newUUID()
+	if err != nil {
+		return err
+	}
+	return r.db.WithContext(ctx).Create(&auditModel{ID: id, ActorID: userID, Action: "admin.logged_in", TargetType: "user", TargetID: userID, Metadata: []byte(`{}`), OccurredAt: at}).Error
 }
 
 type userModel struct {

@@ -17,4 +17,4 @@ services:
       retries: 30
 volumes:
   postgres-data:
-    name: ai-flow_postgres-data
+    name: ${POSTGRES_VOLUME_NAME:-ai-flow_postgres-data}
