@@ -31,3 +31,29 @@ pnpm dev:api
 `GET /v1/auth/captcha` 生成一次性四位图片验证码，按单进程令牌桶限制取图频率；`POST /v1/auth/admin/login` 校验图片答案后再校验密码。图片答案无论对错只可提交一次，未提交的验证码十分钟后过期；当前最多保留 1000 个挑战，均在单个 API 进程内，多实例部署需要共享挑战存储。失败响应在单进程内逐步延迟，不会因代理共享 IP 而锁定正常登录；`GET /v1/me`、用户列表、禁用用户、审计记录均使用签名令牌和本地账户授权。成功登录也会追加审计事件。密码存储采用带随机盐的 Argon2id。图片验证码用于限制简单自动请求，不是第二身份因素。
 
 这只是首位管理员的本地引导。公开注册、邮箱验证、找回密码、跨实例共享的验证码与登录限流、签名密钥轮换、主动撤销已签发令牌、历史资源归属迁移和生成授权尚未完成。生产开放前必须补齐对应账户能力和运维流程。
+
+## Go generation foundation
+
+The Go API exposes `POST /v1/generation/tasks`, `GET /v1/generation/tasks/{id}` and
+`POST /v1/generation/tasks/{id}/cancel`. Creation requires a bearer token, an
+`Idempotency-Key`, an owned project, owned reference assets, and the
+`runninghub/krea2` model. The response contains task metadata and status; the
+prompt and reference IDs stay in the PostgreSQL input snapshot. An authorized
+administrator may query a task, while only its owner may cancel it before claim.
+
+For this foundation phase, project and reference ownership is represented by
+explicit `generation_resource_grants` rows. This is a controlled test resource
+boundary: no application route provisions these grants, so production creation
+fails closed until the project and asset domains migrate. The worker's provider
+is deliberately simulated and returns `simulated://krea2/result`; it does not
+call RunningHub or OSS. Existing Next.js generation remains untouched.
+
+Run the schema migration, start RabbitMQ with
+`docker compose -f infra/compose.yaml up -d --wait rabbitmq`, set
+`RABBITMQ_URL`, then run `pnpm --filter @blow-flow/api generation:worker` as a
+separate process. That process republishes pending outbox rows with broker
+confirms and consumes durable quorum queue messages with manual acknowledgements.
+To run the real integration tests, set `TEST_DATABASE_URL` to a disposable
+PostgreSQL database and `TEST_RABBITMQ_URL` to a disposable RabbitMQ instance,
+then run `pnpm test:integration`. The tests create and remove their own
+PostgreSQL schemas.

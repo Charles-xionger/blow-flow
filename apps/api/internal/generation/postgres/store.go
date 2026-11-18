@@ -1,0 +1,141 @@
+package postgres
+
+import (
+	"blow-flow/api/internal/generation"
+	"context"
+	"encoding/json"
+	"errors"
+	"gorm.io/gorm"
+	"time"
+)
+
+type Store struct{ DB *gorm.DB }
+
+func New(db *gorm.DB) *Store { return &Store{DB: db} }
+func (s *Store) Create(ctx context.Context, owner, key, hash string, input generation.Input) (generation.Task, error) {
+	id, err := generation.NewID()
+	if err != nil {
+		return generation.Task{}, err
+	}
+	now := time.Now().UTC()
+	data, err := json.Marshal(input)
+	if err != nil {
+		return generation.Task{}, err
+	}
+	err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Exec(`INSERT INTO generation_tasks(id,owner_id,project_id,model,input_snapshot,input_hash,idempotency_key,status,created_at,updated_at) VALUES(?,?,?,?,?::jsonb,?,?,'queued',?,?) ON CONFLICT(owner_id,idempotency_key) DO NOTHING`, id, owner, input.ProjectID, input.Model, string(data), hash, key, now, now)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return nil
+		}
+		if err := tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,occurred_at) VALUES(?,'created',?)`, id, now).Error; err != nil {
+			return err
+		}
+		return tx.Exec(`INSERT INTO generation_outbox(task_id,created_at) VALUES(?,?)`, id, now).Error
+	})
+	if err != nil {
+		return generation.Task{}, err
+	}
+	var row struct {
+		ID, InputHash               string
+		Status                      generation.Status
+		ProjectID, Model, ResultURL string
+		CreatedAt, UpdatedAt        time.Time
+	}
+	err = s.DB.WithContext(ctx).Raw(`SELECT id,input_hash,status,project_id,model,result_url,created_at,updated_at FROM generation_tasks WHERE owner_id=? AND idempotency_key=?`, owner, key).Scan(&row).Error
+	if err != nil {
+		return generation.Task{}, err
+	}
+	if row.InputHash != hash {
+		return generation.Task{}, generation.ErrConflict
+	}
+	return generation.Task{ID: row.ID, Status: row.Status, ProjectID: row.ProjectID, Model: row.Model, ResultURL: row.ResultURL, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}, nil
+}
+func (s *Store) Get(ctx context.Context, id string) (generation.Task, string, error) {
+	var r struct {
+		ID, OwnerID, ProjectID, Model, ResultURL string
+		Status                                   generation.Status
+		CreatedAt, UpdatedAt                     time.Time
+	}
+	tx := s.DB.WithContext(ctx).Raw(`SELECT id,owner_id,project_id,model,result_url,status,created_at,updated_at FROM generation_tasks WHERE id=?`, id).Scan(&r)
+	if tx.Error != nil {
+		return generation.Task{}, "", tx.Error
+	}
+	if tx.RowsAffected == 0 {
+		return generation.Task{}, "", generation.ErrNotFound
+	}
+	return generation.Task{ID: r.ID, ProjectID: r.ProjectID, Model: r.Model, ResultURL: r.ResultURL, Status: r.Status, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}, r.OwnerID, nil
+}
+func (s *Store) Cancel(ctx context.Context, id, owner string) (generation.Task, error) {
+	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		now := time.Now().UTC()
+		res := tx.Exec(`UPDATE generation_tasks SET status='canceled',updated_at=? WHERE id=? AND owner_id=? AND status='queued'`, now, id, owner)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected > 0 {
+			return tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,occurred_at) VALUES(?,'canceled',?)`, id, now).Error
+		}
+		var status string
+		row := tx.Raw(`SELECT status FROM generation_tasks WHERE id=? AND owner_id=?`, id, owner).Row()
+		if err := row.Scan(&status); err != nil {
+			return generation.ErrNotFound
+		}
+		if status != "canceled" {
+			return generation.ErrConflict
+		}
+		return nil
+	})
+	if err != nil {
+		return generation.Task{}, err
+	}
+	t, _, err := s.Get(ctx, id)
+	return t, err
+}
+func (s *Store) Claim(ctx context.Context, id string) (generation.Input, bool, error) {
+	var input generation.Input
+	claimed := false
+	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		now := time.Now().UTC()
+		res := tx.Exec(`UPDATE generation_tasks SET status='running',updated_at=? WHERE id=? AND status='queued'`, now, id)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return nil
+		}
+		var data string
+		if err := tx.Raw(`SELECT input_snapshot FROM generation_tasks WHERE id=?`, id).Scan(&data).Error; err != nil {
+			return err
+		}
+		if err := json.Unmarshal([]byte(data), &input); err != nil {
+			return err
+		}
+		if err := tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,occurred_at) VALUES(?,'running',?)`, id, now).Error; err != nil {
+			return err
+		}
+		claimed = true
+		return nil
+	})
+	return input, claimed, err
+}
+func (s *Store) Finish(ctx context.Context, id, url string, runErr error) error {
+	status, event := "completed", "completed"
+	if runErr != nil {
+		status, event = "failed", "failed"
+		url = ""
+	}
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		now := time.Now().UTC()
+		res := tx.Exec(`UPDATE generation_tasks SET status=?,result_url=?,updated_at=? WHERE id=? AND status='running'`, status, url, now, id)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return errors.New("task no longer running")
+		}
+		return tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,occurred_at) VALUES(?,?,?)`, id, event, now).Error
+	})
+}

@@ -67,6 +67,73 @@ paths:
         "400": { $ref: "#/components/responses/InvalidRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "503": { $ref: "#/components/responses/ServiceUnavailable" }
+  /generation/tasks:
+    post:
+      operationId: createGenerationTask
+      summary: Queue a Krea2 generation for a controlled owned project
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 200 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [projectId, model, prompt, width, height]
+              properties:
+                projectId: { type: string }
+                referenceIds: { type: array, items: { type: string } }
+                model: { type: string, enum: [runninghub/krea2] }
+                prompt: { type: string, maxLength: 8000 }
+                width: { type: integer, minimum: 256, maximum: 4096 }
+                height: { type: integer, minimum: 256, maximum: 4096 }
+      responses:
+        "202":
+          description: Durable task, including a replay of the same idempotent request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GenerationTask" }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { description: Idempotency key reused with different input }
+  /generation/tasks/{id}:
+    get:
+      operationId: getGenerationTask
+      summary: Query an owned task or query as an authorized administrator
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Public task projection, without prompt, references, or credentials
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GenerationTask" }
+        "404": { description: Task not found or not authorized }
+  /generation/tasks/{id}/cancel:
+    post:
+      operationId: cancelGenerationTask
+      summary: Cancel an owned task before the worker claims it
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Canceled task
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GenerationTask" }
+        "404": { description: Task not found or not owned }
+        "409": { description: Task has already been claimed }
   /me:
     get:
       operationId: getCurrentUser
@@ -191,6 +258,17 @@ components:
       in: query
       schema: { type: string }
   schemas:
+    GenerationTask:
+      type: object
+      required: [id, status, model, projectId, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [queued, running, completed, canceled, failed, needs_review] }
+        model: { type: string }
+        projectId: { type: string }
+        resultUrl: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     UserStatus:
       type: string
       enum: [active, disabled]
