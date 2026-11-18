@@ -9,6 +9,7 @@ const { registerCanvasTools } = require('../lib/agent/canvas');
 const { createCanvasHistory, validateHistory } = require('../lib/canvas/history');
 after(closeDatabase);
 function setup(id) { saveWorkflow({ id, requestId: 'seed', baseVersion: 0, snapshot: { name: '故事', nodes: [{ id: 'a', type: 'text', position: { x: 0, y: 0 }, data: { type: 'text', label: 'A', prompt: '原稿' } }, { id: 'b', type: 'text', position: { x: 500, y: 0 }, data: { type: 'text', label: 'B', prompt: '无关内容' } }], edges: [], viewport: { x: 0, y: 0, zoom: 1 } } }); const service = new AgentService(getDatabase()); registerCanvasTools(service); return service; }
+function setupEmpty(id) { saveWorkflow({ id, requestId: 'seed', baseVersion: 0, snapshot: { name: '空白画布', nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } } }); const service = new AgentService(getDatabase()); registerCanvasTools(service); return service; }
 test('Agent edits a complete creative step durably, deduplicates tools and shares undo history', async () => { const service = setup('edit'); const task = service.send('edit', { requestId: 'send', text: '改写', modelId: 'test', references: [{ nodeId: 'a', name: 'A' }] }); await service.runNext(async (c) => { const args = { label: '改写剧本', operations: [{ kind: 'update', id: 'a', data: { prompt: '新稿' } }, { kind: 'update', id: 'a', data: { customTitle: '开场' } }] }; await c.tool('edit', 'edit_canvas', args); await c.tool('edit', 'edit_canvas', args); }); assert.equal(service.task(task.id).status, 'completed'); const saved = getWorkflowById('edit'); assert.equal(saved.nodes[0].data.prompt, '新稿'); assert.equal(saved.nodes[1].data.prompt, '无关内容'); assert.equal(saved.history.undo.length, 1); assert.equal(saved.history.operations.length, 2); let state = { ...saved, projectName: saved.name, canvasSession: 1 }; const history = createCanvasHistory(() => state, u => state = { ...state, ...u }); history.undo(); assert.equal(state.nodes[0].data.prompt, '原稿'); history.redo(); assert.equal(state.nodes[0].data.customTitle, '开场'); validateHistory(state.history, state); });
 test('remote Agent edits merge into unrelated unsaved work and undo restores the actual overwritten local value', async () => {
     require('fake-indexeddb/auto');
@@ -36,6 +37,29 @@ test('remote Agent edits merge into unrelated unsaved work and undo restores the
 });
 test('deletion waits for a persisted user decision and a model boolean cannot authorize it', async () => { const service = setup('delete'); const task = service.send('delete', { requestId: 'send', text: '整理画布', modelId: 'test' }); await service.runNext(async (c) => { await assert.rejects(c.tool('bad-delete', 'delete_canvas_nodes', { ids: ['a'], confirmed: true })); await c.tool('delete', 'delete_canvas_nodes', { ids: ['a'] }); }); assert.equal(service.canvas('delete').nodes.length, 2); const waiting = service.task(task.id); assert.equal(waiting.status, 'waiting'); service.answer('delete', { requestId: 'answer', questionId: waiting.question.id, text: '确认删除' }); await service.runNext(async (c) => c.tool('apply-delete', 'delete_canvas_nodes', { ids: ['a'] })); assert.equal(service.canvas('delete').nodes.length, 1); });
 test('model edits validate capabilities and cannot inject generation state', async () => { const service = setup('params'); const task = service.send('params', { requestId: 'send', text: '调整', modelId: 'test', references: [{ nodeId: 'a', name: 'A' }] }); await service.runNext(async (c) => c.tool('bad', 'edit_canvas', { operations: [{ kind: 'update', id: 'a', data: { generationTaskId: 'fabricated' } }] })); assert.equal(service.task(task.id).status, 'failed'); assert.equal(service.canvas('params').nodes[0].data.generationTaskId, undefined); });
+test('malformed canvas creates fail validation before permission checks', async () => {
+    const service = setup('invalid-create');
+    service.send('invalid-create', { requestId: 'send', text: '新增画面', modelId: 'test' });
+    let failure;
+    await service.runNext(async (c) => {
+        try {
+            await c.tool('bad-create', 'edit_canvas', { operations: [{ kind: 'create', id: 'bad', data: { type: 'text', label: '错误节点' } }] });
+        } catch (error) {
+            failure = error;
+        }
+    });
+    assert.ok(failure instanceof Error);
+    assert.match(failure.message, /Invalid tool parameters/);
+    assert.doesNotMatch(failure.message, /Cannot read properties|repurpose existing nodes/);
+    assert.equal(service.canvas('invalid-create').nodes.length, 2);
+});
+test('a valid create succeeds on an empty canvas', async () => {
+    const service = setupEmpty('empty-create');
+    const task = service.send('empty-create', { requestId: 'send', text: '新增开场', modelId: 'test' });
+    await service.runNext((c) => c.tool('create', 'edit_canvas', { operations: [{ kind: 'create', node: { id: 'opening', type: 'text', data: { type: 'text', label: '开场', prompt: '清晨' } } }] }));
+    assert.equal(service.task(task.id).status, 'completed');
+    assert.deepEqual(service.canvas('empty-create').nodes.map(node => node.id), ['opening']);
+});
 test('new content uses deterministic nonoverlapping layout without moving existing nodes', async () => { const service = setup('layout'); service.send('layout', { requestId: 'send', text: '写两个分镜', modelId: 'test' }); await service.runNext(async (c) => c.tool('create', 'edit_canvas', { operations: [{ kind: 'create', node: { id: 'new1', type: 'text', data: { type: 'text', label: '第一幕', prompt: '开场' } } }, { kind: 'create', node: { id: 'new2', type: 'text', data: { type: 'text', label: '第二幕', prompt: '结束' } } }] })); const saved = getWorkflowById('layout'); assert.equal(saved.nodes.length, 4); assert.deepEqual(saved.nodes[0].position, { x: 0, y: 0 }); assert.deepEqual(saved.nodes[1].position, { x: 500, y: 0 }); const [a, b] = saved.nodes.slice(2); assert.ok(Math.abs(a.position.x - b.position.x) >= 320 || Math.abs(a.position.y - b.position.y) >= 240); assert.ok(a.position.x >= 900 || a.position.y >= 300); });
 test('an open canvas automatically rebases an Agent edit through the version-checked save protocol', async () => {
     const { createStore } = require('zustand/vanilla');
@@ -208,10 +232,11 @@ test('Agent creates Seedream nodes with official 1.5K dimensions and durable adv
   const service = setup('seedream-settings');
   const task = service.send('seedream-settings', { requestId: 'send', text: '新增画面', modelId: 'test' });
   await service.runNext(c => c.tool('image', 'edit_canvas', { operations: [{ kind: 'create', node: { id: 'seedream', type: 'textToImage',
-    data: { type: 'textToImage', label: '雨夜', model: 'doubao-seedream-5-0-pro-260628', generationSizePreset: '1.5k', aspectRatio: '16:9',
+    data: { type: 'textToImage', label: '雨夜', model: 'doubao-seedream-5-0-pro-260628', generationSizePreset: '1.5K', aspectRatio: '16:9',
       imageOptions: { outputFormat: 'jpeg', promptOptimization: 'fast', watermark: true } } } }] }));
   assert.equal(service.task(task.id).status, 'completed');
   const data = service.canvas('seedream-settings').nodes.find(node => node.id === 'seedream').data;
   assert.equal(data.generationWidth, 2048); assert.equal(data.generationHeight, 1152);
+  assert.equal(data.generationSizePreset, '1.5k');
   assert.equal(data.imageOptions.outputFormat, 'jpeg');
 });

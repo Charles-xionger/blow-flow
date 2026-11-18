@@ -14,7 +14,7 @@ import {
   type ThreadMessageLike,
   type ToolCallMessagePartProps,
 } from '@assistant-ui/react';
-import { ArrowDown, ArrowUp, Check, Copy, FileText, ImagePlus, Loader2, RotateCcw, Square, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, ChevronRight, Copy, FileText, ImagePlus, Loader2, RotateCcw, Square, X } from 'lucide-react';
 import { useMemo, useState, type ReactNode } from 'react';
 import { BrandMark } from '@/components/ui/brand-mark';
 import type { AgentMessage, AgentReference, AgentTask } from '@/lib/agent/types';
@@ -92,10 +92,10 @@ function SkillText({ text }: TextMessagePartProps) {
 
 function ToolCall({ toolName, result, isError }: ToolCallMessagePartProps) {
   const state = result === undefined ? '执行中' : isError ? '失败' : '已完成';
-  return <div aria-label="工具调用" className={styles.toolCall} data-error={isError || undefined}>
-    <div>{result === undefined ? <Loader2 size={13} className="animate-spin"/> : isError ? <X size={13}/> : <Check size={13}/>}<span>{toolName}</span><small>{state}</small></div>
+  return <details aria-label="工具调用" className={styles.toolCall} data-error={isError || undefined}>
+    <summary><ChevronRight aria-hidden="true" className={styles.toolDisclosure} size={13}/>{result === undefined ? <Loader2 size={13} className="animate-spin"/> : isError ? <X size={13}/> : <Check size={13}/>}<span>{toolName}</span><small>{state}</small></summary>
     {result !== undefined ? <pre aria-label="工具结果" className={styles.toolResult}>{JSON.stringify(result, null, 2)}</pre> : null}
-  </div>;
+  </details>;
 }
 
 function ChatMessage() {

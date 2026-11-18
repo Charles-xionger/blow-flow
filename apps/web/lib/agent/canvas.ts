@@ -126,10 +126,20 @@ export function unauthorizedUpdates(service: AgentService, taskId: string, proje
     return [...new Set(operations.flatMap(op => op.kind === 'update' && existing.has(op.id) && !allowed.has(op.id) ? [op.id] : []))].sort();
 }
 
+const editCanvasOperationSchema = {
+    oneOf: [
+        { type: 'object', properties: { kind: { enum: ['create'] }, node: { type: 'object', properties: { id: { type: 'string' }, type: { enum: Object.values(NodeType) }, data: { type: 'object' }, parentId: { type: 'string' }, style: { type: 'object', properties: { width: { type: 'number' }, height: { type: 'number' } }, additionalProperties: false } }, required: ['id', 'type', 'data'], additionalProperties: false } }, required: ['kind', 'node'], additionalProperties: false },
+        { type: 'object', properties: { kind: { enum: ['update'] }, id: { type: 'string' }, data: { type: 'object', description: 'Editable node fields: label, customTitle, type, prompt (text or [{text},{ref}]), model, generationWidth/Height/SizePreset, imageOptions (outputFormat, watermark, promptOptimization, background), aspectRatio, videoResolution/AspectRatio/Duration/InstanceType, scriptPreset, scriptInstruction. Discover model capabilities first.' } }, required: ['kind', 'id', 'data'], additionalProperties: false },
+        { type: 'object', properties: { kind: { enum: ['move'] }, id: { type: 'string' }, position: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' } }, required: ['x', 'y'], additionalProperties: false } }, required: ['kind', 'id', 'position'], additionalProperties: false },
+        { type: 'object', properties: { kind: { enum: ['connect'] }, edge: { type: 'object', properties: { id: { type: 'string' }, source: { type: 'string' }, target: { type: 'string' } }, required: ['id', 'source', 'target'], additionalProperties: false } }, required: ['kind', 'edge'], additionalProperties: false },
+        { type: 'object', properties: { kind: { enum: ['disconnect'] }, id: { type: 'string' } }, required: ['kind', 'id'], additionalProperties: false },
+    ],
+} as const;
+
 export function registerCanvasTools(service: AgentService, models: () => CanvasModel[] = canvasModels) {
     const canvas = new CanvasAgentService(models);
     service.registerTool({ idempotent: true, name: 'edit_canvas', description: 'Apply a complete creative step as one undo batch. Operations: create {node}, update {id,data}, move {id,position}, connect {edge}, disconnect {id}. Use current project node IDs. Put new content in new nodes: updating a node this task did not create, and the user did not reference, asks the user first.',
-        inputSchema: { type: 'object', properties: { label: { type: 'string' }, operations: { type: 'array', items: { type: 'object', properties: { kind: { enum: ['create', 'update', 'move', 'connect', 'disconnect'] }, id: { type: 'string' }, node: { type: 'object', properties: { id: { type: 'string' }, type: { enum: Object.values(NodeType) }, data: { type: 'object' }, parentId: { type: 'string' }, style: { type: 'object', properties: { width: { type: 'number' }, height: { type: 'number' } }, additionalProperties: false } }, required: ['id', 'type', 'data'], additionalProperties: false }, data: { type: 'object', description: 'Editable node fields: label, customTitle, type, prompt (text or [{text},{ref}]), model, generationWidth/Height/SizePreset, imageOptions (outputFormat, watermark, promptOptimization, background), aspectRatio, videoResolution/AspectRatio/Duration/InstanceType, scriptPreset, scriptInstruction. Discover model capabilities first.' }, position: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' } }, required: ['x', 'y'], additionalProperties: false }, edge: { type: 'object', properties: { id: { type: 'string' }, source: { type: 'string' }, target: { type: 'string' } }, required: ['id', 'source', 'target'], additionalProperties: false } }, required: ['kind'], additionalProperties: false } } }, required: ['operations'], additionalProperties: false },
+        inputSchema: { type: 'object', properties: { label: { type: 'string' }, operations: { type: 'array', items: editCanvasOperationSchema } }, required: ['operations'], additionalProperties: false },
         execute: async (task, args, callId) => {
             const receipt = canvas.receipt(task.projectId, `${task.id}:${callId}`);
             if (receipt) return receipt;
@@ -138,6 +148,12 @@ export function registerCanvasTools(service: AgentService, models: () => CanvasM
             if (operations.some(operation => operation.kind === 'delete')) throw new Error('Deletion requires user permission');
             const current = getWorkflowById(task.projectId);
             if (!current) throw new Error('Project deleted');
+            const creates = operations.filter(op => op.kind === 'create');
+            for (const op of creates) {
+                if (!op.node || typeof op.node.id !== 'string' || !Object.values(NodeType).includes(op.node.type!)) throw new Error('Invalid new node');
+                if (op.node.id.length > 200 || !op.node.id || op.node.style && Object.entries(op.node.style).some(([key, value]) => !['width', 'height'].includes(key) || typeof value !== 'number' || !Number.isFinite(value) || value < 40 || value > 6000)) throw new Error('Invalid node dimensions');
+                if (Object.keys(op.node).some(key => !['id', 'type', 'data', 'position', 'style', 'parentId', 'extent'].includes(key))) throw new Error('Unsupported node field');
+            }
             const restricted = unauthorizedUpdates(service, task.id, task.projectId, current.nodes as CanvasNode[], operations);
             let grant: string | undefined;
             if (restricted.length) {
@@ -152,13 +168,7 @@ export function registerCanvasTools(service: AgentService, models: () => CanvasM
                 }
                 grant = question.id;
             }
-            const creates = operations.filter(op => op.kind === 'create');
             if (creates.length) {
-                for (const op of creates) {
-                    if (!op.node || typeof op.node.id !== 'string' || !Object.values(NodeType).includes(op.node.type!)) throw new Error('Invalid new node');
-                    if (op.node.id.length > 200 || !op.node.id || op.node.style && Object.entries(op.node.style).some(([key, value]) => !['width', 'height'].includes(key) || typeof value !== 'number' || !Number.isFinite(value) || value < 40 || value > 6000)) throw new Error('Invalid node dimensions');
-                    if (Object.keys(op.node).some(key => !['id', 'type', 'data', 'position', 'style', 'parentId', 'extent'].includes(key))) throw new Error('Unsupported node field');
-                }
                 const nodes = [...current.nodes as CanvasNode[], ...creates.map(op => ({ ...op.node, position: { x: 0, y: 0 } }))];
                 const edges = [...current.edges, ...operations.flatMap(op => op.kind === 'connect' ? [op.edge] : [])];
                 const addedIds = new Set(creates.map(op => op.node.id));

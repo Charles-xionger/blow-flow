@@ -164,9 +164,12 @@ test('assistant-ui composer selects skills with dollar or slash, renders tools a
  await input.pressSequentially(' 请写一个短场景');
  await page.getByRole('button',{name:'发送',exact:true}).click();
  await expect(page.getByLabel('助手消息')).toContainText('技能：剧本创作');
- await expect(page.getByLabel('工具调用')).toContainText('read_canvas');
- await expect(page.getByLabel('工具调用')).toContainText('已完成');
- await expect(page.getByLabel('工具结果')).toContainText('nodes');
+ const readCanvasTool=page.getByLabel('工具调用').filter({hasText:'read_canvas'});
+ const readCanvasResult=readCanvasTool.getByLabel('工具结果');
+ await expect(readCanvasTool).toContainText('已完成');
+ await expect(readCanvasResult).toBeHidden();
+ await readCanvasTool.locator('summary').click();
+ await expect(readCanvasResult).toContainText('nodes');
 
  await input.fill('/');
  const slashSkills=page.getByRole('listbox',{name:'选择创作技能'});

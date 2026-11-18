@@ -54,7 +54,10 @@
 .steps p span { flex: 1; min-width: 0; }
 .steps p svg { flex-shrink: 0; }
 .toolCall { padding: 8px 10px; margin: 6px 0; border: 1px solid var(--border); border-radius: 9px; color: var(--muted-foreground); font-size: 11px; }
-.toolCall > div { display: flex; align-items: center; gap: 8px; }
+.toolCall summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; }
+.toolCall summary::-webkit-details-marker { display: none; }
+.toolDisclosure { flex-shrink: 0; transition: transform 120ms ease; }
+.toolCall[open] .toolDisclosure { transform: rotate(90deg); }
 .toolCall span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .toolCall small { font-size: 10px; }
 .toolCall[data-error='true'] { color: var(--destructive); }

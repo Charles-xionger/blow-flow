@@ -214,8 +214,8 @@ export class AgentService {
             finish('completed', result);
             return result;
         } catch (error) {
-            // The planner needs the cause to correct its call; a bare failure pushed it into rewriting existing nodes.
-            const message = `Tool failed: ${redactedFailure(error)}. Fix the parameters and retry; do not repurpose existing nodes.`;
+            // The planner needs the concrete cause to correct its call without unrelated behavioral advice.
+            const message = `Tool failed: ${redactedFailure(error)}. Fix the parameters and retry.`;
             finish('failed', {error: message});
             throw new Error(message);
         }

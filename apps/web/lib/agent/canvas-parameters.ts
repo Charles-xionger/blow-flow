@@ -50,25 +50,27 @@ export function validateCanvasParameters(previous: NodeData, patch: Partial<Node
     let height = data.generationHeight ?? model.capabilities.dimensions.defaultHeight;
     if (model.category === 'IMAGE') {
         if (Object.keys(patch).some(key => key.startsWith('video'))) throw new Error('Video parameters require a video model');
+        const generationSizePreset = typeof data.generationSizePreset === 'string' ? data.generationSizePreset.toLowerCase() : data.generationSizePreset;
+        if ('generationSizePreset' in patch) result.generationSizePreset = generationSizePreset as NodeData['generationSizePreset'];
         const presets = model.capabilities.image?.presets;
         if (patch.imageOptions !== undefined) {
             if (!model.capabilities.image?.options) throw new Error('This model does not support advanced image settings');
             result.imageOptions = normalizeImageOptions(patch.imageOptions);
         }
         if (presets) {
-            if (data.generationSizePreset !== undefined && !model.capabilities.image!.sizes.some(size => size.toLowerCase() === data.generationSizePreset)) throw new Error('Invalid image size preset');
+            if (generationSizePreset !== undefined && !model.capabilities.image!.sizes.some(size => size.toLowerCase() === generationSizePreset)) throw new Error('Invalid image size preset');
             if (data.aspectRatio !== undefined && !model.capabilities.image!.aspectRatios.includes(data.aspectRatio)) throw new Error('Invalid image aspect ratio');
             if ('generationSizePreset' in patch || 'aspectRatio' in patch) {
-                const preset = presets.find(p => p.size.toLowerCase() === (data.generationSizePreset ?? '2k') && p.ratio === (data.aspectRatio ?? '1:1'));
+                const preset = presets.find(p => p.size.toLowerCase() === (generationSizePreset ?? '2k') && p.ratio === (data.aspectRatio ?? '1:1'));
                 if (!preset) throw new Error('Unsupported image preset');
                 width = preset.width; height = preset.height;
             }
             if (!presets.some(p => p.width === width && p.height === height)) throw new Error('Use supported image size and aspect ratio presets');
         } else {
-            if (data.generationSizePreset !== undefined && !['1k', '2k', 'custom'].includes(data.generationSizePreset)) throw new Error('Invalid image size preset');
+            if (generationSizePreset !== undefined && !['1k', '2k', 'custom'].includes(generationSizePreset)) throw new Error('Invalid image size preset');
             if (data.aspectRatio !== undefined && !imageAspectRatios.includes(data.aspectRatio as typeof imageAspectRatios[number])) throw new Error('Invalid image aspect ratio');
-            if (data.generationSizePreset && data.generationSizePreset !== 'custom' && ('generationSizePreset' in patch || 'aspectRatio' in patch)) {
-                const size = imagePresetDimensions(data.generationSizePreset, (data.aspectRatio ?? '1:1') as typeof imageAspectRatios[number], model.capabilities.dimensions);
+            if (generationSizePreset && generationSizePreset !== 'custom' && ('generationSizePreset' in patch || 'aspectRatio' in patch)) {
+                const size = imagePresetDimensions(generationSizePreset as Parameters<typeof imagePresetDimensions>[0], (data.aspectRatio ?? '1:1') as typeof imageAspectRatios[number], model.capabilities.dimensions);
                 if (!size) throw new Error('Unsupported image preset');
                 width = size.width; height = size.height;
             }
