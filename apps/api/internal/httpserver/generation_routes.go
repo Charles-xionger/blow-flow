@@ -6,12 +6,20 @@ import (
 	"errors"
 	"github.com/gin-gonic/gin"
 	"net/http"
+	"strconv"
 )
 
 type GenerationService interface {
 	Create(context.Context, generation.Actor, string, generation.Input) (generation.Task, error)
 	Get(context.Context, generation.Actor, string) (generation.Task, error)
 	Cancel(context.Context, generation.Actor, string) (generation.Task, error)
+}
+
+type GenerationEvents interface {
+	Events(context.Context, generation.Actor, string, int64) ([]generation.Event, error)
+}
+type GenerationResume interface {
+	Resume(context.Context, generation.Actor, string) (generation.Task, error)
 }
 
 func registerGenerationRoutes(v1 *gin.RouterGroup, d Dependencies) {
@@ -56,6 +64,41 @@ func registerGenerationRoutes(v1 *gin.RouterGroup, d Dependencies) {
 			return
 		}
 		c.JSON(200, t)
+	})
+	g.POST("/:id/resume", func(c *gin.Context) {
+		service, ok := d.Generation.(GenerationResume)
+		if !ok {
+			c.JSON(503, errorBody(c, "service_unavailable"))
+			return
+		}
+		task, err := service.Resume(c.Request.Context(), generationActor(c), c.Param("id"))
+		if err != nil {
+			generationError(c, err)
+			return
+		}
+		c.JSON(200, task)
+	})
+	g.GET("/:id/events", func(c *gin.Context) {
+		service, ok := d.Generation.(GenerationEvents)
+		if !ok {
+			c.JSON(503, errorBody(c, "service_unavailable"))
+			return
+		}
+		after, _ := strconv.ParseInt(c.Query("after"), 10, 64)
+		if after < 0 {
+			after = 0
+		}
+		task, err := d.Generation.Get(c.Request.Context(), generationActor(c), c.Param("id"))
+		if err != nil {
+			generationError(c, err)
+			return
+		}
+		events, err := service.Events(c.Request.Context(), generationActor(c), c.Param("id"), after)
+		if err != nil {
+			generationError(c, err)
+			return
+		}
+		c.JSON(200, gin.H{"task": task, "events": events})
 	})
 }
 func generationActor(c *gin.Context) generation.Actor {

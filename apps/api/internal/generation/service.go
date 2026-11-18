@@ -44,13 +44,22 @@ type Input struct {
 	Seed         int64    `json:"seed,omitempty"`
 }
 type Task struct {
-	ID        string    `json:"id"`
-	Status    Status    `json:"status"`
-	Model     string    `json:"model"`
-	ProjectID string    `json:"projectId"`
-	ResultURL string    `json:"resultUrl,omitempty"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID          string    `json:"id"`
+	Status      Status    `json:"status"`
+	Model       string    `json:"model"`
+	ProjectID   string    `json:"projectId"`
+	ResultURL   string    `json:"resultUrl,omitempty"`
+	Stage       string    `json:"stage"`
+	Percent     *float64  `json:"percent,omitempty"`
+	FailureCode string    `json:"failureCode,omitempty"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+}
+type Event struct {
+	ID         int64     `json:"id"`
+	Type       string    `json:"type"`
+	Stage      string    `json:"stage,omitempty"`
+	OccurredAt time.Time `json:"occurredAt"`
 }
 type Resources interface {
 	OwnsProject(context.Context, string, string) (bool, error)
@@ -110,6 +119,33 @@ func (s Service) Cancel(ctx context.Context, a Actor, id string) (Task, error) {
 		return Task{}, ErrNotFound
 	}
 	return s.Store.Cancel(ctx, id, owner)
+}
+func (s Service) Events(ctx context.Context, a Actor, id string, after int64) ([]Event, error) {
+	if _, err := s.Get(ctx, a, id); err != nil {
+		return nil, err
+	}
+	source, ok := s.Store.(interface {
+		Events(context.Context, string, int64) ([]Event, error)
+	})
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return source.Events(ctx, id, after)
+}
+func (s Service) Resume(ctx context.Context, a Actor, id string) (Task, error) {
+	if _, err := s.Get(ctx, a, id); err != nil {
+		return Task{}, err
+	}
+	source, ok := s.Store.(interface {
+		ResumeDelivery(context.Context, string) error
+	})
+	if !ok {
+		return Task{}, ErrNotFound
+	}
+	if err := source.ResumeDelivery(ctx, id); err != nil {
+		return Task{}, err
+	}
+	return s.Get(ctx, a, id)
 }
 func NewID() (string, error) {
 	var b [16]byte

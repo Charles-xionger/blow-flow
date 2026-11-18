@@ -34,8 +34,23 @@ func run() error {
 	publisher := queue.Publisher{DB: db, Rabbit: rabbit}
 	store := postgres.New(db)
 	worker := queue.SubmissionWorker{Store: store, Rabbit: rabbit, Provider: queue.Krea2{BaseURL: os.Getenv("RUNNINGHUB_BASE_URL"), APIKey: os.Getenv("RUNNINGHUB_API_KEY")}}
+	delivery := queue.DeliveryWorker{Store: store, Provider: queue.Krea2{BaseURL: os.Getenv("RUNNINGHUB_BASE_URL"), APIKey: os.Getenv("RUNNINGHUB_API_KEY")}, Artifacts: queue.OSSFromEnv()}
 	result := make(chan error, 1)
 	go func() { result <- worker.Run(ctx) }()
+	go func() {
+		poll := time.NewTicker(time.Second)
+		defer poll.Stop()
+		for {
+			if err := delivery.ProcessDue(ctx); err != nil && ctx.Err() == nil {
+				slog.Warn("delivery retry", "reason", err.Error())
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-poll.C:
+			}
+		}
+	}()
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
