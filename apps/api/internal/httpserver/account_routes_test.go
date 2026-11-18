@@ -3,6 +3,7 @@ package httpserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -21,24 +22,46 @@ type verifierStub struct {
 
 type captchaStub struct{ used bool }
 
-type refreshStub struct{ current string }
+type refreshStub struct {
+	current, previous string
+	revokeErr         error
+}
 
 func (s *refreshStub) Issue(_ context.Context, _ account.User, _ account.Identity) (string, error) {
 	s.current = "refresh-1"
 	return s.current, nil
 }
 func (s *refreshStub) Rotate(_ context.Context, raw, _ string) (account.Identity, string, error) {
-	if raw != s.current {
+	if raw != s.current && raw != s.previous {
 		return account.Identity{}, "", session.ErrInvalid
 	}
-	s.current = "refresh-2"
+	if raw == s.current {
+		s.previous = s.current
+		s.current = "refresh-2"
+	}
 	return account.Identity{Issuer: localauth.Issuer, Subject: localauth.Subject, Email: "admin@example.com", EmailVerified: true, AuthenticatedAt: time.Now()}, s.current, nil
 }
 func (s *refreshStub) Revoke(_ context.Context, raw, _ string) error {
+	if s.revokeErr != nil {
+		return s.revokeErr
+	}
 	if raw == s.current {
 		s.current = ""
 	}
 	return nil
+}
+
+func TestLogoutKeepsCookieWhenRevocationStoreFails(t *testing.T) {
+	sessions := &refreshStub{current: "refresh-1", revokeErr: errors.New("database unavailable")}
+	router := NewWithDependencies(Dependencies{RefreshSessions: sessions})
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/admin/logout", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	req.AddCookie(&http.Cookie{Name: "blow_flow_admin_refresh", Value: "refresh-1"})
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != 503 || len(w.Result().Cookies()) != 0 {
+		t.Fatalf("failed revocation: %d cookies=%v", w.Code, w.Result().Cookies())
+	}
 }
 
 func (*captchaStub) Generate() (string, string, error) {
@@ -86,6 +109,7 @@ func TestLocalAdminLoginIssuesTokenForRealAccountRoutes(t *testing.T) {
 		t.Fatalf("refresh cookie missing protection: %+v", cookies)
 	}
 	refreshRequest := httptest.NewRequest(http.MethodPost, "/v1/auth/admin/refresh", nil)
+	refreshRequest.Header.Set("Sec-Fetch-Site", "same-origin")
 	refreshRequest.AddCookie(cookies[0])
 	refreshed := httptest.NewRecorder()
 	router.ServeHTTP(refreshed, refreshRequest)
@@ -94,10 +118,11 @@ func TestLocalAdminLoginIssuesTokenForRealAccountRoutes(t *testing.T) {
 	}
 	replay := httptest.NewRecorder()
 	router.ServeHTTP(replay, refreshRequest)
-	if replay.Code != 401 {
-		t.Fatalf("replayed refresh = %d", replay.Code)
+	if replay.Code != 200 || replay.Result().Cookies()[0].Value != refreshed.Result().Cookies()[0].Value {
+		t.Fatalf("lost-response refresh replay = %d", replay.Code)
 	}
 	logoutRequest := httptest.NewRequest(http.MethodPost, "/v1/auth/admin/logout", nil)
+	logoutRequest.Header.Set("Sec-Fetch-Site", "same-origin")
 	logoutRequest.AddCookie(refreshed.Result().Cookies()[0])
 	loggedOut := httptest.NewRecorder()
 	router.ServeHTTP(loggedOut, logoutRequest)

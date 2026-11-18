@@ -52,7 +52,7 @@ func TestRefreshSessionRotatesOnceAndExpires(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Second)
-	store := Store{DB: db, Now: func() time.Time { return now }}
+	store := Store{DB: db, Now: func() time.Time { return now }, Key: []byte("0123456789abcdef0123456789abcdef")}
 	identity := account.Identity{Issuer: "blow-flow-local", Subject: "bootstrap-admin", Email: "admin@example.com", EmailVerified: true, AuthenticatedAt: now}
 	raw, err := store.Issue(context.Background(), account.User{ID: userID}, identity)
 	if err != nil {
@@ -62,10 +62,15 @@ func TestRefreshSessionRotatesOnceAndExpires(t *testing.T) {
 	if err != nil || got.Subject != identity.Subject || next == raw {
 		t.Fatalf("rotation: %+v %v", got, err)
 	}
-	if _, _, err = store.Rotate(context.Background(), raw, identity.Issuer); err != ErrInvalid {
-		t.Fatalf("old token reused: %v", err)
+	_, replayed, err := store.Rotate(context.Background(), raw, identity.Issuer)
+	if err != nil || replayed != next {
+		t.Fatalf("lost response replay: %v", err)
 	}
-	if err = store.Revoke(context.Background(), next, identity.Issuer); err != nil {
+	now = now.Add(31 * time.Second)
+	if _, _, err = store.Rotate(context.Background(), raw, identity.Issuer); err != ErrInvalid {
+		t.Fatalf("old token outside grace: %v", err)
+	}
+	if err = store.Revoke(context.Background(), raw, identity.Issuer); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err = store.Rotate(context.Background(), next, identity.Issuer); err != ErrInvalid {
@@ -98,5 +103,12 @@ func TestRefreshSessionRotatesOnceAndExpires(t *testing.T) {
 	now = now.Add(Lifetime + time.Second)
 	if _, _, err = store.Rotate(context.Background(), raw, identity.Issuer); err != ErrInvalid {
 		t.Fatalf("expired token: %v", err)
+	}
+	if err = store.Prune(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var remaining int64
+	if err = db.Raw(`SELECT count(*) FROM auth_sessions`).Scan(&remaining).Error; err != nil || remaining != 0 {
+		t.Fatalf("pruned sessions = %d, err=%v", remaining, err)
 	}
 }

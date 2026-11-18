@@ -47,6 +47,7 @@ export async function ensureSession(): Promise<AdminSession | null> {
 
 export async function signOut() {
   try { await refreshing } catch { /* The refresh request may have failed before logout. */ }
-  try { await fetch('/v1/auth/admin/logout', { method: 'POST', credentials: 'same-origin' }) }
-  finally { clearSession() }
+  const response = await fetch('/v1/auth/admin/logout', { method: 'POST', credentials: 'same-origin' })
+  if (!response.ok) throw new Error('Logout temporarily unavailable')
+  clearSession()
 }

@@ -133,6 +133,8 @@ paths:
       security: []
       responses:
         "204": { description: Session revoked and cookie cleared }
+        "403": { description: Cross-origin request rejected }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
   /auth/user/logout:
     post:
       operationId: logoutCreator
@@ -140,6 +142,8 @@ paths:
       security: []
       responses:
         "204": { description: Session revoked and cookie cleared }
+        "403": { description: Cross-origin request rejected }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
   /workspace:
     get:
       operationId: getOwnedWorkspace

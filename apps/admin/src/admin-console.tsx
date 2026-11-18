@@ -20,7 +20,7 @@ type Props = {
   token?: string
   account?: Account
   preview: boolean
-  onSignOut: () => void
+  onSignOut: () => void | Promise<void>
   onUnauthorized: () => void
 }
 
@@ -158,7 +158,7 @@ export function AdminConsole({ token, account, preview, onSignOut, onUnauthorize
     <div className='min-w-0 flex-1'>
       <header className='flex h-16 items-center justify-between gap-4 border-b px-4 sm:px-6'>
         <div className='flex min-w-0 items-center gap-3'><Button variant='ghost' size='icon' className='md:hidden' aria-label='打开菜单' onClick={() => setMobileOpen(true)}><Menu /></Button><Button variant='ghost' size='icon' className='hidden md:inline-flex' aria-label={collapsed ? '展开侧栏' : '收起侧栏'} onClick={() => setCollapsed(value => !value)}>{collapsed ? <PanelLeftOpen /> : <PanelLeftClose />}</Button><span className='hidden text-sm text-muted-foreground sm:inline'>生成运营后台</span><ChevronRight className='hidden size-4 text-muted-foreground sm:inline' /><span className='truncate text-sm font-medium'>{title}</span></div>
-        <div className='flex items-center gap-2'><Button variant='ghost' size='icon' aria-label='刷新当前页面' disabled={preview || section === 'tasks' || section === 'cost'} onClick={() => setRefresh(value => value + 1)}><RefreshCw /></Button><Button variant='outline' size='sm' onClick={onSignOut}><LogOut />{preview ? '退出预览' : '退出'}</Button></div>
+        <div className='flex items-center gap-2'><Button variant='ghost' size='icon' aria-label='刷新当前页面' disabled={preview || section === 'tasks' || section === 'cost'} onClick={() => setRefresh(value => value + 1)}><RefreshCw /></Button><Button variant='outline' size='sm' onClick={() => { void Promise.resolve(onSignOut()).catch(() => setError('退出暂时失败，请检查网络后重试。')) }}><LogOut />{preview ? '退出预览' : '退出'}</Button></div>
       </header>
       <main className='mx-auto max-w-7xl space-y-6 p-4 sm:p-6'>
         {preview && <div role='status' className='rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950'>{previewMessage}</div>}

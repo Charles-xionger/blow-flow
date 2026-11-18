@@ -1020,6 +1020,14 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Cross-origin request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     logoutCreator: {
@@ -1038,6 +1046,14 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Cross-origin request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getOwnedWorkspace: {

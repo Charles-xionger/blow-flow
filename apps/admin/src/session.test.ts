@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { adminClient } from './api'
-import { clearSession, ensureSession, getSession, saveSession } from './admin-session'
+import { clearSession, ensureSession, getSession, saveSession, signOut } from './admin-session'
 
 afterEach(() => { vi.unstubAllGlobals() })
 
@@ -42,5 +42,20 @@ it('keeps the stored session during a temporary refresh outage', async () => {
   vi.stubGlobal('fetch',vi.fn(async () => Response.json({error:'service_unavailable'},{status:503})))
   await expect(ensureSession()).rejects.toThrow('Refresh temporarily unavailable')
   expect(getSession()?.accessToken).toBe('old')
+  clearSession()
+})
+
+it('keeps the session when logout cannot revoke it on the server', async () => {
+  const values = new Map<string,string>()
+  vi.stubGlobal('window', { sessionStorage: {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => { values.set(key,value) },
+    removeItem: (key: string) => { values.delete(key) },
+  } })
+  const user = { id:'admin-1', email:'admin@example.com', role:'admin', status:'active', createdAt:'2026-01-01', updatedAt:'2026-01-01' } as const
+  saveSession('still-valid',900,user)
+  vi.stubGlobal('fetch',vi.fn(async () => Response.json({error:'service_unavailable'},{status:503})))
+  await expect(signOut()).rejects.toThrow('Logout temporarily unavailable')
+  expect(getSession()?.accessToken).toBe('still-valid')
   clearSession()
 })

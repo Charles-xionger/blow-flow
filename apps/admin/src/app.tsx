@@ -23,6 +23,7 @@ export function AdminApp() {
   const [captchaError, setCaptchaError] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
+  const [reconnecting, setReconnecting] = useState(false)
   const [busy, setBusy] = useState(false)
 
   const clearSession = useCallback(() => {
@@ -46,9 +47,9 @@ export function AdminApp() {
     let active = true
     async function load() {
       if (preview) { setLoading(false); return }
-      const session = await ensureSession()
-      if (!session) { setLoading(false); return }
       try {
+        const session = await ensureSession()
+        if (!session) return
         const result = await adminClient(session.accessToken).GET('/me')
         if (result.response.status === 401 || result.response.status === 403) { if (active) clearSession(); return }
         if (result.error || !result.data) throw new Error('temporarily unavailable')
@@ -58,7 +59,7 @@ export function AdminApp() {
         if (active) {
           const cached = getSession()
           if (cached && cached.expiresAt > Date.now()) { setToken(cached.accessToken); setAccount(cached.user) }
-          else setError('暂时无法验证会话，请检查网络后刷新页面。')
+          else { setError('连接暂时不可用，恢复后将自动继续会话。'); setReconnecting(true) }
         }
       }
       finally { if (active) setLoading(false) }
@@ -66,6 +67,24 @@ export function AdminApp() {
     void load()
     return () => { active = false }
   }, [preview, clearSession])
+
+  useEffect(() => {
+    if (!reconnecting || preview || token) return
+    let active=true
+    const timer=window.setInterval(() => {
+      void ensureSession().then(async session => {
+        if (!active) return
+        if (!session) { setReconnecting(false); setError('会话已失效，请重新登录。'); return }
+        const result=await adminClient(session.accessToken).GET('/me')
+        if (!active) return
+        if (result.response.status===401 || result.response.status===403) { clearSession(); setReconnecting(false); return }
+        if (result.data && mayEnterAdmin(result.data.user.role,result.data.user.status,false)) {
+          setToken(session.accessToken);setAccount(result.data.user);setError('');setReconnecting(false)
+        }
+      }).catch(() => { /* Retry after the next interval. */ })
+    },5_000)
+    return () => {active=false;window.clearInterval(timer)}
+  },[reconnecting,preview,token,clearSession])
 
   useEffect(() => {
     if (!preview && !loading && !token) void refreshCaptcha()
@@ -77,8 +96,10 @@ export function AdminApp() {
       void ensureSession().then(session => {
         if (!session) { clearSession(); return }
         return adminClient(session.accessToken).GET('/me').then(result => {
-          if (result.response.status === 401 || result.response.status === 403 || !mayEnterAdmin(result.data?.user.role, result.data?.user.status, false)) clearSession()
-          else if (result.data) { setToken(session.accessToken); setAccount(result.data.user) }
+          if (result.response.status === 401 || result.response.status === 403) { clearSession(); return }
+          if (result.error || !result.data) return
+          if (!mayEnterAdmin(result.data.user.role, result.data.user.status, false)) clearSession()
+          else { setToken(session.accessToken); setAccount(result.data.user) }
         })
       }).catch(() => { /* A transient network error must not sign out the user. */ })
     }, 30_000)
@@ -87,6 +108,7 @@ export function AdminApp() {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    setReconnecting(false)
     if (!captcha) return
     setBusy(true)
     setError('')
@@ -97,7 +119,7 @@ export function AdminApp() {
       setAccount(session.user)
       setPassword('')
     } catch (cause) {
-      void signOut().catch(() => { /* Local session is cleared even when the server is offline. */ })
+      removeStoredSession()
       setError(cause instanceof Error ? cause.message : '登录失败，请重试。')
       void refreshCaptcha()
     } finally { setBusy(false) }
@@ -145,9 +167,9 @@ export function AdminApp() {
     account={account ?? undefined}
     preview={preview}
     onUnauthorized={clearSession}
-    onSignOut={() => {
+    onSignOut={async () => {
       if (preview) { window.location.assign('/'); return }
-      removeStoredSession()
+      await signOut()
       setToken(null)
       setAccount(null)
       setError('')

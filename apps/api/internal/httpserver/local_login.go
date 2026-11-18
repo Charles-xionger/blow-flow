@@ -211,7 +211,7 @@ func sameOrigin(c *gin.Context) bool {
 		parsed, err := url.Parse(origin)
 		return err == nil && parsed.Host == c.Request.Host && (parsed.Scheme == "https" || parsed.Scheme == "http")
 	}
-	return true
+	return false
 }
 
 func refreshLogin(dependencies Dependencies, role account.Role) gin.HandlerFunc {
@@ -237,7 +237,6 @@ func refreshLogin(dependencies Dependencies, role account.Role) gin.HandlerFunc 
 				c.JSON(http.StatusServiceUnavailable, errorBody(c, "service_unavailable"))
 				return
 			}
-			setRefreshCookie(c, role, "")
 			c.JSON(http.StatusUnauthorized, errorBody(c, "invalid_refresh"))
 			return
 		}
@@ -279,8 +278,15 @@ func logout(dependencies Dependencies, role account.Role) gin.HandlerFunc {
 			return
 		}
 		name, _, issuer := refreshCookie(role)
-		if cookie, err := c.Request.Cookie(name); err == nil && dependencies.RefreshSessions != nil {
-			_ = dependencies.RefreshSessions.Revoke(c.Request.Context(), cookie.Value, issuer)
+		if cookie, err := c.Request.Cookie(name); err == nil {
+			if dependencies.RefreshSessions == nil {
+				c.JSON(http.StatusServiceUnavailable, errorBody(c, "service_unavailable"))
+				return
+			}
+			if err := dependencies.RefreshSessions.Revoke(c.Request.Context(), cookie.Value, issuer); err != nil {
+				c.JSON(http.StatusServiceUnavailable, errorBody(c, "service_unavailable"))
+				return
+			}
 		}
 		setRefreshCookie(c, role, "")
 		c.Status(http.StatusNoContent)

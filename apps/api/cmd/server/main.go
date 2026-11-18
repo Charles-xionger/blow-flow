@@ -52,6 +52,7 @@ func run() error {
 	var creatorAuth httpserver.CreatorAuthenticator
 	var captcha httpserver.ImageCaptcha
 	var refreshSessions httpserver.RefreshSessions
+	var refreshStore *session.Store
 	var generationService httpserver.GenerationService
 	var resourceService *resource.Service
 	var scriptService *script.Service
@@ -112,7 +113,8 @@ func run() error {
 				}
 				identityVerifier = verifiers
 				captcha = imagecaptcha.New()
-				refreshSessions = session.Store{DB: db, Now: time.Now}
+				refreshStore = &session.Store{DB: db, Now: time.Now, Key: key}
+				refreshSessions = refreshStore
 				repository := accountpostgres.New(db, time.Now)
 				accounts = account.NewService(repository, account.InitialAdministrator{Issuer: localauth.Issuer, Subject: localauth.Subject, LinkExistingByEmail: true}, time.Now)
 				ping = func(ctx context.Context) error { return database.Check(ctx, pool) }
@@ -131,6 +133,24 @@ func run() error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if refreshStore != nil {
+		go func() {
+			ticker := time.NewTicker(6 * time.Hour)
+			defer ticker.Stop()
+			for {
+				cleanup, cancel := context.WithTimeout(ctx, 30*time.Second)
+				if err := refreshStore.Prune(cleanup); err != nil && ctx.Err() == nil {
+					slog.Warn("refresh session cleanup failed")
+				}
+				cancel()
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+				}
+			}
+		}()
+	}
 	server := &http.Server{Handler: httpserver.NewWithDependencies(httpserver.Dependencies{Ping: ping, Accounts: accounts, IdentityVerifier: identityVerifier, LocalAdmin: localAdmin, CreatorAuth: creatorAuth, Captcha: captcha, RefreshSessions: refreshSessions, Generation: generationService, GenerationWakeups: wakeups, GenerationStreamClose: ctx.Done(), Resources: resourceService, ResourceBlobs: resourceoss.FromEnv(), Scripts: scriptService, ScriptWakeups: scriptWakeups, TextModels: textModels}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(listener) }()
