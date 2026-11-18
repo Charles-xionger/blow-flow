@@ -60,3 +60,33 @@ type SimulatedProvider struct{}
 func (SimulatedProvider) Generate(_ context.Context, input generation.Input) (string, error) {
 	return "simulated://krea2/result", nil
 }
+
+type Submitter interface {
+	Submit(context.Context, generation.Input) (string, error)
+}
+type SubmissionWorker struct {
+	Store    *postgres.Store
+	Rabbit   *Rabbit
+	Provider Submitter
+}
+
+func (w SubmissionWorker) Run(ctx context.Context) error {
+	return w.Rabbit.Consume(ctx, func(ctx context.Context, id string) error {
+		claim, ok, err := w.Store.ClaimSubmission(ctx, id)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return nil
+		}
+		allowed, err := w.Store.CheckSubmission(ctx, id, claim.Token)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return w.Store.ResolveSubmission(ctx, id, claim.Token, "", generation.ErrSubmissionRejected)
+		}
+		providerID, submitErr := w.Provider.Submit(ctx, claim.Input)
+		return w.Store.ResolveSubmission(ctx, id, claim.Token, providerID, submitErr)
+	})
+}

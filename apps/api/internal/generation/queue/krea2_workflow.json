@@ -1,0 +1,243 @@
+{
+  "2": {
+    "inputs": {
+      "width": [
+        "10",
+        0
+      ],
+      "height": [
+        "10",
+        1
+      ],
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Empty Latent Image",
+      "cnr_id": "comfy-core",
+      "ver": "0.25.0"
+    }
+  },
+  "3": {
+    "inputs": {
+      "text": [
+        "102",
+        0
+      ],
+      "clip": [
+        "7",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt)",
+      "cnr_id": "comfy-core",
+      "ver": "0.25.0"
+    }
+  },
+  "7": {
+    "inputs": {
+      "clip_name": "qwen3vl_4b_fp8_scaled.safetensors",
+      "type": "krea2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP",
+      "cnr_id": "comfy-core",
+      "ver": "0.25.0"
+    }
+  },
+  "9": {
+    "inputs": {
+      "conditioning": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "Conditioning Zero Out",
+      "cnr_id": "comfy-core",
+      "ver": "0.25.0"
+    }
+  },
+  "10": {
+    "inputs": {
+      "use_custom_resolution": true,
+      "resolution": "1920x1080 (16:9) (横屏)",
+      "custom_width": 1920,
+      "custom_height": 1080
+    },
+    "class_type": "TTResolutionSelector",
+    "_meta": {
+      "title": "TT分辨率选择器",
+      "aux_id": "AICoderTudou/ComfyUI-TT-Resolution_selector-Node",
+      "ver": "b69cf75c2ce5f864e3db5301dba46a6b5eeaa8fb"
+    }
+  },
+  "13": {
+    "inputs": {
+      "unet_name": "krea2_turbo_fp8.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model",
+      "cnr_id": "comfy-core",
+      "ver": "0.25.0"
+    }
+  },
+  "16": {
+    "inputs": {
+      "vae_name": "Wan2.1_VAE.pth"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE",
+      "cnr_id": "comfy-core",
+      "ver": "0.25.0"
+    }
+  },
+  "49": {
+    "inputs": {
+      "samples": [
+        "97",
+        0
+      ],
+      "vae": [
+        "16",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode",
+      "cnr_id": "comfy-core",
+      "ver": "0.12.3"
+    }
+  },
+  "97": {
+    "inputs": {
+      "seed": 452156336684689,
+      "steps": 8,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "107",
+        0
+      ],
+      "positive": [
+        "3",
+        0
+      ],
+      "negative": [
+        "9",
+        0
+      ],
+      "latent_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "102": {
+    "inputs": {
+      "prompt": "当代新宋时装艺术人像，3:4竖幅。画面融合现代东方时装电影与宋画空间美学，以留白、抽象山水、克制色彩和流动层次塑造安静而具有视觉张力的氛围。\n\n一位年轻成年东亚女性站在黑色镜面浅水平台上。身体呈舒展的三分之二侧身姿态，头部轻柔转向侧前方。一只手整理腰侧的不对称衣片，另一只手自然下垂，手指松弛优雅。\n\n服装从宋式交领、宽袖、层叠包裹和修长比例中提取设计语言，结合现代不对称叠片、建筑感褶裥、简洁肩线和一体式腰部结构。主体采用温润米白色亚麻丝质面料，搭配苔绿与墨绿色窄幅内层，少量炭黑轻薄织物形成向后的流动线条。服装轮廓简洁、克制、现代，面料具有细腻纤维、柔软垂坠与清晰结构。\n\n空间是一座当代东方水庭艺术装置。黑色镜面水面延伸至画面深处，米白色矿物山石以简化的山峰形态错落排列，黑木垂直框架形成书法般的线条，稀疏竹影投射在薄雾和浅色墙面上。远处悬挂半透明宣纸薄幕，轻微气流令其产生柔和弧度。\n\n采用全身时装构图与略低机位，呈现70至85毫米人像镜头的空间压缩感。人物偏离画面中心，四周保留大面积安静留白。服装轮廓、面部、双手以及水中倒影清晰可读，前后景形成疏密有序的层次。\n\n环境以暗青、墨绿和炭黑为基调。暖金色侧后光沿发丝、面部边缘、肩线和宽袖纤维形成精细轮廓；米白色山石装置反射柔和冷灰补光，保留面部和双手的自然明暗。水面呈现克制的金色反光与轻微涟漪，黑位深沉并保留材质细节。\n\n皮肤呈现干净、健康、自然均匀的东亚肤色。近距离可见低对比度的细微肤理、自然唇纹、柔和眼睑细节和真实色阶；正常观看距离下清爽平整。妆容轻薄克制，表面高光柔和，保留正常皮肤质感。\n\n整体呈现美术馆级当代东方时装影像：极简、诗意、理性、安静且具有吸引力。宋式气质通过修长比例、天然材料、空间留白、抽象山水和含蓄节奏自然呈现。"
+    },
+    "class_type": "CR Prompt Text",
+    "_meta": {
+      "title": "⚙️ CR Prompt Text"
+    }
+  },
+  "103": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "images": [
+        "49",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "105": {
+    "inputs": {
+      "lora_name": "krea2_xm_k20_texture.safetensors",
+      "strength_model": 0.6000000000000001,
+      "model": [
+        "109",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "Load LoRA"
+    }
+  },
+  "106": {
+    "inputs": {
+      "lora_name": "Afterlight_v1.safetensors",
+      "strength_model": 0.5000000000000001,
+      "model": [
+        "108",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "Load LoRA"
+    }
+  },
+  "107": {
+    "inputs": {
+      "lora_name": "krea2-Cc-MJ-影视柔光.safetensors",
+      "strength_model": 0.6000000000000001,
+      "model": [
+        "106",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "Load LoRA"
+    }
+  },
+  "108": {
+    "inputs": {
+      "lora_name": "krea2-Cc-MJ-风格滤镜.safetensors",
+      "strength_model": 0.6000000000000001,
+      "model": [
+        "105",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "Load LoRA"
+    }
+  },
+  "109": {
+    "inputs": {
+      "lora_name": "krea2_10000.safetensors",
+      "strength_model": 0.45000000000000007,
+      "model": [
+        "13",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "Load LoRA"
+    }
+  }
+}

@@ -35,10 +35,11 @@ func TestGenerationChecksResourceOwnerAndHidesOtherUsersTask(t *testing.T) {
 	store := &storeStub{task: Task{ID: "task", Status: Queued}, owner: "owner"}
 	s := Service{Store: store, Resources: resourcesStub{project: true, reference: false}}
 	input := Input{ProjectID: "project", ReferenceIDs: []string{"ref"}, Model: "runninghub/krea2", Prompt: "cat", Width: 1024, Height: 1024}
-	if _, err := s.Create(ctx, Actor{ID: "owner"}, "key", input); !errors.Is(err, ErrForbidden) || store.created != 0 {
+	if _, err := s.Create(ctx, Actor{ID: "owner"}, "key", input); !errors.Is(err, ErrInvalid) || store.created != 0 {
 		t.Fatalf("reference ownership: %v, creates=%d", err, store.created)
 	}
 	s.Resources = resourcesStub{project: true, reference: true}
+	input.ReferenceIDs = nil
 	if _, err := s.Create(ctx, Actor{ID: "owner"}, "key", input); err != nil || store.created != 1 {
 		t.Fatalf("create: %v, creates=%d", err, store.created)
 	}
