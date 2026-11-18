@@ -1,6 +1,8 @@
 package postgres
 
 import (
+	"blow-flow/api/internal/resource"
+	resourcepostgres "blow-flow/api/internal/resource/postgres"
 	"blow-flow/api/internal/script"
 	"context"
 	"crypto/rand"
@@ -15,9 +17,11 @@ import (
 )
 
 type Store struct {
-	DB            *gorm.DB
-	Notify        func(context.Context, string)
-	MaxConcurrent int
+	DB               *gorm.DB
+	Notify           func(context.Context, string)
+	MaxConcurrent    int
+	CircuitCooldown  time.Duration
+	MaxQueuedPerUser int
 }
 
 func New(db *gorm.DB) *Store { return &Store{DB: db} }
@@ -31,6 +35,7 @@ type row struct {
 	ID, OwnerID, ProjectID, NodeID, RequestID, Status, Phase, Text string
 	Input, Workflow                                                []byte
 	OutputNodeID, Error                                            *string
+	OutputSaved                                                    bool
 	Revision                                                       int64
 	LeaseID                                                        *string
 	CreatedAt, UpdatedAt                                           time.Time
@@ -41,7 +46,7 @@ func (r row) task() (script.Task, error) {
 	if err := json.Unmarshal(r.Input, &input); err != nil {
 		return script.Task{}, err
 	}
-	t := script.Task{ID: r.ID, RequestID: r.RequestID, CanvasID: r.ProjectID, NodeID: r.NodeID, Input: input, Status: r.Status, Phase: r.Phase, Text: r.Text, Workflow: r.Workflow, Revision: r.Revision, CreatedAt: r.CreatedAt.UnixMilli(), UpdatedAt: r.UpdatedAt.UnixMilli()}
+	t := script.Task{ID: r.ID, RequestID: r.RequestID, CanvasID: r.ProjectID, NodeID: r.NodeID, Input: input, Status: r.Status, Phase: r.Phase, Text: r.Text, Workflow: r.Workflow, OutputSaved: r.OutputSaved, Revision: r.Revision, CreatedAt: r.CreatedAt.UnixMilli(), UpdatedAt: r.UpdatedAt.UnixMilli()}
 	if r.OutputNodeID != nil {
 		t.OutputNodeID = *r.OutputNodeID
 	}
@@ -60,57 +65,6 @@ func uuid() (string, error) {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[:4], b[4:6], b[6:8], b[8:10], b[10:]), nil
 }
 
-type graph struct {
-	Raw   map[string]any
-	Nodes []map[string]any
-	Edges []map[string]any
-}
-
-func readGraph(raw []byte) (graph, error) {
-	var obj map[string]any
-	err := json.Unmarshal(raw, &obj)
-	if err != nil {
-		return graph{}, script.ErrConflict
-	}
-	rawNodes, ok := obj["nodes"].([]any)
-	if !ok {
-		return graph{}, script.ErrConflict
-	}
-	rawEdges, ok := obj["edges"].([]any)
-	if !ok || obj["viewport"] == nil {
-		return graph{}, script.ErrConflict
-	}
-	g := graph{Raw: obj, Nodes: make([]map[string]any, 0, len(rawNodes)), Edges: make([]map[string]any, 0, len(rawEdges))}
-	for _, n := range rawNodes {
-		v, ok := n.(map[string]any)
-		if !ok {
-			return graph{}, script.ErrConflict
-		}
-		g.Nodes = append(g.Nodes, v)
-	}
-	for _, e := range rawEdges {
-		v, ok := e.(map[string]any)
-		if !ok {
-			return graph{}, script.ErrConflict
-		}
-		g.Edges = append(g.Edges, v)
-	}
-	return g, nil
-}
-func (g graph) bytes() ([]byte, error) {
-	g.Raw["nodes"] = g.Nodes
-	g.Raw["edges"] = g.Edges
-	return json.Marshal(g.Raw)
-}
-func node(g graph, id string) map[string]any {
-	for _, n := range g.Nodes {
-		if n["id"] == id {
-			return n
-		}
-	}
-	return nil
-}
-func nodeData(n map[string]any) map[string]any { d, _ := n["data"].(map[string]any); return d }
 func projectSnapshot(tx *gorm.DB, owner, project string) ([]byte, error) {
 	var p struct {
 		Snapshot            []byte
@@ -177,12 +131,25 @@ func (s *Store) Create(ctx context.Context, owner string, request script.Create)
 			resolvedID = alias.TaskID
 			return nil
 		}
-		g, err := readGraph(snapshot)
-		if err != nil {
+		if err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtext(?))`, owner+":script-queue").Error; err != nil {
 			return err
 		}
-		source := node(g, request.NodeID)
-		if source == nil || source["type"] != "script" {
+		limit := s.MaxQueuedPerUser
+		if limit < 1 {
+			limit = 100
+		}
+		var queued int64
+		if err := tx.Raw(`SELECT count(*) FROM script_tasks WHERE owner_id=? AND status='queued'`, owner).Scan(&queued).Error; err != nil {
+			return err
+		}
+		if queued >= int64(limit) {
+			return script.ErrQueueFull
+		}
+		refs := make([]resourcepostgres.ScriptReference, 0, len(request.Input.References))
+		for _, r := range request.Input.References {
+			refs = append(refs, resourcepostgres.ScriptReference{NodeID: r.NodeID, Label: r.Label, Type: r.Type, Content: r.Content})
+		}
+		if err := (resourcepostgres.ScriptCanvas{}).ValidateSource(snapshot, request.NodeID, request.Input.Requirements, refs); err != nil {
 			return script.ErrConflict
 		}
 		for _, ref := range request.Input.References {
@@ -222,6 +189,9 @@ func (s *Store) Create(ctx context.Context, owner string, request script.Create)
 				if err := tx.Exec(`INSERT INTO script_requests(owner_id,request_id,task_id,project_id,node_id,input) VALUES(?,?,?,?,?,?::jsonb)`, owner, request.RequestID, previous.ID, request.CanvasID, request.NodeID, string(input)).Error; err != nil {
 					return err
 				}
+				if err := tx.Exec(`INSERT INTO script_task_events(task_id,event_type,phase) VALUES(?,'retried','queued')`, previous.ID).Error; err != nil {
+					return err
+				}
 				return tx.Exec(`INSERT INTO script_outbox(task_id,published_at) VALUES(?,NULL) ON CONFLICT(task_id) DO UPDATE SET published_at=NULL`, previous.ID).Error
 			}
 		}
@@ -236,29 +206,25 @@ func (s *Store) Create(ctx context.Context, owner string, request script.Create)
 			workflow = &value
 			outputID = &request.NodeID
 		} else {
-			value, e := uuid()
+			value, e := (resourcepostgres.ScriptCanvas{}).InsertOutput(tx, owner, request.CanvasID, resourcepostgres.ScriptOutput{Preset: request.Input.Preset, Mode: request.Input.OutputMode, SourceID: request.NodeID, TaskID: id, Storyboard: request.Input.Storyboard})
 			if e != nil {
+				if errors.Is(e, resource.ErrConflict) {
+					return script.ErrConflict
+				}
 				return e
 			}
 			outputID = &value
-			output := makeOutputNode(source, g.Nodes, value, id, request.Input)
-			g.Nodes = append(g.Nodes, output)
-			g.Edges = append(g.Edges, map[string]any{"id": "script-output-edge:" + id, "source": request.NodeID, "target": value})
-			updated, e := g.bytes()
-			if e != nil {
-				return e
-			}
-			if e = tx.Exec(`UPDATE projects SET snapshot=?::jsonb,version=version+1,node_count=?,updated_at=now() WHERE id=?`, string(updated), len(g.Nodes), request.CanvasID).Error; e != nil {
-				return e
-			}
 		}
-		if err := tx.Exec(`INSERT INTO script_tasks(id,owner_id,project_id,node_id,request_id,input,status,output_node_id,workflow) VALUES(?,?,?,?,?,?::jsonb,'queued',?,?::jsonb)`, id, owner, request.CanvasID, request.NodeID, request.RequestID, string(input), outputID, workflow).Error; err != nil {
+		if err := tx.Exec(`INSERT INTO script_tasks(id,owner_id,project_id,node_id,request_id,input,status,output_node_id,output_saved,workflow) VALUES(?,?,?,?,?,?::jsonb,'queued',?,?,?::jsonb)`, id, owner, request.CanvasID, request.NodeID, request.RequestID, string(input), outputID, request.Input.OutputMode == "workflow", workflow).Error; err != nil {
 			return err
 		}
 		if err := tx.Exec(`INSERT INTO script_requests(owner_id,request_id,task_id,project_id,node_id,input) VALUES(?,?,?,?,?,?::jsonb)`, owner, request.RequestID, id, request.CanvasID, request.NodeID, string(input)).Error; err != nil {
 			return err
 		}
 		if err := tx.Exec(`INSERT INTO script_outbox(task_id) VALUES(?)`, id).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`INSERT INTO script_task_events(task_id,event_type,phase) VALUES(?,'created','queued')`, id).Error; err != nil {
 			return err
 		}
 		return nil
@@ -275,72 +241,6 @@ func (s *Store) Create(ctx context.Context, owner string, request script.Create)
 		s.notify(ctx, result.ID)
 	}
 	return result, err
-}
-func makeOutputNode(source map[string]any, nodes []map[string]any, id, taskID string, in script.Input) map[string]any {
-	position, _ := source["position"].(map[string]any)
-	x, y := 0.0, 0.0
-	if position != nil {
-		x, _ = position["x"].(float64)
-		y, _ = position["y"].(float64)
-	}
-	title := map[string]string{"free": "创意文本", "screenplay": "剧本", "storyboard": "分镜文稿", "extract": "角色／场景／道具"}[in.Preset]
-	if title == "" {
-		title = "生成文本"
-	}
-	if in.OutputMode == "board" {
-		title = "分镜"
-	}
-	purpose := map[string]string{"free": "idea", "screenplay": "script", "storyboard": "storyboard", "extract": "material"}[in.Preset]
-	if purpose == "" {
-		purpose = "idea"
-	}
-	width := 320.0
-	if d := nodeData(source); d != nil {
-		if size, ok := d["displaySize"].(map[string]any); ok {
-			if v, ok := size["width"].(float64); ok && v > 0 {
-				width = v
-			}
-		}
-	}
-	targetX := x + width + 100
-	for {
-		moved := false
-		for _, other := range nodes {
-			if other["parentId"] != source["parentId"] {
-				continue
-			}
-			p, ok := other["position"].(map[string]any)
-			if !ok {
-				continue
-			}
-			ox, _ := p["x"].(float64)
-			oy, _ := p["y"].(float64)
-			ow, oh := 320.0, 240.0
-			if size, ok := nodeData(other)["displaySize"].(map[string]any); ok {
-				if v, ok := size["width"].(float64); ok && v > 0 {
-					ow = v
-				}
-				if v, ok := size["height"].(float64); ok && v > 0 {
-					oh = v
-				}
-			}
-			if ox < targetX+360 && ox+ow+40 > targetX && oy < y+300 && oy+oh+60 > y {
-				y = oy + oh + 60
-				moved = true
-			}
-		}
-		if !moved {
-			break
-		}
-	}
-	n := map[string]any{"id": id, "type": "text", "position": map[string]any{"x": targetX, "y": y}, "data": map[string]any{"type": "text", "label": "文本", "customTitle": title, "prompt": []any{}, "textPurpose": purpose, "scriptOutputTaskId": taskID, "scriptOutputSource": source["id"]}}
-	if in.OutputMode == "board" && in.Storyboard != nil {
-		n["data"].(map[string]any)["storyboard"] = in.Storyboard
-	}
-	if parent, ok := source["parentId"]; ok {
-		n["parentId"] = parent
-	}
-	return n
 }
 func (s *Store) Get(ctx context.Context, owner, id string) (script.Task, error) {
 	var r row
@@ -376,12 +276,39 @@ func (s *Store) List(ctx context.Context, owner, project, nodeID string) ([]scri
 	return tasks, nil
 }
 func (s *Store) Stop(ctx context.Context, owner, id string) (script.Task, error) {
-	q := s.DB.WithContext(ctx).Exec(`UPDATE script_tasks SET status=CASE WHEN status='queued' THEN 'stopped' ELSE 'stopping' END,revision=revision+1,updated_at=now() WHERE id=? AND owner_id=? AND status IN ('queued','running')`, id, owner)
-	if q.Error != nil {
-		return script.Task{}, q.Error
+	changed := false
+	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var r row
+		q := tx.Raw(`SELECT * FROM script_tasks WHERE id=? AND owner_id=? FOR UPDATE`, id, owner).Scan(&r)
+		if q.Error != nil {
+			return q.Error
+		}
+		if q.RowsAffected == 0 {
+			return script.ErrNotFound
+		}
+		if r.Status != "queued" && r.Status != "running" {
+			return nil
+		}
+		status := "stopping"
+		saved := r.OutputSaved
+		if r.Status == "queued" {
+			status = "stopped"
+			saved = true
+		}
+		if err := tx.Exec(`UPDATE script_tasks SET status=?,output_saved=?,revision=revision+1,updated_at=now() WHERE id=?`, status, saved, id).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`INSERT INTO script_task_events(task_id,event_type,phase) VALUES(?,?,?)`, id, status, r.Phase).Error; err != nil {
+			return err
+		}
+		changed = true
+		return nil
+	})
+	if err != nil {
+		return script.Task{}, err
 	}
 	t, err := s.Get(ctx, owner, id)
-	if err == nil && q.RowsAffected > 0 {
+	if err == nil && changed {
 		s.notify(ctx, id)
 	}
 	return t, err
@@ -408,7 +335,7 @@ func (s *Store) Claim(ctx context.Context, id string, leaseFor time.Duration) (*
 			return nil
 		}
 		var r row
-		q := tx.Raw(`SELECT * FROM script_tasks WHERE id=? AND status='queued' FOR UPDATE SKIP LOCKED`, id).Scan(&r)
+		q := tx.Raw(`SELECT * FROM script_tasks WHERE id=? AND status='queued' AND next_attempt_at<=now() FOR UPDATE SKIP LOCKED`, id).Scan(&r)
 		if q.Error != nil {
 			return q.Error
 		}
@@ -420,9 +347,15 @@ func (s *Store) Claim(ctx context.Context, id string, leaseFor time.Duration) (*
 			return err
 		}
 		if !active {
-			return tx.Exec(`UPDATE script_tasks SET status='stopped',error='项目已删除',revision=revision+1,updated_at=now() WHERE id=?`, id).Error
+			if err := tx.Exec(`UPDATE script_tasks SET status='stopped',output_saved=true,error='项目已删除',revision=revision+1,updated_at=now() WHERE id=?`, id).Error; err != nil {
+				return err
+			}
+			return tx.Exec(`INSERT INTO script_task_events(task_id,event_type,phase) VALUES(?,'stopped','queued')`, id).Error
 		}
 		if err := tx.Exec(`UPDATE script_tasks SET status='running',lease_id=?,lease_until=?,revision=revision+1,updated_at=now() WHERE id=?`, lease, time.Now().Add(leaseFor), id).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`INSERT INTO script_task_events(task_id,event_type,phase) VALUES(?,'started','running')`, id).Error; err != nil {
 			return err
 		}
 		r.Status = "running"
@@ -448,11 +381,22 @@ func (s *Store) SetPhase(ctx context.Context, id, lease, phase string) (bool, er
 	if !strings.Contains("|preparing|connecting|waiting|thinking|writing|", "|"+phase+"|") {
 		return false, script.ErrInvalid
 	}
-	q := s.DB.WithContext(ctx).Exec(`UPDATE script_tasks SET phase=?,revision=revision+1,updated_at=now() WHERE id=? AND lease_id=? AND lease_until>now() AND status='running'`, phase, id, lease)
-	if q.RowsAffected > 0 {
+	changed := false
+	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		q := tx.Exec(`UPDATE script_tasks SET phase=?,revision=revision+1,updated_at=now() WHERE id=? AND lease_id=? AND lease_until>now() AND status='running' AND phase<>?`, phase, id, lease, phase)
+		if q.Error != nil {
+			return q.Error
+		}
+		if q.RowsAffected == 0 {
+			return nil
+		}
+		changed = true
+		return tx.Exec(`INSERT INTO script_task_events(task_id,event_type,phase) VALUES(?,'phase',?)`, id, phase).Error
+	})
+	if changed {
 		s.notify(ctx, id)
 	}
-	return q.RowsAffected > 0, q.Error
+	return changed, err
 }
 func (s *Store) Append(ctx context.Context, id, lease, delta string) (bool, error) {
 	if delta == "" {
@@ -464,7 +408,7 @@ func (s *Store) Append(ctx context.Context, id, lease, delta string) (bool, erro
 	}
 	return q.RowsAffected > 0, q.Error
 }
-func (s *Store) UpdateWorkflow(ctx context.Context, id, lease string, state script.Workflow, allowStopping bool) (bool, error) {
+func (s *Store) UpdateWorkflow(ctx context.Context, id, lease string, state script.Workflow, eventType, eventPhase string, allowStopping bool) (bool, error) {
 	raw, err := json.Marshal(state)
 	if err != nil {
 		return false, err
@@ -473,11 +417,22 @@ func (s *Store) UpdateWorkflow(ctx context.Context, id, lease string, state scri
 	if allowStopping {
 		status = "stopping"
 	}
-	q := s.DB.WithContext(ctx).Exec(`UPDATE script_tasks SET workflow=?::jsonb,text=?,revision=revision+1,updated_at=now() WHERE id=? AND lease_id=? AND lease_until>now() AND status IN (?,'running')`, string(raw), state.Text(), id, lease, status)
-	if q.RowsAffected > 0 {
+	changed := false
+	err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		q := tx.Exec(`UPDATE script_tasks SET workflow=?::jsonb,text=?,revision=revision+1,updated_at=now() WHERE id=? AND lease_id=? AND lease_until>now() AND status IN (?,'running')`, string(raw), state.Text(), id, lease, status)
+		if q.Error != nil {
+			return q.Error
+		}
+		changed = q.RowsAffected > 0
+		if changed && eventType != "" {
+			return tx.Exec(`INSERT INTO script_task_events(task_id,event_type,phase) VALUES(?,?,?)`, id, eventType, eventPhase).Error
+		}
+		return nil
+	})
+	if changed {
 		s.notify(ctx, id)
 	}
-	return q.RowsAffected > 0, q.Error
+	return changed, err
 }
 func (s *Store) Finish(ctx context.Context, id, lease, status, message string) error {
 	if status != "completed" && status != "failed" && status != "stopped" {
@@ -499,38 +454,13 @@ func (s *Store) Finish(ctx context.Context, id, lease, status, message string) e
 		if r.Status != "running" && r.Status != "stopping" {
 			return nil
 		}
-		if r.OutputNodeID != nil && r.Text != "" {
-			var p struct {
-				Snapshot            []byte
-				DeletedAt, PurgedAt *time.Time
-			}
-			if err := tx.Raw(`SELECT snapshot,deleted_at,purged_at FROM projects WHERE id=? AND owner_id=? FOR UPDATE`, r.ProjectID, r.OwnerID).Scan(&p).Error; err != nil {
-				return err
-			}
-			if p.DeletedAt == nil && p.PurgedAt == nil && len(p.Snapshot) > 0 {
-				g, err := readGraph(p.Snapshot)
-				if err != nil {
-					return err
-				}
-				target := node(g, *r.OutputNodeID)
-				if target != nil {
-					d := nodeData(target)
-					if d["scriptOutputTaskId"] == r.ID {
-						if prompt, ok := d["prompt"].([]any); ok && len(prompt) == 0 {
-							d["prompt"] = []any{map[string]string{"text": r.Text}}
-							updated, err := g.bytes()
-							if err != nil {
-								return err
-							}
-							if err := tx.Exec(`UPDATE projects SET snapshot=?::jsonb,version=version+1,updated_at=now() WHERE id=?`, string(updated), r.ProjectID).Error; err != nil {
-								return err
-							}
-						}
-					}
-				}
-			}
+		if err := saveOutput(tx, r); err != nil {
+			return err
 		}
-		return tx.Exec(`UPDATE script_tasks SET status=?,error=NULLIF(?,''),lease_id=NULL,lease_until=NULL,revision=revision+1,updated_at=now() WHERE id=?`, status, message, id).Error
+		if err := tx.Exec(`UPDATE script_tasks SET status=?,output_saved=true,error=NULLIF(?,''),lease_id=NULL,lease_until=NULL,revision=revision+1,updated_at=now() WHERE id=?`, status, message, id).Error; err != nil {
+			return err
+		}
+		return tx.Exec(`INSERT INTO script_task_events(task_id,event_type,phase) VALUES(?,?,?)`, id, status, r.Phase).Error
 	})
 	if err == nil {
 		s.notify(ctx, id)
@@ -538,12 +468,55 @@ func (s *Store) Finish(ctx context.Context, id, lease, status, message string) e
 	return err
 }
 func (s *Store) Recover(ctx context.Context) error {
-	q := s.DB.WithContext(ctx).Exec(`UPDATE script_tasks SET status=CASE WHEN status='stopping' THEN 'stopped' ELSE 'interrupted' END,error='执行中断，已保存正文保留',lease_id=NULL,lease_until=NULL,revision=revision+1,updated_at=now() WHERE status IN ('running','stopping') AND (lease_until IS NULL OR lease_until<=now())`)
-	return q.Error
+	var ids []string
+	if err := s.DB.WithContext(ctx).Raw(`SELECT id FROM script_tasks WHERE (status IN ('running','stopping') AND (lease_until IS NULL OR lease_until<=now())) OR (status IN ('interrupted','completed','failed','stopped') AND output_saved=false) ORDER BY updated_at LIMIT 100`).Scan(&ids).Error; err != nil {
+		return err
+	}
+	for _, id := range ids {
+		err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			var r row
+			q := tx.Raw(`SELECT * FROM script_tasks WHERE id=? AND ((status IN ('running','stopping') AND (lease_until IS NULL OR lease_until<=now())) OR (status IN ('interrupted','completed','failed','stopped') AND output_saved=false)) FOR UPDATE SKIP LOCKED`, id).Scan(&r)
+			if q.Error != nil {
+				return q.Error
+			}
+			if q.RowsAffected == 0 {
+				return nil
+			}
+			if err := saveOutput(tx, r); err != nil {
+				return err
+			}
+			status := r.Status
+			message := r.Error
+			if status == "running" {
+				status = "interrupted"
+				m := "执行中断，已保存正文保留"
+				message = &m
+			} else if status == "stopping" {
+				status = "stopped"
+				m := "执行中断，已保存正文保留"
+				message = &m
+			}
+			if err := tx.Exec(`UPDATE script_tasks SET status=?,output_saved=true,error=?,lease_id=NULL,lease_until=NULL,revision=revision+1,updated_at=now() WHERE id=?`, status, message, id).Error; err != nil {
+				return err
+			}
+			return tx.Exec(`INSERT INTO script_task_events(task_id,event_type,phase) VALUES(?,?,?)`, id, status, r.Phase).Error
+		})
+		if err != nil {
+			return err
+		}
+		s.notify(ctx, id)
+	}
+	return nil
+}
+func saveOutput(tx *gorm.DB, r row) error {
+	if r.OutputSaved || r.OutputNodeID == nil {
+		return nil
+	}
+	return (resourcepostgres.ScriptCanvas{}).SaveOutput(tx, r.OwnerID, r.ProjectID, *r.OutputNodeID, r.ID, r.Text)
 }
 func (s *Store) Pending(ctx context.Context) ([]string, error) {
 	var ids []string
-	err := s.DB.WithContext(ctx).Raw(`SELECT id FROM script_tasks WHERE status='queued' ORDER BY created_at LIMIT 100`).Scan(&ids).Error
+	err := s.DB.WithContext(ctx).Raw(`SELECT id FROM script_tasks WHERE status='queued' AND next_attempt_at<=now() ORDER BY created_at LIMIT 100`).Scan(&ids).Error
 	return ids, err
 }
 func (s *Store) Unpublished(ctx context.Context) ([]string, error) {
@@ -553,4 +526,95 @@ func (s *Store) Unpublished(ctx context.Context) ([]string, error) {
 }
 func (s *Store) MarkPublished(ctx context.Context, id string) error {
 	return s.DB.WithContext(ctx).Exec(`UPDATE script_outbox SET published_at=now() WHERE task_id=? AND published_at IS NULL`, id).Error
+}
+func (s *Store) CircuitPermit(ctx context.Context, provider string) (script.CircuitGrant, error) {
+	var grant script.CircuitGrant
+	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(`INSERT INTO script_provider_circuits(provider) VALUES(?) ON CONFLICT DO NOTHING`, provider).Error; err != nil {
+			return err
+		}
+		var c struct {
+			Failures  int
+			OpenUntil *time.Time
+			Probing   bool
+			UpdatedAt time.Time
+		}
+		if err := tx.Raw(`SELECT failures,open_until,probing,updated_at FROM script_provider_circuits WHERE provider=? FOR UPDATE`, provider).Scan(&c).Error; err != nil {
+			return err
+		}
+		now := time.Now()
+		if c.OpenUntil != nil && now.Before(*c.OpenUntil) {
+			grant.Wait = time.Until(*c.OpenUntil)
+			return nil
+		}
+		if c.Failures >= 3 {
+			if c.Probing && now.Sub(c.UpdatedAt) < 2*time.Minute {
+				grant.Wait = time.Second
+				return nil
+			}
+			token, err := uuid()
+			if err != nil {
+				return err
+			}
+			grant.ProbeToken = token
+			return tx.Exec(`UPDATE script_provider_circuits SET probing=true,probe_token=?::uuid,updated_at=now() WHERE provider=?`, token, provider).Error
+		}
+		return nil
+	})
+	return grant, err
+}
+func (s *Store) RecordCircuit(ctx context.Context, provider string, success bool, probeToken string) error {
+	cooldown := s.CircuitCooldown
+	if cooldown <= 0 {
+		cooldown = 30 * time.Second
+	}
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var c struct {
+			Failures   int
+			Probing    bool
+			ProbeToken *string
+		}
+		if err := tx.Raw(`SELECT failures,probing,probe_token FROM script_provider_circuits WHERE provider=? FOR UPDATE`, provider).Scan(&c).Error; err != nil {
+			return err
+		}
+		if probeToken != "" {
+			if !c.Probing || c.ProbeToken == nil || *c.ProbeToken != probeToken {
+				return nil
+			}
+		} else if c.Failures >= 3 || c.Probing {
+			// Older in-flight calls cannot close or reopen an already open circuit.
+			return nil
+		}
+		if success {
+			return tx.Exec(`UPDATE script_provider_circuits SET failures=0,open_until=NULL,probing=false,probe_token=NULL,updated_at=now() WHERE provider=?`, provider).Error
+		}
+		failures := c.Failures + 1
+		var until *time.Time
+		if failures >= 3 || c.Probing {
+			t := time.Now().Add(cooldown)
+			until = &t
+		}
+		return tx.Exec(`UPDATE script_provider_circuits SET failures=?,open_until=?,probing=false,probe_token=NULL,updated_at=now() WHERE provider=?`, failures, until, provider).Error
+	})
+}
+func (s *Store) Defer(ctx context.Context, id, lease string, wait time.Duration) error {
+	if wait < time.Second {
+		wait = time.Second
+	}
+	changed := false
+	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		q := tx.Exec(`UPDATE script_tasks SET status='queued',phase='preparing',lease_id=NULL,lease_until=NULL,next_attempt_at=?,revision=revision+1,updated_at=now() WHERE id=? AND lease_id=? AND status='running'`, time.Now().Add(wait), id, lease)
+		if q.Error != nil {
+			return q.Error
+		}
+		if q.RowsAffected == 0 {
+			return nil
+		}
+		changed = true
+		return tx.Exec(`INSERT INTO script_task_events(task_id,event_type,phase) VALUES(?,'deferred','queued')`, id).Error
+	})
+	if err == nil && changed {
+		s.notify(ctx, id)
+	}
+	return err
 }

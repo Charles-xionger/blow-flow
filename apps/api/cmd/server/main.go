@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -64,6 +65,9 @@ func run() error {
 			store := generationpostgres.New(db)
 			resourceService = &resource.Service{Repository: resourcepostgres.New(db)}
 			scriptStore := scriptpostgres.New(db)
+			if n, e := strconv.Atoi(os.Getenv("SCRIPT_MAX_QUEUED_PER_USER")); e == nil && n > 0 && n <= 1000 {
+				scriptStore.MaxQueuedPerUser = n
+			}
 			textModels = textmodel.FromEnv()
 			scriptService = &script.Service{Repository: scriptStore, Models: textModels}
 			if raw := os.Getenv("REDIS_URL"); raw != "" {

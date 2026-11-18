@@ -65,6 +65,10 @@ func TestImportLegacyScriptTasksPreservesCheckpointAndInterruptsActiveWork(t *te
 	if got.Status != "interrupted" || got.Text != "draft" || string(got.Workflow) == "" {
 		t.Fatalf("imported %+v", got)
 	}
+	var importedStatus string
+	if err = db.Raw(`SELECT status FROM script_task_events WHERE task_id=? AND event_type='imported'`, id).Scan(&importedStatus).Error; err != nil || importedStatus != "interrupted" {
+		t.Fatalf("imported event status=%q %v", importedStatus, err)
+	}
 	var aliases int64
 	if err = db.Raw(`SELECT count(*) FROM script_requests WHERE task_id=?`, id).Scan(&aliases).Error; err != nil || aliases != 2 {
 		t.Fatalf("aliases=%d %v", aliases, err)

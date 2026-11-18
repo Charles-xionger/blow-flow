@@ -29,7 +29,7 @@ func registerScriptRoutes(v1 *gin.RouterGroup, d Dependencies) {
 			return
 		}
 		var input script.Create
-		if decodeJSONLimited(c, &input, 1<<20) != nil {
+		if decodeJSONLimited(c, &input, 22<<20) != nil {
 			scriptError(c, script.ErrInvalid)
 			return
 		}
@@ -232,6 +232,8 @@ func scriptError(c *gin.Context, err error) {
 		status, code = 409, "conflict"
 	case errors.Is(err, script.ErrUnavailable):
 		status, code = 503, "model_unavailable"
+	case errors.Is(err, script.ErrQueueFull):
+		status, code = 429, "script_queue_full"
 	}
 	if strings.Contains(err.Error(), "duplicate key") {
 		status, code = 409, "conflict"

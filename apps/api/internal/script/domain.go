@@ -14,6 +14,7 @@ var (
 	ErrNotFound    = errors.New("script task not found")
 	ErrConflict    = errors.New("script task conflict")
 	ErrUnavailable = errors.New("script model unavailable")
+	ErrQueueFull   = errors.New("script queue full")
 )
 
 type Reference struct {
@@ -52,6 +53,7 @@ type Task struct {
 	Text         string          `json:"text"`
 	Workflow     json.RawMessage `json:"workflow,omitempty"`
 	OutputNodeID string          `json:"outputNodeId,omitempty"`
+	OutputSaved  bool            `json:"outputSaved"`
 	Revision     int64           `json:"revision"`
 	CreatedAt    int64           `json:"createdAt"`
 	UpdatedAt    int64           `json:"updatedAt"`
@@ -132,6 +134,9 @@ func (in Input) Validate() error {
 	if in.OutputMode == "shots" {
 		return ErrUnavailable
 	} // Historical outputs are imported; new presets use the fixed workflow.
+	if (in.OutputMode == "board" || in.OutputMode == "workflow") && in.Preset != "storyboard" {
+		return ErrInvalid
+	}
 	if in.OutputMode == "board" || in.OutputMode == "workflow" {
 		l := in.Storyboard
 		if l == nil || l.Duration < 5 || l.Duration > 600 || l.MaxShots < 1 || l.MaxShots > 40 || l.Duration > l.MaxShots*15 {
@@ -167,16 +172,23 @@ type Claimed struct {
 	Lease string
 	Owner string
 }
+type CircuitGrant struct {
+	Wait       time.Duration
+	ProbeToken string
+}
 type ExecutorStore interface {
 	Get(context.Context, string, string) (Task, error)
 	Claim(context.Context, string, time.Duration) (*Claimed, error)
 	Heartbeat(context.Context, string, string, time.Duration) (bool, error)
 	Append(context.Context, string, string, string) (bool, error)
 	SetPhase(context.Context, string, string, string) (bool, error)
-	UpdateWorkflow(context.Context, string, string, Workflow, bool) (bool, error)
+	UpdateWorkflow(context.Context, string, string, Workflow, string, string, bool) (bool, error)
 	Finish(context.Context, string, string, string, string) error
 	Recover(context.Context) error
 	Pending(context.Context) ([]string, error)
 	Unpublished(context.Context) ([]string, error)
 	MarkPublished(context.Context, string) error
+	CircuitPermit(context.Context, string) (CircuitGrant, error)
+	RecordCircuit(context.Context, string, bool, string) error
+	Defer(context.Context, string, string, time.Duration) error
 }

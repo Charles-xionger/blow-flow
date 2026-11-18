@@ -18,10 +18,10 @@ func (w Worker) runWorkflow(ctx context.Context, claim *Claimed, images []string
 	if in.Storyboard == nil {
 		return ErrWorkflow
 	}
-	persist := func(allowStopping bool) error {
-		ok, err := w.Store.UpdateWorkflow(ctx, claim.Task.ID, claim.Lease, state, allowStopping)
+	persist := func(event, phase string, allowStopping bool) error {
+		ok, err := w.Store.UpdateWorkflow(ctx, claim.Task.ID, claim.Lease, state, event, phase, allowStopping)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w: %v", errLocalStore, err)
 		}
 		if !ok {
 			return context.Canceled
@@ -37,7 +37,7 @@ func (w Worker) runWorkflow(ctx context.Context, claim *Claimed, images []string
 			return nil
 		}
 		startStep(current)
-		if err := persist(false); err != nil {
+		if err := persist("stage_started", key, false); err != nil {
 			return err
 		}
 		stepCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
@@ -56,7 +56,7 @@ func (w Worker) runWorkflow(ctx context.Context, claim *Claimed, images []string
 			current.Draft = raw.String()
 			current.Phase = "writing"
 			if time.Since(lastSaved) >= 500*time.Millisecond {
-				if err := persist(false); err != nil {
+				if err := persist("", key, false); err != nil {
 					return err
 				}
 				lastSaved = time.Now()
@@ -75,17 +75,17 @@ func (w Worker) runWorkflow(ctx context.Context, claim *Claimed, images []string
 			}
 			if ctx.Err() != nil {
 				saveCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				_, _ = w.Store.UpdateWorkflow(saveCtx, claim.Task.ID, claim.Lease, state, true)
+				_, _ = w.Store.UpdateWorkflow(saveCtx, claim.Task.ID, claim.Lease, state, "stage_stopped", key, true)
 				cancel()
 			} else {
-				_ = persist(true)
+				_ = persist("stage_failed", key, true)
 			}
 			return err
 		}
 		current = state.Step(key)
 		current.Draft = raw.String()
 		completeStep(current)
-		return persist(false)
+		return persist("stage_completed", key, false)
 	}
 	if err := step("plan", planPrompt(in), true, func(raw string) error {
 		plan, err := ParsePlan(raw, *in.Storyboard)
@@ -166,7 +166,7 @@ func (w Worker) runWorkflow(ctx context.Context, claim *Claimed, images []string
 	}
 	startStep(final)
 	completeStep(final)
-	return persist(false)
+	return persist("stage_completed", "prompts", false)
 }
 func planPrompt(in Input) string {
 	limits := *in.Storyboard

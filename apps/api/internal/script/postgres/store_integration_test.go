@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -63,7 +64,7 @@ func setup(t *testing.T) (*Store, string, string) {
 	if _, err = resources.CreateProject(context.Background(), a, "p", "Project", nil); err != nil {
 		t.Fatal(err)
 	}
-	snapshot := json.RawMessage(`{"name":"Project","nodes":[{"id":"script-1","type":"script","position":{"x":10,"y":20},"data":{"type":"script"}}],"edges":[],"viewport":{"x":0,"y":0,"zoom":1},"custom":"keep"}`)
+	snapshot := json.RawMessage(`{"name":"Project","nodes":[{"id":"script-1","type":"script","position":{"x":10,"y":20},"data":{"type":"script","prompt":[{"text":"write"}]}}],"edges":[],"viewport":{"x":0,"y":0,"zoom":1},"custom":"keep"}`)
 	if _, err = resources.SaveCanvas(context.Background(), a, "p", resource.SaveCanvas{RequestID: "setup", BaseVersion: 1, Snapshot: snapshot}); err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +107,7 @@ func TestTaskOwnershipReplayAndCanvasOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	completed, err := s.Get(ctx, a, task.ID)
-	if err != nil || completed.Status != "completed" || completed.Text != "hello" {
+	if err != nil || completed.Status != "completed" || completed.Text != "hello" || !completed.OutputSaved {
 		t.Fatalf("completed %+v %v", completed, err)
 	}
 	var saved struct{ Snapshot []byte }
@@ -132,6 +133,127 @@ func TestTaskOwnershipReplayAndCanvasOutput(t *testing.T) {
 	var version int64
 	if err = s.DB.Raw(`SELECT version FROM projects WHERE id='p'`).Scan(&version).Error; err != nil || version != 4 {
 		t.Fatalf("version=%d %v", version, err)
+	}
+}
+func TestExpiredWorkerSavesPartialTextAndEvents(t *testing.T) {
+	s, a, _ := setup(t)
+	ctx := context.Background()
+	task, err := s.Create(ctx, a, script.Create{RequestID: "recover", CanvasID: "p", NodeID: "script-1", Input: script.Input{Model: "deepseek-v4-pro-ga-260813", Requirements: "write", Preset: "free"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := s.Claim(ctx, task.ID, 30*time.Second)
+	if err != nil || claimed == nil {
+		t.Fatalf("claim %v %v", claimed, err)
+	}
+	if ok, err := s.Append(ctx, task.ID, claimed.Lease, "saved partial"); err != nil || !ok {
+		t.Fatalf("append %v %v", ok, err)
+	}
+	if err = s.DB.Exec(`UPDATE script_tasks SET lease_until=now()-interval '1 second' WHERE id=?`, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Recover(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, a, task.ID)
+	if err != nil || got.Status != "interrupted" || !got.OutputSaved {
+		t.Fatalf("recovered %+v %v", got, err)
+	}
+	var p struct{ Snapshot []byte }
+	if err = s.DB.Raw(`SELECT snapshot FROM projects WHERE id='p'`).Scan(&p).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(p.Snapshot), "saved partial") {
+		t.Fatal("partial text not saved to canvas")
+	}
+	if err = s.Finish(ctx, task.ID, claimed.Lease, "completed", ""); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = s.Get(ctx, a, task.ID)
+	if got.Status != "interrupted" {
+		t.Fatal("expired lease finalized late")
+	}
+	var events int64
+	if err = s.DB.Raw(`SELECT count(*) FROM script_task_events WHERE task_id=?`, task.ID).Scan(&events).Error; err != nil || events < 3 {
+		t.Fatalf("events=%d %v", events, err)
+	}
+}
+func TestProviderCircuitPausesNewClaims(t *testing.T) {
+	s, a, _ := setup(t)
+	ctx := context.Background()
+	s.CircuitCooldown = time.Hour
+	for i := 0; i < 3; i++ {
+		wait, err := s.CircuitPermit(ctx, "ark")
+		if err != nil || wait.Wait != 0 {
+			t.Fatalf("permit %v %v", wait, err)
+		}
+		if err = s.RecordCircuit(ctx, "ark", false, wait.ProbeToken); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wait, err := s.CircuitPermit(ctx, "ark")
+	if err != nil || wait.Wait <= 0 {
+		t.Fatalf("open circuit %v %v", wait, err)
+	}
+	task, err := s.Create(ctx, a, script.Create{RequestID: "circuit", CanvasID: "p", NodeID: "script-1", Input: script.Input{Model: "deepseek-v4-pro-ga-260813", Requirements: "write", Preset: "free"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := s.Claim(ctx, task.ID, 30*time.Second)
+	if err != nil || claimed == nil {
+		t.Fatalf("claim %v %v", claimed, err)
+	}
+	if err = s.Defer(ctx, task.ID, claimed.Lease, wait.Wait); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := s.Pending(ctx)
+	if err != nil || len(pending) != 0 {
+		t.Fatalf("deferred pending=%v %v", pending, err)
+	}
+	if err = s.DB.Exec(`UPDATE script_provider_circuits SET open_until=now()-interval '1 second' WHERE provider='ark'`).Error; err != nil {
+		t.Fatal(err)
+	}
+	wait, err = s.CircuitPermit(ctx, "ark")
+	if err != nil || wait.Wait != 0 || wait.ProbeToken == "" {
+		t.Fatalf("half-open probe %v %v", wait, err)
+	}
+	probeToken := wait.ProbeToken
+	wait, err = s.CircuitPermit(ctx, "ark")
+	if err != nil || wait.Wait <= 0 {
+		t.Fatalf("parallel half-open probe %v %v", wait, err)
+	}
+	if err = s.RecordCircuit(ctx, "ark", true, ""); err != nil {
+		t.Fatal(err)
+	}
+	blocked, err := s.CircuitPermit(ctx, "ark")
+	if err != nil || blocked.Wait <= 0 {
+		t.Fatalf("stale in-flight completion closed circuit: %v %v", blocked, err)
+	}
+	if err = s.RecordCircuit(ctx, "ark", true, probeToken); err != nil {
+		t.Fatal(err)
+	}
+	wait, err = s.CircuitPermit(ctx, "ark")
+	if err != nil || wait.Wait != 0 {
+		t.Fatalf("closed circuit %v %v", wait, err)
+	}
+}
+func TestUserQueueAdmissionRespectsIdempotentReplay(t *testing.T) {
+	s, a, _ := setup(t)
+	ctx := context.Background()
+	s.MaxQueuedPerUser = 1
+	first := script.Create{RequestID: "queue-1", CanvasID: "p", NodeID: "script-1", Input: script.Input{Model: "deepseek-v4-pro-ga-260813", Requirements: "write", Preset: "free"}}
+	task, err := s.Create(ctx, a, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := s.Create(ctx, a, first)
+	if err != nil || again.ID != task.ID {
+		t.Fatalf("replay %+v %v", again, err)
+	}
+	second := first
+	second.RequestID = "queue-2"
+	if _, err = s.Create(ctx, a, second); !errors.Is(err, script.ErrQueueFull) {
+		t.Fatalf("queue admission: %v", err)
 	}
 }
 func TestStopAndDeletedOutputStayStopped(t *testing.T) {
@@ -171,7 +293,7 @@ func (s storyboardStream) Stream(_ context.Context, r textmodel.Request, emit te
 func TestWorkflowCheckpointRetryAndCompletion(t *testing.T) {
 	s, a, _ := setup(t)
 	ctx := context.Background()
-	in := script.Input{Model: "deepseek-v4-pro-ga-260813", Requirements: "short film", Instruction: "create", Preset: "storyboard", OutputMode: "workflow", Storyboard: &script.Limits{Duration: 30, MaxShots: 2}}
+	in := script.Input{Model: "deepseek-v4-pro-ga-260813", Requirements: "write", Instruction: "create", Preset: "storyboard", OutputMode: "workflow", Storyboard: &script.Limits{Duration: 30, MaxShots: 2}}
 	task, err := s.Create(ctx, a, script.Create{RequestID: "wf-1", CanvasID: "p", NodeID: "script-1", Input: in})
 	if err != nil {
 		t.Fatal(err)
@@ -211,6 +333,13 @@ func TestWorkflowCheckpointRetryAndCompletion(t *testing.T) {
 	}
 	if state.Progress(true) != 100 || state.Step("plan").Attempts != 1 || state.Step("assets").Attempts != 2 {
 		t.Fatalf("progress/retry %+v", state)
+	}
+	var completedStages []string
+	if err = s.DB.Raw(`SELECT phase FROM script_task_events WHERE task_id=? AND event_type='stage_completed' ORDER BY id`, task.ID).Scan(&completedStages).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(completedStages, []string{"plan", "assets", "details-0", "prompts"}) {
+		t.Fatalf("stage events=%v", completedStages)
 	}
 	oldReplay, err := s.Create(ctx, a, script.Create{RequestID: "wf-1", CanvasID: "p", NodeID: "script-1", Input: in})
 	if err != nil || oldReplay.ID != task.ID {

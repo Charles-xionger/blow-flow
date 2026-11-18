@@ -15,6 +15,7 @@ func TestInputValidationAndPrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 	in.OutputMode = "workflow"
+	in.Preset = "storyboard"
 	in.Storyboard = &Limits{Duration: 60, MaxShots: 5}
 	if err := in.Validate(); err != nil {
 		t.Fatalf("workflow validation=%v", err)

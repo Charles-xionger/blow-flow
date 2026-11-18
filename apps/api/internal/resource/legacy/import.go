@@ -63,6 +63,7 @@ type ScriptTask struct {
 	Text         string  `json:"text"`
 	Pipeline     *string `json:"pipeline"`
 	OutputNodeID *string `json:"output_node_id"`
+	OutputSaved  int     `json:"output_saved"`
 	Phase        string  `json:"phase"`
 	Revision     int64   `json:"revision"`
 	CreatedAt    int64   `json:"created_at"`
@@ -136,7 +137,8 @@ func (e Export) Validate() error {
 	tasks := map[string]ScriptTask{}
 	requests := map[string]bool{}
 	for _, t := range e.ScriptTasks {
-		if !valid(t.ID) || !valid(t.RequestID) || !projects[t.CanvasID] || !valid(t.NodeID) || tasks[t.ID].ID != "" || t.Revision < 1 || t.CreatedAt <= 0 || t.UpdatedAt <= 0 {
+		decodedID, e := hex.DecodeString(strings.ReplaceAll(t.ID, "-", ""))
+		if e != nil || len(decodedID) != 16 || !valid(t.RequestID) || !projects[t.CanvasID] || !valid(t.NodeID) || tasks[t.ID].ID != "" || t.Revision < 1 || t.CreatedAt <= 0 || t.UpdatedAt <= 0 || t.OutputSaved < 0 || t.OutputSaved > 1 || !strings.Contains("|queued|running|stopping|stopped|completed|failed|interrupted|", "|"+t.Status+"|") {
 			return errors.New("invalid legacy script task")
 		}
 		var input any
@@ -153,7 +155,7 @@ func (e Export) Validate() error {
 	}
 	for _, r := range e.ScriptRequests {
 		t, ok := tasks[r.TaskID]
-		if !ok || !valid(r.RequestID) || requests[r.RequestID] || r.CanvasID != t.CanvasID || r.NodeID != t.NodeID {
+		if !ok || !valid(r.RequestID) || requests[r.RequestID] || r.CanvasID != t.CanvasID || r.NodeID != t.NodeID || r.Input != t.Input {
 			return errors.New("invalid legacy script request")
 		}
 		var input any
@@ -277,12 +279,15 @@ func Apply(ctx context.Context, db *gorm.DB, owner, ossHost string, e Export) er
 			if task.Pipeline != nil {
 				workflow = task.Pipeline
 			}
-			res := tx.Exec(`INSERT INTO script_tasks(id,owner_id,project_id,node_id,request_id,input,status,phase,text,workflow,output_node_id,error,revision,created_at,updated_at) VALUES(?::uuid,?,?,?,?,?::jsonb,?,?,?,?::jsonb,?,?,?,?,?) ON CONFLICT(id) DO NOTHING`, task.ID, owner, task.CanvasID, task.NodeID, task.RequestID, task.Input, status, phase, task.Text, workflow, task.OutputNodeID, failure, task.Revision, timestamp(task.CreatedAt), timestamp(task.UpdatedAt))
+			res := tx.Exec(`INSERT INTO script_tasks(id,owner_id,project_id,node_id,request_id,input,status,phase,text,workflow,output_node_id,output_saved,error,revision,created_at,updated_at) VALUES(?::uuid,?,?,?,?,?::jsonb,?,?,?,?::jsonb,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING`, task.ID, owner, task.CanvasID, task.NodeID, task.RequestID, task.Input, status, phase, task.Text, workflow, task.OutputNodeID, task.OutputSaved != 0, failure, task.Revision, timestamp(task.CreatedAt), timestamp(task.UpdatedAt))
 			if res.Error != nil {
 				return res.Error
 			}
 			if res.RowsAffected != 1 {
 				return fmt.Errorf("script task ID collision: %s", task.ID)
+			}
+			if err := tx.Exec(`INSERT INTO script_task_events(task_id,event_type,phase,status,occurred_at) VALUES(?::uuid,'imported',?,?,?)`, task.ID, phase, status, timestamp(task.UpdatedAt)).Error; err != nil {
+				return err
 			}
 			if err := tx.Exec(`INSERT INTO script_requests(owner_id,request_id,task_id,project_id,node_id,input) VALUES(?,?,?::uuid,?,?,?::jsonb)`, owner, task.RequestID, task.ID, task.CanvasID, task.NodeID, task.Input).Error; err != nil {
 				return err

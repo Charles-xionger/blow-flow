@@ -737,7 +737,7 @@ components:
                   content: { type: string }
     ScriptTask:
       type: object
-      required: [id, requestId, canvasId, nodeId, input, status, phase, text, revision, createdAt, updatedAt]
+      required: [id, requestId, canvasId, nodeId, input, status, phase, text, outputSaved, revision, createdAt, updatedAt]
       properties:
         id: { type: string, format: uuid }
         requestId: { type: string }
@@ -749,6 +749,7 @@ components:
         text: { type: string }
         workflow: { type: object }
         outputNodeId: { type: string }
+        outputSaved: { type: boolean }
         revision: { type: integer, format: int64 }
         createdAt: { type: integer, format: int64, description: Unix milliseconds }
         updatedAt: { type: integer, format: int64, description: Unix milliseconds }

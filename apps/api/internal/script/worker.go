@@ -22,6 +22,9 @@ type Publisher interface {
 type Streamer interface {
 	Stream(context.Context, textmodel.Request, textmodel.Emit) error
 }
+
+var errLocalStore = errors.New("local script store error")
+
 type Worker struct {
 	Store      ExecutorStore
 	Queue      Publisher
@@ -90,17 +93,47 @@ func (w Worker) Process(ctx context.Context, id string) error {
 	go w.watch(runCtx, cancel, claim, done)
 	defer close(done)
 	images, err := w.images(runCtx, task.Input)
-	if err == nil {
-		_, err = w.Store.SetPhase(runCtx, id, claim.Lease, "connecting")
+	provider := ""
+	if model, ok := textmodel.Lookup(task.Input.Model); ok {
+		provider = model.Provider
 	}
+	permitted := false
+	var grant CircuitGrant
+	if err == nil && provider != "" {
+		grant, err = w.Store.CircuitPermit(runCtx, provider)
+		if err == nil && grant.Wait > 0 {
+			return w.Store.Defer(ctx, id, claim.Lease, grant.Wait)
+		}
+		permitted = err == nil
+	}
+	if err == nil {
+		var ok bool
+		ok, err = w.Store.SetPhase(runCtx, id, claim.Lease, "connecting")
+		if err == nil && !ok {
+			current, e := w.Store.Get(runCtx, claim.Owner, id)
+			if e != nil || current.Status != "running" {
+				err = context.Canceled
+			}
+		}
+	}
+	called := err == nil
 	if err == nil {
 		if task.Input.OutputMode == "workflow" {
 			err = w.runWorkflow(runCtx, claim, images)
 		} else {
+			writing := false
 			err = w.Model.Stream(runCtx, textmodel.Request{Model: task.Input.Model, Prompt: Prompt(task.Input), Images: images}, func(delta string) error {
+				if delta != "" && !writing {
+					if ok, e := w.Store.SetPhase(runCtx, id, claim.Lease, "writing"); e != nil {
+						return fmt.Errorf("%w: %v", errLocalStore, e)
+					} else if !ok {
+						return context.Canceled
+					}
+					writing = true
+				}
 				ok, e := w.Store.Append(runCtx, id, claim.Lease, delta)
 				if e != nil {
-					return e
+					return fmt.Errorf("%w: %v", errLocalStore, e)
 				}
 				if !ok {
 					return context.Canceled
@@ -111,6 +144,15 @@ func (w Worker) Process(ctx context.Context, id string) error {
 	}
 	if ctx.Err() != nil {
 		return ctx.Err()
+	}
+	if permitted {
+		recordCtx, recordCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if called {
+			_ = w.Store.RecordCircuit(recordCtx, provider, err == nil || errors.Is(err, ErrWorkflow) || errors.Is(err, context.Canceled) || errors.Is(err, errLocalStore), grant.ProbeToken)
+		} else {
+			_ = w.Store.RecordCircuit(recordCtx, provider, true, grant.ProbeToken)
+		}
+		recordCancel()
 	}
 	if err == nil && task.Input.OutputMode != "workflow" {
 		latest, e := w.Store.Get(runCtx, claim.Owner, id)
