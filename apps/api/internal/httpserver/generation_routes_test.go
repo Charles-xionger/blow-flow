@@ -14,10 +14,12 @@ import (
 type generationStub struct {
 	created int
 	last    generation.Task
+	input   generation.Input
 }
 
-func (s *generationStub) Create(_ context.Context, _ generation.Actor, _ string, _ generation.Input) (generation.Task, error) {
+func (s *generationStub) Create(_ context.Context, _ generation.Actor, _ string, input generation.Input) (generation.Task, error) {
 	s.created++
+	s.input = input
 	return s.last, nil
 }
 func (s *generationStub) Get(_ context.Context, _ generation.Actor, _ string) (generation.Task, error) {
@@ -27,9 +29,9 @@ func (s *generationStub) Cancel(_ context.Context, _ generation.Actor, _ string)
 	return s.last, nil
 }
 func TestGenerationCreateRequiresAuthenticatedOwnerAndReturnsTaskID(t *testing.T) {
-	s := &generationStub{last: generation.Task{ID: "task-1", Status: generation.Queued}}
+	s := &generationStub{last: generation.Task{ID: "task-1", Status: generation.Queued, NodeID: "node-1"}}
 	r := NewWithDependencies(Dependencies{Accounts: &accountServiceStub{resolved: account.User{ID: "owner-1", Status: account.StatusActive}}, IdentityVerifier: verifierStub{}, Generation: s})
-	body := `{"projectId":"project-1","model":"runninghub/krea2","prompt":"A cat","width":1024,"height":1024}`
+	body := `{"projectId":"project-1","nodeId":"node-1","model":"runninghub/krea2","prompt":"A cat","width":1024,"height":1024}`
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/generation/tasks", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -43,7 +45,7 @@ func TestGenerationCreateRequiresAuthenticatedOwnerAndReturnsTaskID(t *testing.T
 	req.Header.Set("Authorization", "Bearer valid")
 	req.Header.Set("Idempotency-Key", "key-1")
 	r.ServeHTTP(w, req)
-	if w.Code != http.StatusAccepted || !strings.Contains(w.Body.String(), `"id":"task-1"`) || s.created != 1 {
+	if w.Code != http.StatusAccepted || !strings.Contains(w.Body.String(), `"id":"task-1"`) || !strings.Contains(w.Body.String(), `"nodeId":"node-1"`) || s.input.NodeID != "node-1" || s.created != 1 {
 		t.Fatalf("created: %d %s count=%d", w.Code, w.Body.String(), s.created)
 	}
 }

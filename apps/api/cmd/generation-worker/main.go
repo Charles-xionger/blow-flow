@@ -68,6 +68,9 @@ func run() error {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
+		if err := worker.ProcessDue(ctx); err != nil && ctx.Err() == nil {
+			slog.Warn("queued task recovery retry", "reason", err.Error())
+		}
 		if err := store.Heartbeat(ctx, workerID); err != nil && ctx.Err() == nil {
 			slog.Warn("worker heartbeat retry", "reason", err.Error())
 		}

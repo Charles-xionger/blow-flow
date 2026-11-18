@@ -255,3 +255,67 @@ func TestSubmissionCapacityAndUncertainResponse(t *testing.T) {
 	<-done
 	<-done
 }
+
+func TestSubmissionWorkerRecoversPublishedTaskWithoutRabbitMessage(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Fatal("TEST_DATABASE_URL required")
+	}
+	_, admin, err := database.Open(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close()
+	schema := fmt.Sprintf("recovery_%d", time.Now().UnixNano())
+	if _, err := admin.Exec("CREATE SCHEMA " + schema); err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Exec("DROP SCHEMA " + schema + " CASCADE")
+	parsed, _ := url.Parse(dsn)
+	q := parsed.Query()
+	q.Set("search_path", schema)
+	parsed.RawQuery = q.Encode()
+	db, pool, err := database.Open(parsed.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	if err := goose.SetDialect("postgres"); err != nil {
+		t.Fatal(err)
+	}
+	migrations, _ := filepath.Abs("../../../migrations")
+	if err := goose.Up(pool, migrations); err != nil {
+		t.Fatal(err)
+	}
+	owner := "00000000-0000-0000-0000-000000000004"
+	if err := db.Exec(`INSERT INTO users(id,email,status,created_at,updated_at) VALUES(?,'recovery@example.com','active',now(),now())`, owner).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`INSERT INTO generation_resource_grants(owner_id,resource_type,resource_id) VALUES(?,'project','p')`, owner).Error; err != nil {
+		t.Fatal(err)
+	}
+	store := generationpostgres.New(db)
+	ctx := context.Background()
+	input := generation.Input{ProjectID: "p", Model: "runninghub/krea2", Prompt: "cat", Width: 1024, Height: 1024}
+	task, err := store.Create(ctx, owner, "lost", "lost", input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`UPDATE generation_outbox SET published_at=now() WHERE task_id=?`, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int64
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1); w.Write([]byte(`{"code":301}`)) }))
+	defer provider.Close()
+	worker := SubmissionWorker{Store: store, Provider: Krea2{BaseURL: provider.URL, APIKey: "secret", Client: provider.Client()}}
+	if err := worker.ProcessDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.ProcessDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := store.Get(ctx, task.ID)
+	if err != nil || got.Status != generation.Failed || calls.Load() != 1 {
+		t.Fatalf("recovered %+v calls=%d err=%v", got, calls.Load(), err)
+	}
+}

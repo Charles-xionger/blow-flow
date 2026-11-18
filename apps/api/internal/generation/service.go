@@ -14,12 +14,14 @@ import (
 type Status string
 
 const (
-	Queued      Status = "queued"
-	Running     Status = "running"
-	Completed   Status = "completed"
-	Canceled    Status = "canceled"
-	Failed      Status = "failed"
-	NeedsReview Status = "needs_review"
+	Queued        Status = "queued"
+	Running       Status = "running"
+	Completed     Status = "completed"
+	Canceled      Status = "canceled"
+	Failed        Status = "failed"
+	NeedsReview   Status = "needs_review"
+	QueryFailed   Status = "query_failed"
+	SaveExhausted Status = "save_exhausted"
 )
 
 var (
@@ -39,6 +41,7 @@ type Actor struct {
 }
 type Input struct {
 	ProjectID    string   `json:"projectId"`
+	NodeID       string   `json:"nodeId,omitempty"`
 	ReferenceIDs []string `json:"referenceIds,omitempty"`
 	Model        string   `json:"model"`
 	Prompt       string   `json:"prompt"`
@@ -52,6 +55,7 @@ type Task struct {
 	Status      Status    `json:"status"`
 	Model       string    `json:"model"`
 	ProjectID   string    `json:"projectId"`
+	NodeID      string    `json:"nodeId,omitempty"`
 	ResultURL   string    `json:"resultUrl,omitempty"`
 	Stage       string    `json:"stage"`
 	Percent     *float64  `json:"percent,omitempty"`
@@ -108,7 +112,7 @@ type Service struct {
 }
 
 func (s Service) Create(ctx context.Context, actor Actor, key string, input Input) (Task, error) {
-	if actor.ID == "" || len(key) < 1 || len(key) > 200 || strings.TrimSpace(input.ProjectID) == "" || strings.TrimSpace(input.Prompt) == "" || len(input.Prompt) > 8000 || input.Width < 64 || input.Width > 8192 || input.Height < 64 || input.Height > 8192 || input.Width%8 != 0 || input.Height%8 != 0 || input.Model != "runninghub/krea2" || len(input.ReferenceIDs) > 0 || input.Seed != 0 {
+	if actor.ID == "" || len(key) < 1 || len(key) > 200 || strings.TrimSpace(input.ProjectID) == "" || len(input.NodeID) > 200 || strings.TrimSpace(input.Prompt) == "" || len(input.Prompt) > 8000 || input.Width < 64 || input.Width > 8192 || input.Height < 64 || input.Height > 8192 || input.Width%8 != 0 || input.Height%8 != 0 || input.Model != "runninghub/krea2" || len(input.ReferenceIDs) > 0 || input.Seed != 0 {
 		return Task{}, ErrInvalid
 	}
 	if s.Resources == nil {

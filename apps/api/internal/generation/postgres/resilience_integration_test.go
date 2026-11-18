@@ -196,3 +196,217 @@ func TestInFlightClaimDefersWhenSubmitCircuitOpens(t *testing.T) {
 		t.Fatalf("task=%+v err=%v", task, err)
 	}
 }
+
+func TestQueuedTaskRecoversWithoutRabbitWakeupAfterGrantReturns(t *testing.T) {
+	s, owner := resilienceStore(t)
+	ctx := context.Background()
+	task, err := s.Create(ctx, owner, "lost-wakeup", "lost-wakeup", resilienceInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DB.Exec(`UPDATE generation_outbox SET published_at=now() WHERE task_id=?`, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DB.Exec(`DELETE FROM generation_resource_grants WHERE owner_id=?`, owner).Error; err != nil {
+		t.Fatal(err)
+	}
+	ids, err := s.DueQueued(ctx, 25)
+	if err != nil || len(ids) != 1 || ids[0] != task.ID {
+		t.Fatalf("recovery scan %v %v", ids, err)
+	}
+	if _, ok, err := s.ClaimSubmission(ctx, task.ID); err != nil || ok {
+		t.Fatalf("unauthorized claim %v %v", ok, err)
+	}
+	if err := s.DB.Exec(`INSERT INTO generation_resource_grants(owner_id,resource_type,resource_id) VALUES(?,'project','p')`, owner).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DB.Exec(`UPDATE generation_tasks SET recovery_checked_at=now()-interval '6 seconds' WHERE id=?`, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	ids, err = s.DueQueued(ctx, 25)
+	if err != nil || len(ids) != 1 || ids[0] != task.ID {
+		t.Fatalf("reauthorized scan %v %v", ids, err)
+	}
+	claim, ok, err := s.ClaimSubmission(ctx, task.ID)
+	if err != nil || !ok {
+		t.Fatalf("claim %v %v", ok, err)
+	}
+	if _, ok, err := s.ClaimSubmission(ctx, task.ID); err != nil || ok {
+		t.Fatalf("duplicate paid claim %v %v", ok, err)
+	}
+	if err := s.ResolveSubmission(ctx, task.ID, claim.Token, "provider-original", nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLateNodeResultRemainsTaskScopedAndCannotReplaceCurrentResult(t *testing.T) {
+	s, owner := resilienceStore(t)
+	ctx := context.Background()
+	input := resilienceInput()
+	input.NodeID = "image-node"
+	old, err := s.Create(ctx, owner, "old", "old", input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newer, err := s.Create(ctx, owner, "new", "new", input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finish := func(task generation.Task, url string) {
+		t.Helper()
+		sub, ok, err := s.ClaimSubmission(ctx, task.ID)
+		if err != nil || !ok {
+			t.Fatalf("submission %v %v", ok, err)
+		}
+		if err := s.ResolveSubmission(ctx, task.ID, sub.Token, "provider-"+task.ID, nil); err != nil {
+			t.Fatal(err)
+		}
+		query, ok, err := s.ClaimDelivery(ctx, task.ID)
+		if err != nil || !ok {
+			t.Fatalf("delivery %v %v", ok, err)
+		}
+		if err := s.ProviderSucceeded(ctx, query, "https://provider.test/"+task.ID, "png"); err != nil {
+			t.Fatal(err)
+		}
+		save, ok, err := s.ClaimDelivery(ctx, task.ID)
+		if err != nil || !ok {
+			t.Fatalf("save %v %v", ok, err)
+		}
+		if err := s.Delivered(ctx, save, url); err != nil {
+			t.Fatal(err)
+		}
+	}
+	finish(newer, "https://project.test/new.png")
+	finish(old, "https://project.test/old.png")
+	oldTask, _, err := s.Get(ctx, old.ID)
+	if err != nil || oldTask.ResultURL != "https://project.test/old.png" {
+		t.Fatalf("old task %+v %v", oldTask, err)
+	}
+	var head struct{ TaskID, ResultURL string }
+	if err := s.DB.Raw(`SELECT task_id,result_url FROM generation_node_results WHERE owner_id=? AND project_id='p' AND node_id='image-node'`, owner).Scan(&head).Error; err != nil {
+		t.Fatal(err)
+	}
+	if head.TaskID != newer.ID || head.ResultURL != "https://project.test/new.png" {
+		t.Fatalf("node result %+v", head)
+	}
+}
+
+func TestDeliveryCircuitsAndRetryExhaustionAreIndependent(t *testing.T) {
+	s, owner := resilienceStore(t)
+	ctx := context.Background()
+	task, err := s.Create(ctx, owner, "retry", "retry", resilienceInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub, ok, err := s.ClaimSubmission(ctx, task.ID)
+	if err != nil || !ok {
+		t.Fatalf("submission %v %v", ok, err)
+	}
+	if err := s.ResolveSubmission(ctx, task.ID, sub.Token, "provider-original", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DB.Exec(`UPDATE generation_circuits SET state='open',opened_at=now(),cooldown_seconds=30 WHERE operation='submit'`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DB.Exec(`UPDATE generation_circuits SET failure_threshold=1,cooldown_seconds=1 WHERE operation='query'`).Error; err != nil {
+		t.Fatal(err)
+	}
+	claim, ok, err := s.ClaimDelivery(ctx, task.ID)
+	if err != nil || !ok {
+		t.Fatalf("query claim %v %v", ok, err)
+	}
+	if allowed, err := s.BeginOperation(ctx, claim, "query"); err != nil || !allowed {
+		t.Fatalf("submit breaker blocked query %v %v", allowed, err)
+	}
+	if err := s.RecordOperation(ctx, claim, "query", errors.New("network")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ScheduleQuery(ctx, claim, "waiting_provider", errors.New("network"), time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DB.Exec(`UPDATE generation_tasks SET next_attempt_at=now()-interval '1 second' WHERE id=?`, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	claim, ok, err = s.ClaimDelivery(ctx, task.ID)
+	if err != nil || !ok {
+		t.Fatalf("query claim 2 %v %v", ok, err)
+	}
+	if allowed, err := s.BeginOperation(ctx, claim, "query"); err != nil || allowed {
+		t.Fatalf("open query circuit %v %v", allowed, err)
+	}
+	if err := s.DB.Exec(`UPDATE generation_circuits SET opened_at=now()-interval '2 seconds' WHERE operation='query'`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if allowed, err := s.BeginOperation(ctx, claim, "query"); err != nil || !allowed {
+		t.Fatalf("half-open query %v %v", allowed, err)
+	}
+	if err := s.RecordOperation(ctx, claim, "query", nil); err != nil {
+		t.Fatal(err)
+	}
+	var state string
+	s.DB.Raw(`SELECT state FROM generation_circuits WHERE operation='query'`).Scan(&state)
+	if state != "closed" {
+		t.Fatalf("query circuit %s", state)
+	}
+	if err := s.DB.Exec(`UPDATE generation_tasks SET poll_attempts=5 WHERE id=?`, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	claim.Attempts = 5
+	if err := s.ScheduleQuery(ctx, claim, "waiting_provider", errors.New("network"), time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := s.Get(ctx, task.ID)
+	if err != nil || got.Status != generation.QueryFailed {
+		t.Fatalf("query exhausted %+v %v", got, err)
+	}
+	if err := s.ResumeDelivery(ctx, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	query, ok, err := s.ClaimDelivery(ctx, task.ID)
+	if err != nil || !ok {
+		t.Fatalf("resumed query %v %v", ok, err)
+	}
+	if err := s.ProviderSucceeded(ctx, query, "https://provider.test/result.png", "png"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DB.Exec(`UPDATE generation_circuits SET failure_threshold=1,cooldown_seconds=1 WHERE operation='save'`).Error; err != nil {
+		t.Fatal(err)
+	}
+	save, ok, err := s.ClaimDelivery(ctx, task.ID)
+	if err != nil || !ok {
+		t.Fatalf("save claim %v %v", ok, err)
+	}
+	if allowed, err := s.BeginOperation(ctx, save, "save"); err != nil || !allowed {
+		t.Fatalf("submit breaker blocked save %v %v", allowed, err)
+	}
+	if err := s.RecordOperation(ctx, save, "save", errors.New("storage")); err != nil {
+		t.Fatal(err)
+	}
+	if allowed, err := s.BeginOperation(ctx, save, "save"); err != nil || allowed {
+		t.Fatalf("open save circuit %v %v", allowed, err)
+	}
+	if err := s.DB.Exec(`UPDATE generation_circuits SET opened_at=now()-interval '2 seconds' WHERE operation='save'`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if allowed, err := s.BeginOperation(ctx, save, "save"); err != nil || !allowed {
+		t.Fatalf("half-open save %v %v", allowed, err)
+	}
+	if err := s.RecordOperation(ctx, save, "save", nil); err != nil {
+		t.Fatal(err)
+	}
+	s.DB.Raw(`SELECT state FROM generation_circuits WHERE operation='save'`).Scan(&state)
+	if state != "closed" {
+		t.Fatalf("save circuit %s", state)
+	}
+	if err := s.DB.Exec(`UPDATE generation_tasks SET save_attempts=4 WHERE id=?`, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	save.SaveAttempts = 4
+	if err := s.SaveFailed(ctx, save, "save_retryable", false); err != nil {
+		t.Fatal(err)
+	}
+	got, _, err = s.Get(ctx, task.ID)
+	if err != nil || got.Status != generation.SaveExhausted || got.FailureCode != "save_exhausted" {
+		t.Fatalf("save exhausted %+v %v", got, err)
+	}
+}
