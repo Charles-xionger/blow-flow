@@ -10,6 +10,7 @@ import (
 )
 
 var ErrNoCapacity = errors.New("platform connection full")
+var ErrSubmitCircuitOpen = errors.New("provider submit circuit open")
 var ErrStaleLease = errors.New("generation lease expired")
 
 type Submission struct {
@@ -22,12 +23,41 @@ func (s *Store) ClaimSubmission(ctx context.Context, id string) (Submission, boo
 	var out Submission
 	claimed := false
 	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var queued bool
+		if err := tx.Raw(`SELECT EXISTS(SELECT 1 FROM generation_tasks WHERE id=? AND status='queued')`, id).Scan(&queued).Error; err != nil {
+			return err
+		}
+		if !queued {
+			return nil
+		}
 		var max int
 		if err := tx.Raw(`SELECT max_active FROM generation_connection_limits WHERE id='runninghub-international' FOR UPDATE`).Scan(&max).Error; err != nil {
 			return err
 		}
 		if max < 1 {
 			return errors.New("missing connection limit")
+		}
+		var circuit struct {
+			State           string
+			CooldownSeconds int
+			OpenedAt        *time.Time
+			ProbeUntil      *time.Time
+		}
+		if err := tx.Raw(`SELECT state,cooldown_seconds,opened_at,probe_until FROM generation_circuits WHERE connection_id='runninghub-international' AND operation='submit' FOR UPDATE`).Scan(&circuit).Error; err != nil {
+			return err
+		}
+		if circuit.State == "open" {
+			if circuit.OpenedAt == nil || time.Since(*circuit.OpenedAt) < time.Duration(circuit.CooldownSeconds)*time.Second {
+				return ErrSubmitCircuitOpen
+			}
+			if err := tx.Exec(`UPDATE generation_circuits SET state='half_open',probe_until=now()+interval '60 seconds',probe_task_id=?,updated_at=now() WHERE connection_id='runninghub-international' AND operation='submit'`, id).Error; err != nil {
+				return err
+			}
+			if err := tx.Exec(`INSERT INTO generation_circuit_events(connection_id,operation,state,reason) VALUES('runninghub-international','submit','half_open','cooldown_elapsed')`).Error; err != nil {
+				return err
+			}
+		} else if circuit.State == "half_open" && circuit.ProbeUntil != nil && time.Now().Before(*circuit.ProbeUntil) {
+			return ErrSubmitCircuitOpen
 		}
 		var active int64
 		if err := tx.Raw(`SELECT count(*) FROM generation_tasks WHERE connection_id='runninghub-international' AND status IN ('submitting','running','wait_timeout','needs_review')`).Scan(&active).Error; err != nil {
@@ -41,6 +71,28 @@ func (s *Store) ClaimSubmission(ctx context.Context, id string) (Submission, boo
 			}
 			return nil
 		}
+		var scopeLimits []struct {
+			Scope     string
+			MaxActive int
+		}
+		if err := tx.Raw(`SELECT scope,max_active FROM generation_queue_limits WHERE (scope='user' AND key IN ((SELECT owner_id::text FROM generation_tasks WHERE id=?),'*')) OR (scope='model' AND key IN ((SELECT model FROM generation_tasks WHERE id=?),'*')) OR (scope='connection' AND key IN ('runninghub-international','*')) ORDER BY scope,key`, id, id).Scan(&scopeLimits).Error; err != nil {
+			return err
+		}
+		for _, limit := range scopeLimits {
+			column := "owner_id"
+			if limit.Scope == "model" {
+				column = "model"
+			} else if limit.Scope == "connection" {
+				column = "connection_id"
+			}
+			var n int64
+			if err := tx.Raw(`SELECT count(*) FROM generation_tasks WHERE `+column+`=(SELECT `+column+` FROM generation_tasks WHERE id=?) AND status IN ('submitting','running','saving','save_failed','wait_timeout','needs_review')`, id).Scan(&n).Error; err != nil {
+				return err
+			}
+			if n >= int64(limit.MaxActive) {
+				return ErrNoCapacity
+			}
+		}
 		token, err := generation.NewID()
 		if err != nil {
 			return err
@@ -52,6 +104,11 @@ func (s *Store) ClaimSubmission(ctx context.Context, id string) (Submission, boo
 		}
 		if res.RowsAffected == 0 {
 			return nil
+		}
+		if circuit.State == "open" || circuit.State == "half_open" {
+			if err := tx.Exec(`UPDATE generation_circuits SET state='half_open',probe_until=?,probe_task_id=?,updated_at=? WHERE connection_id='runninghub-international' AND operation='submit'`, now.Add(60*time.Second), id, now).Error; err != nil {
+				return err
+			}
 		}
 		var raw string
 		if err := tx.Raw(`SELECT input_snapshot::text FROM generation_tasks WHERE id=?`, id).Scan(&raw).Error; err != nil {
@@ -75,7 +132,33 @@ func (s *Store) ClaimSubmission(ctx context.Context, id string) (Submission, boo
 func (s *Store) CheckSubmission(ctx context.Context, id, token string) (bool, error) {
 	var n int64
 	err := s.DB.WithContext(ctx).Raw(`SELECT count(*) FROM generation_tasks t JOIN users u ON u.id=t.owner_id WHERE t.id=? AND t.status='submitting' AND t.lease_token=? AND t.lease_until>now() AND u.status='active' AND EXISTS(SELECT 1 FROM generation_resource_grants g WHERE g.owner_id=t.owner_id AND g.resource_type='project' AND g.resource_id=t.project_id)`, id, token).Scan(&n).Error
-	return n == 1, err
+	if err != nil || n != 1 {
+		return false, err
+	}
+	var circuit struct{ State, ProbeTaskID string }
+	if err := s.DB.WithContext(ctx).Raw(`SELECT state,COALESCE(probe_task_id,'') AS probe_task_id FROM generation_circuits WHERE connection_id='runninghub-international' AND operation='submit'`).Scan(&circuit).Error; err != nil {
+		return false, err
+	}
+	if circuit.State == "open" || (circuit.State == "half_open" && circuit.ProbeTaskID != id) {
+		return false, ErrSubmitCircuitOpen
+	}
+	return true, nil
+}
+func (s *Store) RequeueSubmission(ctx context.Context, id, token string) error {
+	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Exec(`UPDATE generation_tasks SET status='queued',stage='queued',lease_token=NULL,lease_until=NULL,updated_at=now() WHERE id=? AND status='submitting' AND lease_token=? AND lease_until>now()`, id, token)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrStaleLease
+		}
+		return tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,stage,occurred_at) VALUES(?,'submission_deferred','queued',now())`, id).Error
+	})
+	if err == nil {
+		s.notify(ctx, id)
+	}
+	return err
 }
 func (s *Store) ResolveSubmission(ctx context.Context, id, token, providerID string, submitErr error) error {
 	status, event := "running", "accepted"
@@ -88,6 +171,13 @@ func (s *Store) ResolveSubmission(ctx context.Context, id, token, providerID str
 	}
 	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
+		var isCurrent bool
+		if err := tx.Raw(`SELECT EXISTS(SELECT 1 FROM generation_tasks WHERE id=? AND status='submitting' AND lease_token=? AND lease_until>now())`, id, token).Scan(&isCurrent).Error; err != nil {
+			return err
+		}
+		if !isCurrent {
+			return ErrStaleLease
+		}
 		res := tx.Exec(`UPDATE generation_tasks SET status=?,stage=?,provider_task_id=?,lease_token=NULL,lease_until=NULL,updated_at=? WHERE id=? AND status='submitting' AND lease_token=? AND lease_until>now()`, status, status, providerID, now, id, token)
 		if res.Error != nil {
 			return res.Error
@@ -95,12 +185,48 @@ func (s *Store) ResolveSubmission(ctx context.Context, id, token, providerID str
 		if res.RowsAffected == 0 {
 			return ErrStaleLease
 		}
+		if err := s.recordSubmitOutcome(tx, id, submitErr); err != nil {
+			return err
+		}
 		return tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,stage,occurred_at) VALUES(?,?,?,?)`, id, event, status, now).Error
 	})
 	if err == nil {
 		s.notify(ctx, id)
 	}
 	return err
+}
+
+func (s *Store) recordSubmitOutcome(tx *gorm.DB, id string, submitErr error) error {
+	var circuit struct {
+		State                                                  string
+		ProbeTaskID                                            string
+		ConsecutiveFailures, FailureThreshold, CooldownSeconds int
+	}
+	if err := tx.Raw(`SELECT state,consecutive_failures,failure_threshold,cooldown_seconds,COALESCE(probe_task_id,'') AS probe_task_id FROM generation_circuits WHERE connection_id='runninghub-international' AND operation='submit' FOR UPDATE`).Scan(&circuit).Error; err != nil {
+		return err
+	}
+	if circuit.State == "" {
+		return errors.New("missing submit circuit")
+	}
+	if circuit.State == "open" || (circuit.State == "half_open" && circuit.ProbeTaskID != id) {
+		return nil
+	}
+	if submitErr == nil || errors.Is(submitErr, generation.ErrSubmissionRejected) || errors.Is(submitErr, generation.ErrInvalid) {
+		if err := tx.Exec(`UPDATE generation_circuits SET state='closed',consecutive_failures=0,probe_until=NULL,probe_task_id=NULL,opened_at=NULL,updated_at=now() WHERE connection_id='runninghub-international' AND operation='submit'`).Error; err != nil {
+			return err
+		}
+		if circuit.State != "closed" {
+			return tx.Exec(`INSERT INTO generation_circuit_events(connection_id,operation,state,reason) VALUES('runninghub-international','submit','closed','probe_succeeded')`).Error
+		}
+		return nil
+	}
+	if circuit.State == "half_open" || circuit.ConsecutiveFailures+1 >= circuit.FailureThreshold {
+		if err := tx.Exec(`UPDATE generation_circuits SET state='open',consecutive_failures=consecutive_failures+1,opened_at=now(),probe_until=NULL,probe_task_id=NULL,updated_at=now() WHERE connection_id='runninghub-international' AND operation='submit'`).Error; err != nil {
+			return err
+		}
+		return tx.Exec(`INSERT INTO generation_circuit_events(connection_id,operation,state,reason) VALUES('runninghub-international','submit','open','submit_failure')`).Error
+	}
+	return tx.Exec(`UPDATE generation_circuits SET consecutive_failures=consecutive_failures+1,updated_at=now() WHERE connection_id='runninghub-international' AND operation='submit'`).Error
 }
 
 // Expired submission is uncertain even if the process disappeared before recording a response.
