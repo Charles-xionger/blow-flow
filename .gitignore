@@ -73,5 +73,6 @@ next-env.d.ts
 **/data/*.db*
 !**/.env.example
 **/.admin-login.local
+**/.admin-totp-qr.local.png
 packages/evals/results/
 **/.langfuse/

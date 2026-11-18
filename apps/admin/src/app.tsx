@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import type { components } from '@blow-flow/api-client'
+import { Activity, ShieldCheck, Sparkles } from 'lucide-react'
 import { clearSession as removeStoredSession, getSession, login } from './auth'
 import { adminClient } from './api'
 import { mayEnterAdmin } from './access'
@@ -75,17 +76,44 @@ export function AdminApp() {
   }
 
   if (loading) return <div className='grid min-h-svh place-items-center'>正在验证管理员身份…</div>
-  if (!preview && (!token || !account)) return <div className='grid min-h-svh place-items-center bg-muted/40 p-6'>
-    <Card className='w-full max-w-md shadow-lg'>
-      <CardHeader><div className='mb-2 grid size-10 place-items-center rounded-lg bg-primary text-primary-foreground font-bold'>B</div><CardTitle className='text-xl'>登录生成运营后台</CardTitle><CardDescription>使用内部管理员账户与动态验证码登录。</CardDescription></CardHeader>
-      <CardContent><form className='space-y-4' onSubmit={event => void submit(event)}>
-        <label className='block space-y-2 text-sm font-medium'>邮箱<Input type='email' autoComplete='username' required value={email} onChange={event => setEmail(event.target.value)} placeholder='admin@example.com' /></label>
-        <label className='block space-y-2 text-sm font-medium'>密码<Input type='password' autoComplete='current-password' required value={password} onChange={event => setPassword(event.target.value)} /></label>
-        <label className='block space-y-2 text-sm font-medium'>动态验证码<Input inputMode='numeric' pattern='[0-9]{6}' maxLength={6} autoComplete='one-time-code' required value={otp} onChange={event => setOtp(event.target.value)} placeholder='6 位验证码' /></label>
-        {error && <p role='alert' className='text-sm text-destructive'>{error}</p>}
-        <Button className='w-full' disabled={busy} type='submit'>{busy ? '登录中…' : '登录'}</Button>
-      </form></CardContent>
-    </Card>
+  if (!preview && (!token || !account)) return <div className='grid min-h-svh bg-[#f7f9fc] lg:grid-cols-[minmax(0,1fr)_minmax(520px,0.88fr)]'>
+    <section className='relative hidden min-h-svh overflow-hidden bg-[#07132f] p-12 text-white lg:flex lg:flex-col lg:justify-between' aria-label='Blow Flow 品牌介绍'>
+      <div className='pointer-events-none absolute -left-32 top-1/4 size-[34rem] rounded-full bg-blue-600/30 blur-[100px]' />
+      <div className='pointer-events-none absolute -right-32 bottom-0 size-[34rem] rounded-full bg-cyan-400/20 blur-[100px]' />
+      <div className='relative z-10 flex items-center gap-3'><span className='grid size-10 place-items-center rounded-xl border border-white/20 bg-white/10'><Activity className='size-5' /></span><span className='text-lg font-semibold tracking-tight'>Blow Flow</span></div>
+      <div className='relative z-10 mx-auto w-full max-w-2xl'>
+        <div className='relative mx-auto mb-7 grid aspect-square w-[min(100%,28rem)] place-items-center rounded-full border border-white/10 bg-[radial-gradient(circle,rgba(14,165,233,0.22),transparent_68%)]'>
+          <div className='absolute inset-8 rounded-full border border-white/10' />
+          <img src='/brand/blow-flow-mark.png' alt='Blow Flow 蓝色无限形品牌图像' className='relative w-[min(100%,20rem)] drop-shadow-[0_30px_70px_rgba(0,180,255,0.4)]' />
+        </div>
+        <div className='flex items-center gap-2 text-sm font-medium text-cyan-200'><Sparkles className='size-4' /> 生成运营后台</div>
+        <h1 className='mt-4 text-4xl font-semibold leading-tight tracking-tight xl:text-5xl'>让每一次生成<br />都有迹可循。</h1>
+        <p className='mt-5 max-w-lg text-sm leading-7 text-slate-300'>统一查看账户与审计记录，逐步接入生成任务和供应商成本，掌握平台的真实运行状态。</p>
+      </div>
+      <p className='relative z-10 text-xs text-slate-400'>© Blow Flow · Internal operations</p>
+    </section>
+    <main className='flex min-h-svh flex-col px-6 py-8 sm:px-12 lg:px-16'>
+      <div className='flex items-center gap-2 text-sm font-semibold text-slate-900 lg:invisible'><img src='/brand/blow-flow-mark.png' alt='' className='size-7' /> Blow Flow</div>
+      <div className='flex flex-1 items-center justify-center py-10'>
+        <Card className='w-full max-w-md border-0 bg-transparent shadow-none'>
+          <CardHeader className='px-0'><div className='mb-5 grid size-12 place-items-center rounded-2xl bg-slate-950 text-white shadow-lg shadow-slate-900/20'><ShieldCheck className='size-6' /></div><CardTitle className='text-3xl font-semibold tracking-tight'>登录生成运营后台</CardTitle><CardDescription className='pt-1 text-sm leading-6'>仅限内部管理员。使用账户密码和验证器中的动态验证码登录。</CardDescription></CardHeader>
+          <CardContent className='px-0'><form className='space-y-5' onSubmit={event => void submit(event)}>
+            <label className='block space-y-2 text-sm font-medium'>邮箱<Input type='email' autoComplete='username' required value={email} onChange={event => setEmail(event.target.value)} placeholder='admin@example.com' className='h-11 bg-white' /></label>
+            <label className='block space-y-2 text-sm font-medium'>密码<Input type='password' autoComplete='current-password' required value={password} onChange={event => setPassword(event.target.value)} className='h-11 bg-white' /></label>
+            <label className='block space-y-2 text-sm font-medium'>动态验证码<Input inputMode='numeric' pattern='[0-9]{6}' maxLength={6} autoComplete='one-time-code' required value={otp} onChange={event => setOtp(event.target.value)} placeholder='验证器中的 6 位数字' className='h-11 bg-white' /></label>
+            {error && <p role='alert' className='text-sm text-destructive'>{error}</p>}
+            <Button className='h-11 w-full' disabled={busy} type='submit'>{busy ? '登录中…' : '登录'}</Button>
+          </form>
+          <details className='mt-6 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 open:pb-4'>
+            <summary className='cursor-pointer font-medium text-slate-800'>动态验证码从哪里获取？</summary>
+            <p className='mt-3 leading-6'>首位管理员在部署本机获取绑定二维码，用 Google Authenticator、Microsoft Authenticator 等验证器扫描后输入 6 位验证码。验证码每 30 秒更新；这里不会发送短信或邮件。新增管理员的绑定流程尚未开放。</p>
+          </details>
+          <p className='mt-6 text-center text-xs leading-5 text-slate-500'>普通创作用户的注册将在创作端开放，后台不提供自行注册。</p>
+          </CardContent>
+        </Card>
+      </div>
+      <p className='text-center text-xs text-slate-400'>安全访问 · Blow Flow</p>
+    </main>
   </div>
 
   return <AdminConsole

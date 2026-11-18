@@ -13,7 +13,7 @@ Go API 按完整领域逐步接管现有 TypeScript 实现的业务写入。当�
 
 ## 本地配置
 
-`DATABASE_URL` 连接 PostgreSQL。`pnpm admin:setup` 生成 `ADMIN_AUTH_EMAIL`、Argon2id 密码哈希、TOTP 密钥及 32 字节签名密钥，写入忽略提交的 `apps/api/.env.local`。登录信息保存在 `apps/api/.admin-login.local`，只用于本机开发；密钥不能提交到仓库。API 不自动加载 dotenv，启动或迁移前需在 shell 中加载配置：
+`DATABASE_URL` 连接 PostgreSQL。`pnpm admin:setup` 生成 `ADMIN_AUTH_EMAIL`、Argon2id 密码哈希、TOTP 密钥及 32 字节签名密钥，写入忽略提交的 `apps/api/.env.local`。登录信息保存在 `apps/api/.admin-login.local`，验证器导入二维码保存在 `apps/api/.admin-totp-qr.local.png`；两者只用于本机开发，不能提交到仓库。已有配置可用 `pnpm admin:qr` 生成二维码，不轮换密钥。API 不自动加载 dotenv，启动或迁移前需在 shell 中加载配置：
 
 ```sh
 set -a

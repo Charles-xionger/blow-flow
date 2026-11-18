@@ -10,14 +10,18 @@ import (
 	"time"
 
 	"blow-flow/api/internal/identity/localauth"
+	qrcode "github.com/skip2/go-qrcode"
 )
 
 const loginFile = ".admin-login.local"
+const qrFile = ".admin-totp-qr.local.png"
 
 func main() {
 	var err error
 	if len(os.Args) > 1 && os.Args[1] == "code" {
 		err = printCode()
+	} else if len(os.Args) > 1 && os.Args[1] == "qr" {
+		err = printQR()
 	} else {
 		err = setup()
 	}
@@ -94,7 +98,10 @@ func setup() error {
 	if err := os.Chmod(".env.local", 0600); err != nil {
 		return err
 	}
-	fmt.Printf("Local admin configured. Credentials and authenticator URI: apps/api/%s\n", loginFile)
+	if err := saveQR(uri); err != nil {
+		return fmt.Errorf("credentials were saved, but QR creation failed: %w; fix the error and run pnpm admin:qr", err)
+	}
+	fmt.Printf("Local admin configured. Credentials: apps/api/%s; authenticator QR: apps/api/%s\n", loginFile, qrFile)
 	return nil
 }
 
@@ -133,19 +140,70 @@ func setEnv(current string, updates map[string]string) string {
 func shellQuote(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'" }
 
 func printCode() error {
+	secret, err := configuredTOTPSecret()
+	if err != nil {
+		return err
+	}
+	code, err := localauth.CurrentTOTPCode(secret, time.Now())
+	if err != nil {
+		return err
+	}
+	fmt.Println(code)
+	return nil
+}
+
+func printQR() error {
 	content, err := os.ReadFile(loginFile)
 	if err != nil {
 		return err
 	}
 	for _, line := range strings.Split(string(content), "\n") {
-		if secret, ok := strings.CutPrefix(line, "TOTP secret: "); ok {
-			code, err := localauth.CurrentTOTPCode(secret, time.Now())
+		if uri, ok := strings.CutPrefix(line, "Authenticator URI: "); ok {
+			parsed, err := url.Parse(uri)
+			if err != nil || parsed.Scheme != "otpauth" || parsed.Host != "totp" {
+				return fmt.Errorf("invalid authenticator URI in %s", loginFile)
+			}
+			secret, err := configuredTOTPSecret()
 			if err != nil {
 				return err
 			}
-			fmt.Println(code)
+			if parsed.Query().Get("secret") != secret {
+				_ = os.Remove(qrFile)
+				return fmt.Errorf("authenticator URI does not match the active local TOTP secret; do not use the old QR")
+			}
+			if err := saveQR(uri); err != nil {
+				return err
+			}
+			fmt.Printf("Authenticator QR saved: apps/api/%s\n", qrFile)
 			return nil
 		}
 	}
-	return fmt.Errorf("TOTP secret missing from %s", loginFile)
+	return fmt.Errorf("authenticator URI missing from %s", loginFile)
+}
+
+func configuredTOTPSecret() (string, error) {
+	content, err := os.ReadFile(".env.local")
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(string(content), "\n") {
+		if raw, ok := strings.CutPrefix(line, "ADMIN_AUTH_TOTP_SECRET="); ok {
+			secret := strings.Trim(strings.TrimSpace(raw), "'\"")
+			if secret != "" {
+				return secret, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("ADMIN_AUTH_TOTP_SECRET missing from .env.local")
+}
+
+func saveQR(uri string) error {
+	qr, err := qrcode.Encode(uri, qrcode.Medium, 320)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(qrFile, qr, 0600); err != nil {
+		return err
+	}
+	return os.Chmod(qrFile, 0600)
 }
