@@ -30,7 +30,7 @@ func (s *Store) ClaimSubmission(ctx context.Context, id string) (Submission, boo
 			return errors.New("missing connection limit")
 		}
 		var active int64
-		if err := tx.Raw(`SELECT count(*) FROM generation_tasks WHERE connection_id='runninghub-international' AND status IN ('submitting','running','needs_review')`).Scan(&active).Error; err != nil {
+		if err := tx.Raw(`SELECT count(*) FROM generation_tasks WHERE connection_id='runninghub-international' AND status IN ('submitting','running','wait_timeout','needs_review')`).Scan(&active).Error; err != nil {
 			return err
 		}
 		if active >= int64(max) {
@@ -85,7 +85,7 @@ func (s *Store) ResolveSubmission(ctx context.Context, id, token, providerID str
 	}
 	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
-		res := tx.Exec(`UPDATE generation_tasks SET status=?,provider_task_id=?,lease_token=NULL,lease_until=NULL,updated_at=? WHERE id=? AND status='submitting' AND lease_token=? AND lease_until>now()`, status, providerID, now, id, token)
+		res := tx.Exec(`UPDATE generation_tasks SET status=?,stage=?,provider_task_id=?,lease_token=NULL,lease_until=NULL,updated_at=? WHERE id=? AND status='submitting' AND lease_token=? AND lease_until>now()`, status, status, providerID, now, id, token)
 		if res.Error != nil {
 			return res.Error
 		}

@@ -60,3 +60,33 @@ func TestGenerationQueryAndCancelExposeOnlyPublicTask(t *testing.T) {
 		}
 	}
 }
+
+func (s *generationStub) Events(_ context.Context, _ generation.Actor, _ string, after int64) ([]generation.Event, error) {
+	if after >= 8 {
+		return []generation.Event{}, nil
+	}
+	return []generation.Event{{ID: 8, Type: "provider_succeeded"}}, nil
+}
+func (s *generationStub) Resume(_ context.Context, _ generation.Actor, _ string) (generation.Task, error) {
+	return s.last, nil
+}
+func TestGenerationEventsAndTaskExposeStageWithoutUnverifiedPercent(t *testing.T) {
+	s := &generationStub{last: generation.Task{ID: "task-1", Status: generation.Running, Stage: "generating"}}
+	r := NewWithDependencies(Dependencies{Accounts: &accountServiceStub{resolved: account.User{ID: "owner-1", Status: account.StatusActive}}, IdentityVerifier: verifierStub{}, Generation: s})
+	for _, path := range []string{"/v1/generation/tasks/task-1", "/v1/generation/tasks/task-1/events?after=0"} {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer valid")
+		r.ServeHTTP(w, req)
+		if w.Code != 200 || !strings.Contains(w.Body.String(), `"stage":"generating"`) || strings.Contains(w.Body.String(), `"percent"`) {
+			t.Fatalf("%s: %d %s", path, w.Code, w.Body.String())
+		}
+	}
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/generation/tasks/task-1/events?after=8", nil)
+	req.Header.Set("Authorization", "Bearer valid")
+	r.ServeHTTP(w, req)
+	if w.Code != 200 || strings.Contains(w.Body.String(), "provider_succeeded") {
+		t.Fatalf("cursor: %s", w.Body.String())
+	}
+}

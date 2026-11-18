@@ -55,18 +55,19 @@ func (s *Store) Create(ctx context.Context, owner, key, hash string, input gener
 }
 func (s *Store) Get(ctx context.Context, id string) (generation.Task, string, error) {
 	var r struct {
-		ID, OwnerID, ProjectID, Model, ResultURL string
-		Status                                   generation.Status
-		CreatedAt, UpdatedAt                     time.Time
+		ID, OwnerID, ProjectID, Model, ResultURL, Stage, FailureCode string
+		Percent                                                      *float64
+		Status                                                       generation.Status
+		CreatedAt, UpdatedAt                                         time.Time
 	}
-	tx := s.DB.WithContext(ctx).Raw(`SELECT id,owner_id,project_id,model,result_url,status,created_at,updated_at FROM generation_tasks WHERE id=?`, id).Scan(&r)
+	tx := s.DB.WithContext(ctx).Raw(`SELECT id,owner_id,project_id,model,result_url,status,stage,percent,COALESCE(failure_code,'') AS failure_code,created_at,updated_at FROM generation_tasks WHERE id=?`, id).Scan(&r)
 	if tx.Error != nil {
 		return generation.Task{}, "", tx.Error
 	}
 	if tx.RowsAffected == 0 {
 		return generation.Task{}, "", generation.ErrNotFound
 	}
-	return generation.Task{ID: r.ID, ProjectID: r.ProjectID, Model: r.Model, ResultURL: r.ResultURL, Status: r.Status, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}, r.OwnerID, nil
+	return generation.Task{ID: r.ID, ProjectID: r.ProjectID, Model: r.Model, ResultURL: r.ResultURL, Status: r.Status, Stage: r.Stage, Percent: r.Percent, FailureCode: r.FailureCode, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}, r.OwnerID, nil
 }
 func (s *Store) Cancel(ctx context.Context, id, owner string) (generation.Task, error) {
 	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

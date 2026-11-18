@@ -34,6 +34,7 @@ func run() error {
 	publisher := queue.Publisher{DB: db, Rabbit: rabbit}
 	store := postgres.New(db)
 	worker := queue.SubmissionWorker{Store: store, Rabbit: rabbit, Provider: queue.Krea2{BaseURL: os.Getenv("RUNNINGHUB_BASE_URL"), APIKey: os.Getenv("RUNNINGHUB_API_KEY")}}
+	delivery := queue.DeliveryWorker{Store: store, Provider: queue.Krea2{BaseURL: os.Getenv("RUNNINGHUB_BASE_URL"), APIKey: os.Getenv("RUNNINGHUB_API_KEY")}, Artifacts: queue.OSSFromEnv()}
 	result := make(chan error, 1)
 	go func() { result <- worker.Run(ctx) }()
 	ticker := time.NewTicker(time.Second)
@@ -44,6 +45,9 @@ func run() error {
 		}
 		if err := publisher.PublishPending(ctx); err != nil {
 			slog.Warn("outbox publish retry", "reason", err.Error())
+		}
+		if err := delivery.ProcessDue(ctx); err != nil && ctx.Err() == nil {
+			slog.Warn("delivery retry", "reason", err.Error())
 		}
 		select {
 		case <-ctx.Done():
