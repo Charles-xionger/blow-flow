@@ -93,6 +93,26 @@ func (*authenticatorStub) Authenticate(string, string) (account.Identity, error)
 }
 func (*authenticatorStub) Issue(account.Identity) (string, error) { return "", nil }
 
+type creatorAuthenticatorStub struct{}
+
+func (*creatorAuthenticatorStub) Authenticate(_ context.Context, email, password string) (account.Identity, error) {
+	if email != "creator@example.com" || password != "creator-password-long" {
+		return account.Identity{}, localauth.ErrInvalidCredentials
+	}
+	return account.Identity{Issuer: "blow-flow-creator", Subject: "creator-1", Email: email, EmailVerified: true, AuthenticatedAt: time.Now().UTC()}, nil
+}
+func (*creatorAuthenticatorStub) Issue(account.Identity) (string, error) { return "creator-token", nil }
+func TestCreatorLoginUsesCaptchaAndReturnsUserToken(t *testing.T) {
+	router := NewWithDependencies(Dependencies{Accounts: &accountServiceStub{resolved: account.User{ID: "creator-1", Role: account.RoleUser, Status: account.StatusActive}}, CreatorAuth: &creatorAuthenticatorStub{}, Captcha: &captchaStub{}})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/user/login", strings.NewReader(`{"email":"creator@example.com","password":"creator-password-long","captchaId":"challenge-1","captchaAnswer":"1234"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"accessToken":"creator-token"`) || w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("creator login %d %s", w.Code, w.Body.String())
+	}
+}
+
 func TestImageCaptchaEndpointIsUncached(t *testing.T) {
 	router := NewWithDependencies(Dependencies{Captcha: &captchaStub{}})
 	w := httptest.NewRecorder()

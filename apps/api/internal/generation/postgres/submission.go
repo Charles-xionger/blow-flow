@@ -96,7 +96,7 @@ func (s *Store) ClaimSubmission(ctx context.Context, id string) (Submission, boo
 			return err
 		}
 		now := time.Now().UTC()
-		res := tx.Exec(`UPDATE generation_tasks t SET status='submitting',stage='submitting',lease_token=?,lease_until=?,updated_at=? FROM users u WHERE t.id=? AND t.owner_id=u.id AND u.status='active' AND t.status='queued' AND EXISTS (SELECT 1 FROM generation_resource_grants g WHERE g.owner_id=t.owner_id AND g.resource_type='project' AND g.resource_id=t.project_id)`, token, now.Add(60*time.Second), now, id)
+		res := tx.Exec(`UPDATE generation_tasks t SET status='submitting',stage='submitting',lease_token=?,lease_until=?,updated_at=? FROM users u WHERE t.id=? AND t.owner_id=u.id AND u.status='active' AND t.status='queued' AND EXISTS (SELECT 1 FROM projects p WHERE p.owner_id=t.owner_id AND p.id=t.project_id AND p.deleted_at IS NULL AND p.purged_at IS NULL)`, token, now.Add(60*time.Second), now, id)
 		if res.Error != nil {
 			return res.Error
 		}
@@ -129,7 +129,7 @@ func (s *Store) ClaimSubmission(ctx context.Context, id string) (Submission, boo
 }
 func (s *Store) CheckSubmission(ctx context.Context, id, token string) (bool, error) {
 	var n int64
-	err := s.DB.WithContext(ctx).Raw(`SELECT count(*) FROM generation_tasks t JOIN users u ON u.id=t.owner_id WHERE t.id=? AND t.status='submitting' AND t.lease_token=? AND t.lease_until>now() AND u.status='active' AND EXISTS(SELECT 1 FROM generation_resource_grants g WHERE g.owner_id=t.owner_id AND g.resource_type='project' AND g.resource_id=t.project_id)`, id, token).Scan(&n).Error
+	err := s.DB.WithContext(ctx).Raw(`SELECT count(*) FROM generation_tasks t JOIN users u ON u.id=t.owner_id WHERE t.id=? AND t.status='submitting' AND t.lease_token=? AND t.lease_until>now() AND u.status='active' AND EXISTS(SELECT 1 FROM projects p WHERE p.owner_id=t.owner_id AND p.id=t.project_id AND p.deleted_at IS NULL AND p.purged_at IS NULL)`, id, token).Scan(&n).Error
 	if err != nil || n != 1 {
 		return false, err
 	}

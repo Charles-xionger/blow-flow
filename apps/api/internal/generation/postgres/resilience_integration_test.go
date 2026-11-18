@@ -51,7 +51,7 @@ func resilienceStore(t *testing.T) (*Store, string) {
 	if err = db.Exec(`INSERT INTO users(id,email,status,created_at,updated_at) VALUES(?,'resilience@example.com','active',now(),now())`, owner).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err = db.Exec(`INSERT INTO generation_resource_grants(owner_id,resource_type,resource_id) VALUES(?,'project','p')`, owner).Error; err != nil {
+	if err = db.Exec(`INSERT INTO projects(id,owner_id,name,snapshot,version,created_at,updated_at) VALUES('p',?,'P','{}'::jsonb,1,now(),now())`, owner).Error; err != nil {
 		t.Fatal(err)
 	}
 	return New(db), owner
@@ -207,7 +207,7 @@ func TestQueuedTaskRecoversWithoutRabbitWakeupAfterGrantReturns(t *testing.T) {
 	if err := s.DB.Exec(`UPDATE generation_outbox SET published_at=now() WHERE task_id=?`, task.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DB.Exec(`DELETE FROM generation_resource_grants WHERE owner_id=?`, owner).Error; err != nil {
+	if err := s.DB.Exec(`UPDATE projects SET deleted_at=now() WHERE owner_id=?`, owner).Error; err != nil {
 		t.Fatal(err)
 	}
 	ids, err := s.DueQueued(ctx, 25)
@@ -217,7 +217,7 @@ func TestQueuedTaskRecoversWithoutRabbitWakeupAfterGrantReturns(t *testing.T) {
 	if _, ok, err := s.ClaimSubmission(ctx, task.ID); err != nil || ok {
 		t.Fatalf("unauthorized claim %v %v", ok, err)
 	}
-	if err := s.DB.Exec(`INSERT INTO generation_resource_grants(owner_id,resource_type,resource_id) VALUES(?,'project','p')`, owner).Error; err != nil {
+	if err := s.DB.Exec(`UPDATE projects SET deleted_at=NULL WHERE owner_id=?`, owner).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DB.Exec(`UPDATE generation_tasks SET recovery_checked_at=now()-interval '6 seconds' WHERE id=?`, task.ID).Error; err != nil {

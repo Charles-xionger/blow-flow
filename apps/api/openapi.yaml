@@ -67,6 +67,245 @@ paths:
         "400": { $ref: "#/components/responses/InvalidRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "503": { $ref: "#/components/responses/ServiceUnavailable" }
+  /auth/user/login:
+    post:
+      operationId: loginCreator
+      summary: Authenticate a provisioned creator with password and image CAPTCHA
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email, password, captchaId, captchaAnswer]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+                captchaId: { type: string }
+                captchaAnswer: { type: string }
+      responses:
+        "200":
+          description: Fifteen-minute creator bearer token and user
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accessToken, expiresIn, user]
+                properties:
+                  accessToken: { type: string }
+                  expiresIn: { type: integer }
+                  user: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+  /workspace:
+    get:
+      operationId: getOwnedWorkspace
+      summary: List the current creator's projects and folders
+      parameters:
+        - name: trash
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Owned workspace
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Workspace" }
+  /projects:
+    post:
+      operationId: createOwnedProject
+      summary: Create a project with an empty canvas
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [id, name]
+              properties:
+                id: { type: string, maxLength: 200 }
+                name: { type: string, maxLength: 200 }
+                folderId: { type: string, maxLength: 200 }
+      responses:
+        "201":
+          description: Created project
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        "409": { description: Project ID already exists }
+  /projects/{id}:
+    get:
+      operationId: getOwnedProject
+      summary: Read an active owned project and canvas snapshot
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Project
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        "404": { description: Project not found or owned by another user }
+        "410": { description: Project is in the recycle bin }
+    patch:
+      operationId: changeOwnedProject
+      summary: Rename, move, trash, restore, or purge an owned project with a version check
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action, expectedVersion]
+              properties:
+                action: { type: string, enum: [rename, move, trash, restore, purge] }
+                expectedVersion: { type: integer, format: int64, minimum: 1 }
+                name: { type: string }
+                folderId: { type: string, nullable: true }
+      responses:
+        "200":
+          description: Updated project or tombstone
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        "409": { description: Version or state conflict }
+  /projects/{id}/canvas:
+    put:
+      operationId: saveOwnedCanvas
+      summary: Atomically save a complete canvas snapshot, version, and idempotency receipt
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [requestId, baseVersion, snapshot]
+              properties:
+                requestId: { type: string, maxLength: 200 }
+                baseVersion: { type: integer, format: int64, minimum: 1 }
+                snapshot: { type: object, description: Complete name, nodes, edges, viewport, and optional history }
+      responses:
+        "200":
+          description: Durable save receipt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CanvasSaveReceipt" }
+        "409": { description: Version conflict or request ID reused with different content }
+        "410": { description: Project was trashed or purged }
+  /projects/{id}/assets:
+    post:
+      operationId: uploadOwnedAsset
+      summary: Upload a validated media file to an owned active project
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        "201":
+          description: Owned asset metadata
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MediaAsset" }
+        "400": { description: Unsupported or oversized file }
+        "404": { description: Project not found or not owned }
+  /assets/{id}:
+    get:
+      operationId: getOwnedAsset
+      summary: Read current user's asset metadata
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Asset metadata
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MediaAsset" }
+        "404": { description: Asset not found, not owned, or its project is deleted }
+  /folders:
+    post:
+      operationId: createOwnedFolder
+      summary: Create a folder in the current user's workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, name]
+              properties:
+                id: { type: string }
+                name: { type: string }
+      responses:
+        "201":
+          description: Created folder
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Folder" }
+  /folders/{id}:
+    patch:
+      operationId: renameOwnedFolder
+      summary: Rename an owned folder
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        "200":
+          description: Renamed folder
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Folder" }
+    delete:
+      operationId: deleteOwnedFolder
+      summary: Delete a folder while retaining its projects at workspace root
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Folder deleted }
   /generation/tasks:
     post:
       operationId: createGenerationTask
@@ -318,6 +557,65 @@ components:
       in: query
       schema: { type: string }
   schemas:
+    Workspace:
+      type: object
+      required: [projects, folders]
+      properties:
+        projects:
+          type: array
+          items: { $ref: "#/components/schemas/ProjectSummary" }
+        folders:
+          type: array
+          items: { $ref: "#/components/schemas/Folder" }
+    ProjectSummary:
+      type: object
+      required: [id, name, version, nodeCount, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        folderId: { type: string }
+        version: { type: integer, format: int64 }
+        coverUrl: { type: string }
+        nodeCount: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        deletedAt: { type: string, format: date-time }
+    Project:
+      allOf:
+        - { $ref: "#/components/schemas/ProjectSummary" }
+        - type: object
+          required: [snapshot]
+          properties:
+            snapshot: { type: object }
+            purgedAt: { type: string, format: date-time }
+    Folder:
+      type: object
+      required: [id, name, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    CanvasSaveReceipt:
+      type: object
+      required: [id, requestId, version]
+      properties:
+        id: { type: string }
+        requestId: { type: string }
+        version: { type: integer, format: int64 }
+    MediaAsset:
+      type: object
+      required: [id, kind, url, sizeBytes, createdAt]
+      properties:
+        id: { type: string }
+        projectId: { type: string }
+        kind: { type: string, enum: [image, video, audio] }
+        url: { type: string }
+        objectKey: { type: string }
+        originalName: { type: string }
+        contentType: { type: string }
+        sizeBytes: { type: integer, format: int64 }
+        createdAt: { type: string, format: date-time }
     GenerationTask:
       type: object
       required: [id, version, status, model, projectId, stage, createdAt, updatedAt]

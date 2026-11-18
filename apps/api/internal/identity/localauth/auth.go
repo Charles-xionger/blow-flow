@@ -78,12 +78,21 @@ func validHash(value string) bool {
 	return err1 == nil && err2 == nil && len(salt) == 16 && len(hash) == 32
 }
 
-func (a *Authenticator) passwordMatches(password string) bool {
-	parts := strings.Split(strings.TrimPrefix(a.passwordHash, passwordPrefix), "$")
+// VerifyPassword applies the same Argon2id parameters as the local bootstrap
+// administrator without exposing the stored hash through an API response.
+func VerifyPassword(hash, password string) bool {
+	if !validHash(hash) {
+		return false
+	}
+	parts := strings.Split(strings.TrimPrefix(hash, passwordPrefix), "$")
 	salt, _ := base64.RawStdEncoding.DecodeString(parts[0])
 	want, _ := base64.RawStdEncoding.DecodeString(parts[1])
 	got := argon2.IDKey([]byte(password), salt, 2, 19456, 1, 32)
 	return subtle.ConstantTimeCompare(got, want) == 1
+}
+
+func (a *Authenticator) passwordMatches(password string) bool {
+	return VerifyPassword(a.passwordHash, password)
 }
 
 func (a *Authenticator) Authenticate(email, password string) (account.Identity, error) {

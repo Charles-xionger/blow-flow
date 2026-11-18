@@ -5,6 +5,8 @@
     "dev": "go run ./cmd/server",
     "dev:all": "go run ./cmd/server",
     "admin:setup": "go run ./cmd/local-admin-setup",
+    "creator:setup": "go run ./cmd/creator-setup",
+    "resources:import": "go run ./cmd/import-legacy-resources",
     "build": "go build -o bin/api ./cmd/server",
     "typecheck": "go vet ./...",
     "lint": "node ../../scripts/go-format.mjs",

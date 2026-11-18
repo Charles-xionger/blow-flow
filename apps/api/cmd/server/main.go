@@ -18,8 +18,12 @@ import (
 	generationpostgres "blow-flow/api/internal/generation/postgres"
 	"blow-flow/api/internal/generation/progress"
 	"blow-flow/api/internal/httpserver"
+	"blow-flow/api/internal/identity/creatorauth"
 	"blow-flow/api/internal/identity/imagecaptcha"
 	localauth "blow-flow/api/internal/identity/localauth"
+	"blow-flow/api/internal/resource"
+	resourceoss "blow-flow/api/internal/resource/oss"
+	resourcepostgres "blow-flow/api/internal/resource/postgres"
 	"blow-flow/api/internal/telemetry"
 	"github.com/getsentry/sentry-go"
 )
@@ -39,8 +43,10 @@ func run() error {
 	var accounts *account.Service
 	var identityVerifier httpserver.IdentityVerifier
 	var localAdmin httpserver.LocalAdminAuthenticator
+	var creatorAuth httpserver.CreatorAuthenticator
 	var captcha httpserver.ImageCaptcha
 	var generationService httpserver.GenerationService
+	var resourceService *resource.Service
 	var wakeups *progress.Redis
 	if dsn := os.Getenv("DATABASE_URL"); dsn != "" {
 		db, pool, err := database.Open(dsn)
@@ -49,6 +55,7 @@ func run() error {
 		} else {
 			defer pool.Close()
 			store := generationpostgres.New(db)
+			resourceService = &resource.Service{Repository: resourcepostgres.New(db)}
 			if raw := os.Getenv("REDIS_URL"); raw != "" {
 				client, dialErr := progress.Dial(raw)
 				if dialErr != nil {
@@ -59,23 +66,32 @@ func run() error {
 				store.Notify = client.Publish
 			}
 			generationService = generation.Service{Store: store, Resources: generationpostgres.Resources{DB: db}}
-			if os.Getenv("ADMIN_AUTH_EMAIL") != "" {
+			if os.Getenv("AUTH_SIGNING_KEY") != "" {
 				key, err := base64.RawStdEncoding.DecodeString(os.Getenv("AUTH_SIGNING_KEY"))
 				if err != nil {
 					return err
 				}
-				adminAuth, err := localauth.New(localauth.Config{Email: os.Getenv("ADMIN_AUTH_EMAIL"), PasswordHash: os.Getenv("ADMIN_AUTH_PASSWORD_HASH"), SigningKey: key}, time.Now)
+				userAuth, err := creatorauth.New(db, key, time.Now)
 				if err != nil {
 					return err
 				}
-				identityVerifier = adminAuth
-				localAdmin = adminAuth
+				creatorAuth = userAuth
+				verifiers := httpserver.IdentityChain{userAuth}
+				if os.Getenv("ADMIN_AUTH_EMAIL") != "" {
+					adminAuth, err := localauth.New(localauth.Config{Email: os.Getenv("ADMIN_AUTH_EMAIL"), PasswordHash: os.Getenv("ADMIN_AUTH_PASSWORD_HASH"), SigningKey: key}, time.Now)
+					if err != nil {
+						return err
+					}
+					localAdmin = adminAuth
+					verifiers = append(verifiers, adminAuth)
+				}
+				identityVerifier = verifiers
 				captcha = imagecaptcha.New()
 				repository := accountpostgres.New(db, time.Now)
 				accounts = account.NewService(repository, account.InitialAdministrator{Issuer: localauth.Issuer, Subject: localauth.Subject, LinkExistingByEmail: true}, time.Now)
 				ping = func(ctx context.Context) error { return database.Check(ctx, pool) }
 			} else {
-				slog.Warn("account API unavailable: local admin authentication is not configured")
+				slog.Warn("account API unavailable: signing key is not configured")
 			}
 		}
 	}
@@ -89,7 +105,7 @@ func run() error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	server := &http.Server{Handler: httpserver.NewWithDependencies(httpserver.Dependencies{Ping: ping, Accounts: accounts, IdentityVerifier: identityVerifier, LocalAdmin: localAdmin, Captcha: captcha, Generation: generationService, GenerationWakeups: wakeups, GenerationStreamClose: ctx.Done()}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
+	server := &http.Server{Handler: httpserver.NewWithDependencies(httpserver.Dependencies{Ping: ping, Accounts: accounts, IdentityVerifier: identityVerifier, LocalAdmin: localAdmin, CreatorAuth: creatorAuth, Captcha: captcha, Generation: generationService, GenerationWakeups: wakeups, GenerationStreamClose: ctx.Done(), Resources: resourceService, ResourceBlobs: resourceoss.FromEnv()}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(listener) }()
 	slog.Info("API listening", "address", listener.Addr().String())

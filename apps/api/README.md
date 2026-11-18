@@ -1,6 +1,6 @@
 # Go API
 
-Go API 按完整领域逐步接管现有 TypeScript 实现的业务写入。当前已迁移账户领域，生成与画布数据仍由 `apps/web` 持有；两边不能同时成为同一业务数据的权威写入者。
+Go API 按完整领域逐步接管现有 TypeScript 实现的业务写入。Go 已具备账户、生成任务及项目／素材资源 API；在生产切换前，`apps/web` 仍是旧 SQLite 项目与生成任务的权威写入者。两边不能同时写同一批项目。
 
 ## 模块边界
 
@@ -30,7 +30,7 @@ pnpm dev:api
 
 `GET /v1/auth/captcha` 生成一次性四位图片验证码，按单进程令牌桶限制取图频率；`POST /v1/auth/admin/login` 校验图片答案后再校验密码。图片答案无论对错只可提交一次，未提交的验证码十分钟后过期；当前最多保留 1000 个挑战，均在单个 API 进程内，多实例部署需要共享挑战存储。失败响应在单进程内逐步延迟，不会因代理共享 IP 而锁定正常登录；`GET /v1/me`、用户列表、禁用用户、审计记录均使用签名令牌和本地账户授权。成功登录也会追加审计事件。密码存储采用带随机盐的 Argon2id。图片验证码用于限制简单自动请求，不是第二身份因素。
 
-这只是首位管理员的本地引导。公开注册、邮箱验证、找回密码、跨实例共享的验证码与登录限流、签名密钥轮换、主动撤销已签发令牌、历史资源归属迁移和生成授权尚未完成。生产开放前必须补齐对应账户能力和运维流程。
+首位管理员仍由本地引导。Go API 还提供受控创建的普通创作用户登录：运行 `CREATOR_SETUP_PASSWORD=... pnpm --filter @blow-flow/api creator:setup -- -email creator@example.com`，随后调用 `POST /v1/auth/user/login`（邮箱、密码、图片验证码）获取 15 分钟 JWT。公开自助注册、邮箱验证、找回密码、跨实例共享验证码与登录限流、签名密钥轮换和主动撤销令牌尚未提供，生产开放前须补齐。
 
 ## Go generation service
 
@@ -43,11 +43,10 @@ a newer result. The response contains task metadata and status; the prompt stays
 in the PostgreSQL input snapshot. An authorized administrator may query a task,
 while only its owner may cancel it before claim.
 
-For this foundation phase, project and reference ownership is represented by
-explicit `generation_resource_grants` rows. This is a controlled test resource
-boundary: no application route provisions these grants, so production creation
-fails closed until the project and asset domains migrate. Existing Next.js
-generation remains untouched; production cutover is a separate step.
+Project and asset ownership now comes from PostgreSQL `projects` and
+`media_assets`. A deleted or purged project cannot start a new generation;
+already submitted tasks continue recovery. Existing Next.js generation remains
+untouched; production cutover is a separate step.
 
 Run the schema migrations, start PostgreSQL, RabbitMQ, and Redis with
 `docker compose -f infra/compose.yaml up -d --wait`, configure
@@ -69,4 +68,19 @@ For integration tests, set `TEST_DATABASE_URL`, `TEST_RABBITMQ_URL`, and
 `TEST_REDIS_URL` to disposable services, then run `pnpm test:integration`.
 The tests create and remove their own PostgreSQL schemas. The Go adapters are
 tested with a simulated RunningHub and object store; live provider credentials
-and production resource grants require separate validation before cutover.
+require separate validation before cutover.
+
+## Project and asset migration
+
+The Go API exposes owner-scoped `/v1/workspace`, `/v1/projects`, `/v1/folders`,
+and `/v1/assets` endpoints. Canvas saves use `requestId` and `baseVersion`;
+PostgreSQL stores the snapshot, version, receipt, and deleted-node record in one
+transaction. Asset upload requires an owned active project and writes the object
+to OSS under a server-generated key. See `openapi.yaml` for request shapes.
+
+The one-time export/import tools preserve legacy project IDs, versions, folder
+links, save receipts, deleted-node records, and `media_files`. Import can also
+index trusted OSS links already embedded in project snapshots. Follow
+[the cutover procedure](../../docs/architecture/resource-migration.md) before
+running it against persistent data. The export contains project content and is
+created with mode `0600`; remove it after verifying the import.

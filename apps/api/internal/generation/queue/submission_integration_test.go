@@ -55,7 +55,7 @@ func TestSubmissionCapacityAndUncertainResponse(t *testing.T) {
 	if err = db.Exec(`INSERT INTO users(id,email,status,created_at,updated_at) VALUES(?,'submission@example.com','active',now(),now())`, owner).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err = db.Exec(`INSERT INTO generation_resource_grants(owner_id,resource_type,resource_id) VALUES(?,'project','p')`, owner).Error; err != nil {
+	if err = db.Exec(`INSERT INTO projects(id,owner_id,name,snapshot,version,created_at,updated_at) VALUES('p',?,'P','{}'::jsonb,1,now(),now())`, owner).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err = db.Exec(`UPDATE generation_connection_limits SET max_active=1`).Error; err != nil {
@@ -291,7 +291,7 @@ func TestSubmissionWorkerRecoversPublishedTaskWithoutRabbitMessage(t *testing.T)
 	if err := db.Exec(`INSERT INTO users(id,email,status,created_at,updated_at) VALUES(?,'recovery@example.com','active',now(),now())`, owner).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Exec(`INSERT INTO generation_resource_grants(owner_id,resource_type,resource_id) VALUES(?,'project','p')`, owner).Error; err != nil {
+	if err := db.Exec(`INSERT INTO projects(id,owner_id,name,snapshot,version,created_at,updated_at) VALUES('p',?,'P','{}'::jsonb,1,now(),now())`, owner).Error; err != nil {
 		t.Fatal(err)
 	}
 	store := generationpostgres.New(db)

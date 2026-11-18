@@ -121,6 +121,51 @@ func adminLogin(dependencies Dependencies) gin.HandlerFunc {
 	}
 }
 
+func creatorLogin(dependencies Dependencies) gin.HandlerFunc {
+	limiter := &loginLimiter{}
+	return func(c *gin.Context) {
+		if dependencies.CreatorAuth == nil || dependencies.Accounts == nil || dependencies.Captcha == nil {
+			c.JSON(http.StatusServiceUnavailable, errorBody(c, "service_unavailable"))
+			return
+		}
+		var body struct {
+			Email         string `json:"email"`
+			Password      string `json:"password"`
+			CaptchaID     string `json:"captchaId"`
+			CaptchaAnswer string `json:"captchaAnswer"`
+		}
+		if decodeJSON(c, &body) != nil || len(body.CaptchaID) > 128 || len(body.Email) > 320 || len(body.Password) > 1024 {
+			c.JSON(http.StatusBadRequest, errorBody(c, "invalid_request"))
+			return
+		}
+		if !dependencies.Captcha.Verify(body.CaptchaID, body.CaptchaAnswer) {
+			throttleLogin(c, limiter.fail())
+			c.JSON(http.StatusUnauthorized, errorBody(c, "invalid_captcha"))
+			return
+		}
+		identity, err := dependencies.CreatorAuth.Authenticate(c.Request.Context(), body.Email, body.Password)
+		if err != nil {
+			throttleLogin(c, limiter.fail())
+			c.JSON(http.StatusUnauthorized, errorBody(c, "invalid_credentials"))
+			return
+		}
+		user, err := dependencies.Accounts.Resolve(c.Request.Context(), identity)
+		if err != nil || user.Role != account.RoleUser || user.Status != account.StatusActive {
+			throttleLogin(c, limiter.fail())
+			c.JSON(http.StatusUnauthorized, errorBody(c, "invalid_credentials"))
+			return
+		}
+		token, err := dependencies.CreatorAuth.Issue(identity)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, errorBody(c, "internal_error"))
+			return
+		}
+		limiter.clear()
+		c.Header("Cache-Control", "no-store")
+		c.JSON(http.StatusOK, gin.H{"accessToken": token, "expiresIn": 900, "user": user})
+	}
+}
+
 func newImageCaptcha(dependencies Dependencies) gin.HandlerFunc {
 	limiter := &captchaIssueLimiter{}
 	return func(c *gin.Context) {

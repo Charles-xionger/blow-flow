@@ -50,7 +50,7 @@ func TestProviderSuccessSaveRetryAndEventsSurviveRestart(t *testing.T) {
 	if err = db.Exec(`INSERT INTO users(id,email,status,created_at,updated_at) VALUES(?,'delivery@example.com','active',now(),now())`, owner).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err = db.Exec(`INSERT INTO generation_resource_grants(owner_id,resource_type,resource_id) VALUES(?,'project','project')`, owner).Error; err != nil {
+	if err = db.Exec(`INSERT INTO projects(id,owner_id,name,snapshot,version,created_at,updated_at) VALUES('project',?,'Project','{}'::jsonb,1,now(),now())`, owner).Error; err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()

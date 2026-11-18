@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"blow-flow/api/internal/account"
+	"blow-flow/api/internal/resource"
 	sentrygin "github.com/getsentry/sentry-go/gin"
 	"github.com/gin-gonic/gin"
 )
@@ -20,6 +21,10 @@ type IdentityVerifier interface {
 
 type LocalAdminAuthenticator interface {
 	Authenticate(email, password string) (account.Identity, error)
+	Issue(account.Identity) (string, error)
+}
+type CreatorAuthenticator interface {
+	Authenticate(context.Context, string, string) (account.Identity, error)
 	Issue(account.Identity) (string, error)
 }
 
@@ -40,11 +45,14 @@ type Dependencies struct {
 	Ping                  Ping
 	IdentityVerifier      IdentityVerifier
 	LocalAdmin            LocalAdminAuthenticator
+	CreatorAuth           CreatorAuthenticator
 	Captcha               ImageCaptcha
 	Accounts              AccountService
 	Generation            GenerationService
 	GenerationWakeups     GenerationWakeups
 	GenerationStreamClose <-chan struct{}
+	Resources             *resource.Service
+	ResourceBlobs         ResourceBlobStore
 }
 
 func New(ping Ping) *gin.Engine {
