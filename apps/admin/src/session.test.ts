@@ -45,6 +45,26 @@ it('keeps the stored session during a temporary refresh outage', async () => {
   clearSession()
 })
 
+it('retries a lost refresh response without dropping the session', async () => {
+  const values = new Map<string,string>()
+  vi.stubGlobal('window', { sessionStorage: {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => { values.set(key,value) },
+    removeItem: (key: string) => { values.delete(key) },
+  }, setTimeout })
+  const user = { id:'admin-1', email:'admin@example.com', role:'admin', status:'active', createdAt:'2026-01-01', updatedAt:'2026-01-01' } as const
+  saveSession('old',-1,user)
+  let calls=0
+  vi.stubGlobal('fetch',vi.fn(async () => {
+    calls++
+    if(calls===1) throw new Error('response lost')
+    return Response.json({accessToken:'new',expiresIn:900,user})
+  }))
+  expect((await ensureSession())?.accessToken).toBe('new')
+  expect(calls).toBe(2)
+  clearSession()
+})
+
 it('keeps the session when logout cannot revoke it on the server', async () => {
   const values = new Map<string,string>()
   vi.stubGlobal('window', { sessionStorage: {

@@ -29,7 +29,13 @@ export async function refreshSession(): Promise<AdminSession | null> {
   if (refreshing) return refreshing
   const epoch = sessionEpoch
   refreshing = (async () => {
-    const response = await fetch('/v1/auth/admin/refresh', { method: 'POST', credentials: 'same-origin' })
+    const request = () => fetch('/v1/auth/admin/refresh', { method: 'POST', credentials: 'same-origin' })
+    let response: Response
+    try { response = await request() }
+    catch {
+      await new Promise(resolve => window.setTimeout(resolve, 200))
+      response = await request()
+    }
     if (response.status === 401) { if (epoch === sessionEpoch) clearSession(); return null }
     if (!response.ok) throw new Error('Refresh temporarily unavailable')
     const data = await response.json() as { accessToken: string; expiresIn: number; user: Account }
