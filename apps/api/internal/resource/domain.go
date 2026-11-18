@@ -7,11 +7,12 @@ import (
 )
 
 var (
-	ErrInvalid   = errors.New("invalid resource input")
-	ErrNotFound  = errors.New("resource not found")
-	ErrConflict  = errors.New("resource version conflict")
-	ErrDeleted   = errors.New("project is deleted")
-	ErrDuplicate = errors.New("resource ID already exists")
+	ErrInvalid         = errors.New("invalid resource input")
+	ErrNotFound        = errors.New("resource not found")
+	ErrConflict        = errors.New("resource version conflict")
+	ErrRequestConflict = errors.New("resource request identity conflict")
+	ErrDeleted         = errors.New("project is deleted")
+	ErrDuplicate       = errors.New("resource ID already exists")
 )
 
 type Project struct {

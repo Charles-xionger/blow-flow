@@ -132,6 +132,27 @@ func (r *Repository) GetProject(ctx context.Context, owner, id string) (resource
 	}
 	return row.domain(), nil
 }
+func (r *Repository) DeletedNodes(ctx context.Context, owner, id string, ids []string) ([]string, error) {
+	deleted := []string{}
+	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var row projectRow
+		res := tx.Raw(`SELECT id,deleted_at,purged_at FROM projects WHERE id=? AND owner_id=?`, id, owner).Scan(&row)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 || row.PurgedAt != nil {
+			return resource.ErrNotFound
+		}
+		if row.DeletedAt != nil {
+			return resource.ErrDeleted
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+		return tx.Raw(`SELECT node_id FROM project_deleted_nodes WHERE project_id=? AND node_id IN ? ORDER BY node_id`, id, ids).Scan(&deleted).Error
+	})
+	return deleted, err
+}
 func (r *Repository) SaveCanvas(ctx context.Context, owner, id string, input resource.SaveCanvas, digest string, nodeCount int) (resource.SaveReceipt, error) {
 	var receipt resource.SaveReceipt
 	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -156,7 +177,7 @@ func (r *Repository) SaveCanvas(ctx context.Context, owner, id string, input res
 		}
 		if res.RowsAffected > 0 {
 			if old.Digest != digest {
-				return resource.ErrConflict
+				return resource.ErrRequestConflict
 			}
 			receipt = resource.SaveReceipt{ID: id, RequestID: input.RequestID, Version: old.Version}
 			return nil

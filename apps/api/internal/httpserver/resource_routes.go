@@ -82,6 +82,25 @@ func registerResourceRoutes(v1 *gin.RouterGroup, d Dependencies) {
 		}
 		c.JSON(200, receipt)
 	})
+	p.POST("/:id/deleted-nodes/check", func(c *gin.Context) {
+		if d.Resources == nil {
+			resourceUnavailable(c)
+			return
+		}
+		var body struct {
+			IDs []string `json:"ids"`
+		}
+		if decodeJSON(c, &body) != nil {
+			resourceError(c, resource.ErrInvalid)
+			return
+		}
+		deleted, err := d.Resources.DeletedNodes(c.Request.Context(), currentUser(c).ID, c.Param("id"), body.IDs)
+		if err != nil {
+			resourceError(c, err)
+			return
+		}
+		c.JSON(200, gin.H{"deleted": deleted})
+	})
 	p.PATCH("/:id", func(c *gin.Context) {
 		if d.Resources == nil {
 			resourceUnavailable(c)
@@ -235,6 +254,8 @@ func resourceError(c *gin.Context, err error) {
 		status, code = 404, "not_found"
 	case errors.Is(err, resource.ErrDeleted):
 		status, code = 410, "project_deleted"
+	case errors.Is(err, resource.ErrRequestConflict):
+		status, code = 409, "request_conflict"
 	case errors.Is(err, resource.ErrConflict):
 		status, code = 409, "version_conflict"
 	case errors.Is(err, resource.ErrDuplicate):

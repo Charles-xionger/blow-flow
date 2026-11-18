@@ -85,7 +85,7 @@ func TestProjectOwnershipVersionReceiptsAndTrash(t *testing.T) {
 		t.Fatalf("replay %+v %v", replay, err)
 	}
 	input.Snapshot = []byte(`{"name":"Changed","nodes":[],"edges":[],"viewport":{"x":0,"y":0,"zoom":1}}`)
-	if _, err = svc.SaveCanvas(ctx, a, p.ID, input); !errors.Is(err, resource.ErrConflict) {
+	if _, err = svc.SaveCanvas(ctx, a, p.ID, input); !errors.Is(err, resource.ErrRequestConflict) {
 		t.Fatalf("idempotency conflict: %v", err)
 	}
 	input.RequestID = "save-2"
@@ -115,6 +115,16 @@ func TestProjectOwnershipVersionReceiptsAndTrash(t *testing.T) {
 	got, err := svc.GetProject(ctx, a, p.ID)
 	if err != nil || got.FolderID != nil {
 		t.Fatalf("folder deletion %+v %v", got, err)
+	}
+	if _, err = svc.SaveCanvas(ctx, a, p.ID, resource.SaveCanvas{RequestID: "delete-node", BaseVersion: got.Version, Snapshot: []byte(`{"name":"Scene","nodes":[],"edges":[],"viewport":{"x":0,"y":0,"zoom":1}}`)}); err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := svc.DeletedNodes(ctx, a, p.ID, []string{"node-a", "new-node"})
+	if err != nil || len(deleted) != 1 || deleted[0] != "node-a" {
+		t.Fatalf("deleted nodes=%v %v", deleted, err)
+	}
+	if _, err = svc.DeletedNodes(ctx, b, p.ID, []string{"node-a"}); !errors.Is(err, resource.ErrNotFound) {
+		t.Fatalf("cross-user tombstone lookup: %v", err)
 	}
 }
 func TestAssetIsOwnedBySameUserAndProject(t *testing.T) {

@@ -13,6 +13,7 @@ type Repository interface {
 	CreateProject(context.Context, string, string, string, *string) (Project, error)
 	Workspace(context.Context, string, bool) (Workspace, error)
 	GetProject(context.Context, string, string) (Project, error)
+	DeletedNodes(context.Context, string, string, []string) ([]string, error)
 	SaveCanvas(context.Context, string, string, SaveCanvas, string, int) (SaveReceipt, error)
 	ChangeProject(context.Context, string, string, ProjectChange) (Project, error)
 	CreateFolder(context.Context, string, string, string) (Folder, error)
@@ -46,6 +47,17 @@ func (s Service) GetProject(ctx context.Context, owner, id string) (Project, err
 		return Project{}, ErrInvalid
 	}
 	return s.Repository.GetProject(ctx, owner, id)
+}
+func (s Service) DeletedNodes(ctx context.Context, owner, id string, ids []string) ([]string, error) {
+	if !validID(owner) || !validID(id) || len(ids) > 100 {
+		return nil, ErrInvalid
+	}
+	for _, nodeID := range ids {
+		if !validID(nodeID) {
+			return nil, ErrInvalid
+		}
+	}
+	return s.Repository.DeletedNodes(ctx, owner, id, ids)
 }
 func (s Service) SaveCanvas(ctx context.Context, owner, id string, input SaveCanvas) (SaveReceipt, error) {
 	if !validID(owner) || !validID(id) || !validID(input.RequestID) || input.BaseVersion < 1 || len(input.Snapshot) == 0 || len(input.Snapshot) > 10<<20 {

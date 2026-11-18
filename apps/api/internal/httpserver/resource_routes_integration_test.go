@@ -93,8 +93,13 @@ func TestResourceHTTPAndGenerationOwnership(t *testing.T) {
 	request(router(owner), "PATCH", "/v1/projects/p", `{"action":"move","expectedVersion":1,"folderId":"f"}`, 200)
 	snapshot := `{"name":"New","nodes":[],"edges":[],"viewport":{"x":0,"y":0,"zoom":1}}`
 	request(router(owner), "PUT", "/v1/projects/p/canvas", `{"requestId":"r1","baseVersion":2,"snapshot":`+snapshot+`}`, 200)
+	if got := request(router(owner), "PUT", "/v1/projects/p/canvas", `{"requestId":"r1","baseVersion":2,"snapshot":{"name":"Changed","nodes":[],"edges":[],"viewport":{"x":0,"y":0,"zoom":1}}}`, 409); !strings.Contains(got, `"request_conflict"`) {
+		t.Fatalf("request identity conflict: %s", got)
+	}
 	request(router(other), "GET", "/v1/projects/p", "", 404)
 	request(router(other), "PUT", "/v1/projects/p/canvas", `{"requestId":"x","baseVersion":3,"snapshot":`+snapshot+`}`, 404)
+	request(router(owner), "POST", "/v1/projects/p/deleted-nodes/check", `{"ids":["node-a"]}`, 200)
+	request(router(other), "POST", "/v1/projects/p/deleted-nodes/check", `{"ids":["node-a"]}`, 404)
 	if own, err := (generationpostgres.Resources{DB: db}).OwnsProject(context.Background(), owner, "p"); err != nil || !own {
 		t.Fatalf("generation owner: %v %v", own, err)
 	}
