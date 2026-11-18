@@ -86,11 +86,12 @@ paths:
               required: [projectId, model, prompt, width, height]
               properties:
                 projectId: { type: string }
-                referenceIds: { type: array, items: { type: string } }
+                nodeId: { type: string, maxLength: 200, description: Optional node identity used to fence the current result }
+                referenceIds: { type: array, maxItems: 0, description: Krea2 currently does not accept reference assets, items: { type: string } }
                 model: { type: string, enum: [runninghub/krea2] }
                 prompt: { type: string, maxLength: 8000 }
-                width: { type: integer, minimum: 256, maximum: 4096 }
-                height: { type: integer, minimum: 256, maximum: 4096 }
+                width: { type: integer, minimum: 64, maximum: 8192, multipleOf: 8 }
+                height: { type: integer, minimum: 64, maximum: 8192, multipleOf: 8 }
       responses:
         "202":
           description: Durable task, including a replay of the same idempotent request
@@ -101,6 +102,8 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "409": { description: Idempotency key reused with different input }
+        "429": { description: User or model queue is full; error code identifies the scope }
+        "503": { description: Connection queue is full or generation dependencies are unavailable }
   /generation/tasks/{id}:
     get:
       operationId: getGenerationTask
@@ -134,6 +137,63 @@ paths:
               schema: { $ref: "#/components/schemas/GenerationTask" }
         "404": { description: Task not found or not owned }
         "409": { description: Task has already been claimed }
+  /generation/tasks/{id}/resume:
+    post:
+      operationId: resumeGenerationDelivery
+      summary: Resume query or result saving for an owned task without resubmitting generation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Task after resume request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GenerationTask" }
+        "404": { description: Task not found or not authorized }
+  /generation/tasks/{id}/events:
+    get:
+      operationId: getGenerationTaskEvents
+      summary: Read task events as JSON or subscribe to owner-only task SSE
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: after
+          in: query
+          description: JSON event cursor; ignored for SSE, which sends the latest PostgreSQL snapshot on connect
+          schema: { type: integer, minimum: 0 }
+      responses:
+        "200":
+          description: JSON event history or a versioned task stream, selected by Accept
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [task, events]
+                properties:
+                  task: { $ref: "#/components/schemas/GenerationTask" }
+                  events:
+                    type: array
+                    items: { $ref: "#/components/schemas/GenerationEvent" }
+            text/event-stream:
+              schema: { type: string, description: 'SSE event task; id is the task version and data is GenerationTask JSON' }
+        "404": { description: Task not found or not authorized }
+        "503": { description: SSE stream capacity reached or generation service unavailable }
+  /admin/generation/operations:
+    get:
+      operationId: getGenerationOperations
+      summary: Read audited generation queue, worker, circuit, stage, and failure metrics as an administrator
+      responses:
+        "200":
+          description: Aggregated operations view
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GenerationOperations" }
+        "403": { $ref: "#/components/responses/Forbidden" }
   /me:
     get:
       operationId: getCurrentUser
@@ -260,15 +320,70 @@ components:
   schemas:
     GenerationTask:
       type: object
-      required: [id, status, model, projectId, createdAt, updatedAt]
+      required: [id, version, status, model, projectId, stage, createdAt, updatedAt]
       properties:
         id: { type: string }
-        status: { type: string, enum: [queued, running, completed, canceled, failed, needs_review] }
+        version: { type: integer, format: int64 }
+        status: { type: string, enum: [queued, running, completed, canceled, failed, needs_review, query_failed, save_exhausted] }
         model: { type: string }
         projectId: { type: string }
+        nodeId: { type: string }
+        stage: { type: string }
+        percent: { type: number, minimum: 0, maximum: 100, description: Omitted until overall progress is verified from provider events }
+        failureCode: { type: string }
         resultUrl: { type: string }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    GenerationEvent:
+      type: object
+      required: [id, type, occurredAt]
+      properties:
+        id: { type: integer, format: int64 }
+        type: { type: string }
+        stage: { type: string }
+        occurredAt: { type: string, format: date-time }
+    GenerationOperations:
+      type: object
+      required: [queueLength, oldestWaitSeconds, needsReview, stages, failures, workers, circuits]
+      properties:
+        queueLength: { type: integer, format: int64 }
+        oldestWaitSeconds: { type: number }
+        needsReview: { type: integer, format: int64 }
+        stages:
+          type: array
+          items:
+            type: object
+            required: [stage, averageSeconds, samples]
+            properties:
+              stage: { type: string }
+              averageSeconds: { type: number }
+              samples: { type: integer, format: int64 }
+        failures:
+          type: array
+          items:
+            type: object
+            required: [code, count]
+            properties:
+              code: { type: string }
+              count: { type: integer, format: int64 }
+        workers:
+          type: array
+          items:
+            type: object
+            required: [id, seenAt]
+            properties:
+              id: { type: string }
+              seenAt: { type: string, format: date-time }
+        circuits:
+          type: array
+          items:
+            type: object
+            required: [connectionId, operation, state, consecutiveFailures]
+            properties:
+              connectionId: { type: string }
+              operation: { type: string, enum: [submit, query, save] }
+              state: { type: string, enum: [closed, open, half_open] }
+              consecutiveFailures: { type: integer }
     UserStatus:
       type: string
       enum: [active, disabled]

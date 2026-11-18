@@ -32,28 +32,41 @@ pnpm dev:api
 
 这只是首位管理员的本地引导。公开注册、邮箱验证、找回密码、跨实例共享的验证码与登录限流、签名密钥轮换、主动撤销已签发令牌、历史资源归属迁移和生成授权尚未完成。生产开放前必须补齐对应账户能力和运维流程。
 
-## Go generation foundation
+## Go generation service
 
 The Go API exposes `POST /v1/generation/tasks`, `GET /v1/generation/tasks/{id}` and
 `POST /v1/generation/tasks/{id}/cancel`. Creation requires a bearer token, an
-`Idempotency-Key`, an owned project, owned reference assets, and the
-`runninghub/krea2` model. The response contains task metadata and status; the
-prompt and reference IDs stay in the PostgreSQL input snapshot. An authorized
-administrator may query a task, while only its owner may cancel it before claim.
+`Idempotency-Key`, an owned project, and the `runninghub/krea2` model. Krea2
+currently rejects reference assets. An optional `nodeId` associates a task with
+the current result for that node; a late result from an older task cannot replace
+a newer result. The response contains task metadata and status; the prompt stays
+in the PostgreSQL input snapshot. An authorized administrator may query a task,
+while only its owner may cancel it before claim.
 
 For this foundation phase, project and reference ownership is represented by
 explicit `generation_resource_grants` rows. This is a controlled test resource
 boundary: no application route provisions these grants, so production creation
-fails closed until the project and asset domains migrate. The worker's provider
-is deliberately simulated and returns `simulated://krea2/result`; it does not
-call RunningHub or OSS. Existing Next.js generation remains untouched.
+fails closed until the project and asset domains migrate. Existing Next.js
+generation remains untouched; production cutover is a separate step.
 
-Run the schema migration, start RabbitMQ with
-`docker compose -f infra/compose.yaml up -d --wait rabbitmq`, set
-`RABBITMQ_URL`, then run `pnpm --filter @blow-flow/api generation:worker` as a
-separate process. That process republishes pending outbox rows with broker
-confirms and consumes durable quorum queue messages with manual acknowledgements.
-To run the real integration tests, set `TEST_DATABASE_URL` to a disposable
-PostgreSQL database and `TEST_RABBITMQ_URL` to a disposable RabbitMQ instance,
-then run `pnpm test:integration`. The tests create and remove their own
-PostgreSQL schemas.
+Run the schema migrations, start PostgreSQL, RabbitMQ, and Redis with
+`docker compose -f infra/compose.yaml up -d --wait`, configure
+`DATABASE_URL`, `RABBITMQ_URL`, `REDIS_URL`, `RUNNINGHUB_BASE_URL`,
+`RUNNINGHUB_API_KEY`, and the `OSS_*` values in `.env.example`, then run
+`pnpm --filter @blow-flow/api generation:worker` as a separate process.
+The worker publishes outbox rows with broker confirms, consumes durable quorum
+queue messages with manual acknowledgements, and scans PostgreSQL to recover
+queued work even if a wakeup is lost. Redis only wakes SSE subscribers;
+PostgreSQL remains the source of task state and events.
+
+`GET /v1/generation/tasks/{id}/events` returns task events as JSON or, with
+`Accept: text/event-stream`, a versioned task SSE stream. Failed delivery can
+be resumed through `POST /v1/generation/tasks/{id}/resume` without resubmitting
+the paid generation. Administrators can inspect audited aggregate metrics at
+`GET /v1/admin/generation/operations`. See `openapi.yaml` for the contract.
+
+For integration tests, set `TEST_DATABASE_URL`, `TEST_RABBITMQ_URL`, and
+`TEST_REDIS_URL` to disposable services, then run `pnpm test:integration`.
+The tests create and remove their own PostgreSQL schemas. The Go adapters are
+tested with a simulated RunningHub and object store; live provider credentials
+and production resource grants require separate validation before cutover.
