@@ -111,16 +111,17 @@ test('assistant composer supports starters, multiline input, IME and compact lay
  await page.goto(`/canvas?project=${id}&assistant=1`);
  const panel=page.getByLabel('创作助手对话');
  const input=page.getByLabel('创作要求');
+ const inputText=async()=> (await input.locator('p').allTextContents()).join('\n');
  await expect(page.getByRole('combobox',{name:'助手模型'})).toContainText('测试助手');
  await page.getByRole('button',{name:'写一个故事'}).click();
- await expect(input).toBeFocused();await expect(input).toHaveValue('帮我写一个故事剧本：');
+ await expect(input).toBeFocused();await expect.poll(inputText).toBe('帮我写一个故事剧本：');
  await input.fill('第一行');await input.press('Shift+Enter');await page.keyboard.insertText('第二行');
- await expect(input).toHaveValue('第一行\n第二行');
+ await expect.poll(inputText).toBe('第一行\n第二行');
  await input.dispatchEvent('keydown',{key:'Enter',isComposing:true});
- await expect(input).toHaveValue('第一行\n第二行');
+ await expect.poll(inputText).toBe('第一行\n第二行');
  await input.press('Enter');
  await expect(page.getByLabel('助手消息')).toContainText('收到：第一行');
- await expect(input).toHaveValue('');
+ await expect.poll(inputText).toBe('');
  await page.getByRole('button',{name:'展开宽屏'}).click();
  await expect(panel).toHaveAttribute('data-expanded','true');
  await page.setViewportSize({width:390,height:700});
@@ -136,7 +137,9 @@ test('assistant composer supports starters, multiline input, IME and compact lay
 test('assistant-ui composer selects skills with dollar or slash, renders tools and retries a failed turn', async ({page,request})=>{
  const id=crypto.randomUUID();await request.post('/api/workspace',{data:{action:'create-project',id,folderId:null}});
  await page.goto(`/canvas?project=${id}&assistant=1`);
- const input=page.getByLabel('创作要求');
+ const input=page.getByRole('textbox',{name:'创作要求'});
+ await expect(input).toHaveAttribute('contenteditable','true');
+ await expect(page.locator('textarea[aria-label="创作要求"]')).toHaveCount(0);
  await expect(page.getByRole('combobox',{name:'助手模型'})).toContainText('测试助手');
 
  await input.fill('$');
@@ -147,9 +150,17 @@ test('assistant-ui composer selects skills with dollar or slash, renders tools a
  await expect(dollarSkills.getByRole('option').nth(1)).toHaveAttribute('aria-selected','true');
  await input.press('Escape');
  await expect(dollarSkills).toHaveCount(0);
+ await expect(input).toHaveText('');
+ await input.fill('$剧本');
+ await input.press('Tab');
+ await expect(input.getByLabel('Skill：剧本创作')).toBeVisible();
+ await input.press('Backspace');
+ await input.press('Backspace');
+ await expect(input.getByLabel('Skill：剧本创作')).toHaveCount(0);
  await input.fill('$剧本');
  await input.press('Enter');
- await expect(input).toHaveValue(/剧本创作/);
+ await expect(input.getByLabel('Skill：剧本创作')).toBeVisible();
+ await expect(input).not.toContainText('[[skill:');
  await input.pressSequentially(' 请写一个短场景');
  await page.getByRole('button',{name:'发送',exact:true}).click();
  await expect(page.getByLabel('助手消息')).toContainText('技能：剧本创作');
@@ -161,7 +172,16 @@ test('assistant-ui composer selects skills with dollar or slash, renders tools a
  const slashSkills=page.getByRole('listbox',{name:'选择创作技能'});
  await expect(slashSkills).toBeVisible();
  await slashSkills.getByRole('option',{name:/分镜创作/}).click();
- await expect(input).toContainText('分镜创作');
+ await expect(input.getByLabel('Skill：分镜创作')).toBeVisible();
+ await expect(input).not.toContainText('[[skill:');
+ await input.getByLabel('Skill：分镜创作').click();
+ await input.press('Delete');
+ await expect(input.getByLabel('Skill：分镜创作')).toHaveCount(0);
+
+ await input.fill('/');
+ await page.getByRole('listbox',{name:'选择创作技能'}).getByRole('option',{name:/分镜创作/}).click();
+ await page.getByRole('button',{name:'发送',exact:true}).click();
+ await expect(page.getByLabel('助手消息')).toContainText('技能：分镜创作');
 
  await input.fill('测试失败');
  await page.getByRole('button',{name:'发送',exact:true}).click();
@@ -194,7 +214,7 @@ test('assistant docks beside the canvas, floats, drags and references searchable
  await page.getByLabel('创作要求').fill('请参考这个节点');
  await page.getByRole('button',{name:'切换为浮动窗口'}).click();
  await expect(panel).toHaveAttribute('data-mode','floating');
- await expect(page.getByLabel('创作要求')).toHaveValue('请参考这个节点');
+ await expect(page.getByLabel('创作要求')).toHaveText('请参考这个节点');
  const before=await panel.boundingBox();const handle=panel.getByTitle('拖动以移动助手');const bounds=await handle.boundingBox();
  await page.mouse.move(bounds!.x+30,bounds!.y+20);await page.mouse.down();await page.mouse.move(bounds!.x-170,bounds!.y+70,{steps:10});await page.mouse.up();
  const after=await panel.boundingBox();expect(after!.x).toBeLessThan(before!.x-100);expect(after!.y).toBeGreaterThan(before!.y);

@@ -15,10 +15,11 @@ import {
   type ToolCallMessagePartProps,
 } from '@assistant-ui/react';
 import { ArrowDown, ArrowUp, Check, Copy, FileText, ImagePlus, Loader2, RotateCcw, Square, X } from 'lucide-react';
-import { useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { BrandMark } from '@/components/ui/brand-mark';
 import type { AgentMessage, AgentReference, AgentTask } from '@/lib/agent/types';
 import type { SkillSummary } from '@/lib/agent/skills';
+import { AgentComposerEditor, sameSkillSelection } from './AgentComposerEditor';
 import styles from './AgentSidebar.module.css';
 
 const skillDirective = /\[\[skill:([^|\]]+)\|([^\]]+)\]\]/g;
@@ -117,7 +118,7 @@ function ChatMessage() {
   </MessagePrimitive.Root>;
 }
 
-function EmptyThread({ inputRef }: { inputRef: RefObject<HTMLTextAreaElement | null> }) {
+function EmptyThread({ onStart }: { onStart: (prompt: string) => void }) {
   const aui = useAui();
   const starters = [
     { title: '写一个故事', detail: '把灵感展开成完整剧本', prompt: '帮我写一个故事剧本：' },
@@ -126,39 +127,55 @@ function EmptyThread({ inputRef }: { inputRef: RefObject<HTMLTextAreaElement | n
   ];
   return <div className={styles.empty}>
     <span className={styles.welcomeIcon}><BrandMark size={40}/></span><span className={styles.eyebrow}>你的画布创作伙伴</span><h2>今天，想创作什么？</h2><p>聊聊你的想法，或引用画布中的素材。<br/>我们可以从一个故事、一组分镜开始。</p>
-    <div className={styles.starters}>{starters.map(item => <button key={item.title} onClick={() => { aui.composer.setText(item.prompt); inputRef.current?.focus(); }}><span><strong>{item.title}</strong><small>{item.detail}</small></span><ArrowUp size={15}/></button>)}</div>
+    <div className={styles.starters}>{starters.map(item => <button key={item.title} onClick={() => { aui.composer.setText(item.prompt); onStart(item.prompt); }}><span><strong>{item.title}</strong><small>{item.detail}</small></span><ArrowUp size={15}/></button>)}</div>
   </div>;
 }
 
-function SkillComposerInput({ skills, waiting, inputRef }: { skills: SkillSummary[]; waiting: boolean; inputRef: RefObject<HTMLTextAreaElement | null> }) {
+function RichComposerInput({ disabled, focusRequest, onSkillsChange, selectedSkills, skills, waiting }: {
+  disabled: boolean;
+  focusRequest: number;
+  onSkillsChange: (skills: SkillSummary[]) => void;
+  selectedSkills: SkillSummary[];
+  skills: SkillSummary[];
+  waiting: boolean;
+}) {
   const aui = useAui();
   const text = useAuiState(state => state.composer.text);
-  const [active, setActive] = useState(0);
-  const match = text.match(/(?:^|\s)([$/])([\p{L}\p{N}-]*)$/u);
-  const query = match?.[2].toLocaleLowerCase() ?? '';
-  const matches = match ? skills.filter(skill => `${skill.id} ${skill.name} ${skill.description}`.toLocaleLowerCase().includes(query)).slice(0, 8) : [];
-  const open = matches.length > 0;
-  const choose = (skill: SkillSummary) => {
-    const start = match?.index ?? text.length;
-    const prefix = text.slice(0, start).trimEnd();
-    aui.composer.setText(`${prefix ? `${prefix} ` : ''}[[skill:${skill.id}|${skill.name}]] `);
-    setActive(0);
-  };
-  const keyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (!open) return;
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      event.preventDefault();
-      setActive(index => (index + (event.key === 'ArrowDown' ? 1 : matches.length - 1)) % matches.length);
-    } else if (event.key === 'Enter' && !event.shiftKey) {
-      event.preventDefault(); choose(matches[active] ?? matches[0]);
-    } else if (event.key === 'Escape') {
-      event.preventDefault(); aui.composer.setText(text.slice(0, match?.index ?? text.length));
-    }
-  };
-  return <>
-    {open ? <div id="agent-skill-menu" role="listbox" aria-label="选择创作技能" className={styles.skillMenu}>{matches.map((skill, index) => <button key={skill.id} role="option" aria-selected={index === active} className={styles.skillOption} onMouseDown={event => event.preventDefault()} onClick={() => choose(skill)}><strong>{skill.name}</strong><span>{skill.description}</span><small>{match?.[1]}{skill.id}</small></button>)}</div> : null}
-    <ComposerPrimitive.Input ref={inputRef} aria-label="创作要求" role="combobox" aria-expanded={open} aria-controls={open ? 'agent-skill-menu' : undefined} placeholder={waiting ? '回答或修改要求…' : '描述你的创作想法，输入 / 或 $ 选择技能…'} rows={3} submitMode="enter" onKeyDown={keyDown}/>
-  </>;
+  return <AgentComposerEditor
+    disabled={disabled}
+    focusRequest={focusRequest}
+    onChange={next => {
+      if (next.text !== text) aui.composer.setText(next.text);
+      onSkillsChange(next.skills);
+    }}
+    onSubmit={() => sendRichComposer(aui, text, selectedSkills)}
+    selectedSkills={selectedSkills}
+    skills={skills}
+    value={text}
+    waiting={waiting}
+  />;
+}
+
+function sendRichComposer(aui: ReturnType<typeof useAui>, text: string, selectedSkills: SkillSummary[]) {
+  if (text.trim()) aui.composer.send();
+  else if (selectedSkills.length) aui.thread.append({ role: 'user', content: [{ type: 'text', text: '' }] });
+}
+
+function RichComposerSend({ busy, selectedSkills, waiting }: { busy: boolean; selectedSkills: SkillSummary[]; waiting: boolean }) {
+  const aui = useAui();
+  const text = useAuiState(state => state.composer.text);
+  const canSend = useAuiState(state => state.composer.canSend);
+  const threadBlocked = useAuiState(state => state.thread.isDisabled || state.thread.isSendDisabled);
+  const enabled = !busy && (canSend || (selectedSkills.length > 0 && !threadBlocked));
+  const label = waiting ? '回答 / 修改' : '发送';
+  return <button
+    aria-label={label}
+    title={label}
+    className={styles.send}
+    disabled={!enabled}
+    onClick={() => sendRichComposer(aui, text, selectedSkills)}
+    type="button"
+  >{busy ? <Loader2 size={17} className="animate-spin"/> : <ArrowUp size={18}/>}</button>;
 }
 
 type Props = {
@@ -187,7 +204,8 @@ function textOf(message: AppendMessage) {
 }
 
 export function AgentAssistantUI(props: Props) {
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [selectedSkills, setSelectedSkills] = useState<SkillSummary[]>([]);
+  const [focusRequest, setFocusRequest] = useState(0);
   const messages = useMemo(() => threadMessages(props.messages, props.tasks), [props.messages, props.tasks]);
   const running = props.task ? ['queued', 'running'].includes(props.task.status) : false;
   const waitingOrInterrupted = props.task ? ['waiting', 'interrupted'].includes(props.task.status) : false;
@@ -197,7 +215,11 @@ export function AgentAssistantUI(props: Props) {
     isRunning: running,
     canResume: props.task?.status === 'interrupted',
     isSendDisabled: props.busy || props.uploading,
-    onNew: async message => props.onSubmit(textOf(message)),
+    onNew: async message => {
+      const directives = selectedSkills.map(skill => `[[skill:${skill.id}|${skill.name}]]`).join(' ');
+      await props.onSubmit([directives, textOf(message).trim()].filter(Boolean).join(' '));
+      setSelectedSkills([]);
+    },
     onReload: async parentId => props.onRetry(parentId),
     onCancel: props.onStop,
     onResume: async () => props.onResume(),
@@ -205,7 +227,7 @@ export function AgentAssistantUI(props: Props) {
   return <AssistantRuntimeProvider runtime={runtime}>
     <ThreadPrimitive.Root className={styles.assistantThread}>
       <ThreadPrimitive.Viewport className={styles.messages} aria-label="助手消息" autoScroll>
-        <ThreadPrimitive.Empty><EmptyThread inputRef={inputRef}/></ThreadPrimitive.Empty>
+        <ThreadPrimitive.Empty><EmptyThread onStart={() => setFocusRequest(request => request + 1)}/></ThreadPrimitive.Empty>
         <ThreadPrimitive.Messages components={{ UserMessage: ChatMessage, AssistantMessage: ChatMessage }}/>
         {props.statusContent}
       </ThreadPrimitive.Viewport>
@@ -217,12 +239,19 @@ export function AgentAssistantUI(props: Props) {
         <ComposerPrimitive.Root className={styles.composer}>
           {props.references.length > 0 ? <div className={styles.references}>{props.references.map((reference, index) => <button key={index} aria-label={`参考：${reference.name || reference.nodeId} ×`} title="移除参考" onClick={() => props.onRemoveReference(index)}><ImagePlus size={12}/><span>参考：{reference.name || reference.nodeId}</span><X size={12}/></button>)}</div> : null}
           {props.uploading ? <p role="status" className={styles.hint}>正在保存参考图…</p> : null}
-          <SkillComposerInput skills={props.skills} waiting={props.waiting} inputRef={inputRef}/>
+          <RichComposerInput
+            disabled={props.uploading}
+            focusRequest={focusRequest}
+            onSkillsChange={next => setSelectedSkills(current => sameSkillSelection(current, next) ? current : next)}
+            selectedSkills={selectedSkills}
+            skills={props.skills}
+            waiting={props.waiting}
+          />
           {props.referenceTools}
           <div className={styles.composerBottom}>{props.modelControl}<div className={styles.actions}>
             {running ? <ComposerPrimitive.Cancel aria-label="停止" title="停止" disabled={props.busy}><Square size={14}/></ComposerPrimitive.Cancel> : null}
             {waitingOrInterrupted ? <button type="button" aria-label="停止" title="停止" disabled={props.busy} onClick={() => void props.onStop()}><Square size={14}/></button> : null}
-            <ComposerPrimitive.Send aria-label={props.waiting ? '回答 / 修改' : '发送'} title={props.waiting ? '回答 / 修改' : '发送'} className={styles.send}>{props.busy ? <Loader2 size={17} className="animate-spin"/> : <ArrowUp size={18}/>}</ComposerPrimitive.Send>
+            <RichComposerSend busy={props.busy || props.uploading} selectedSkills={selectedSkills} waiting={props.waiting}/>
           </div></div>
         </ComposerPrimitive.Root>
         <p className={styles.keyboardHint}>Enter 发送 · Shift + Enter 换行 · / 或 $ 选择技能</p>
