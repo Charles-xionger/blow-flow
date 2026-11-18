@@ -42,6 +42,7 @@ type Dependencies struct {
 	LocalAdmin       LocalAdminAuthenticator
 	Captcha          ImageCaptcha
 	Accounts         AccountService
+	Generation       GenerationService
 }
 
 func New(ping Ping) *gin.Engine {

@@ -22,6 +22,7 @@ func registerAccountRoutes(router *gin.Engine, dependencies Dependencies) {
 	v1.GET("/auth/captcha", newImageCaptcha(dependencies))
 	v1.POST("/auth/admin/login", adminLogin(dependencies))
 	v1.Use(authenticate(dependencies.IdentityVerifier, dependencies.Accounts))
+	registerGenerationRoutes(v1, dependencies)
 	v1.GET("/me", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"user": currentUser(c)})
 	})
