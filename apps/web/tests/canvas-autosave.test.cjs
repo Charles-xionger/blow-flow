@@ -53,6 +53,39 @@ test('autosave creates once, updates edits, and persists deleting the last node'
   assert.equal(store.getState().saveStatus, 'synced');
 });
 
+test('Agent send accepts an unchanged viewport notification during server confirmation', async t => {
+  const { store, saver, repository } = await setup(t);
+  store.setState({ nodes: [node('one')] });
+  await saver.save();
+  const id = store.getState().currentWorkflowId;
+  const draft = await repository.read(id);
+  const originalFetch = global.fetch;
+  let notifyViewport = false;
+  global.fetch = async (url, options) => {
+    if (options?.method === 'PUT') return originalFetch(url, options);
+    // React Flow can publish a new viewport object with the same values while
+    // the confirmation GET is in flight. The saved canvas has not changed.
+    if (notifyViewport) store.setState({ viewport: { ...store.getState().viewport } });
+    return Response.json({ success: true, data: { id, ...draft.snapshot, version: draft.serverVersion } });
+  };
+  assert.equal(await saver.flushAndConfirm(id), draft.serverVersion);
+  notifyViewport = true;
+  assert.equal(await saver.flushAndConfirm(id), draft.serverVersion);
+});
+
+test('Agent send still rejects a real edit during server confirmation', async t => {
+  const { store, saver, repository } = await setup(t);
+  store.setState({ nodes: [node('one')] });
+  await saver.save();
+  const id = store.getState().currentWorkflowId;
+  const draft = await repository.read(id);
+  global.fetch = async () => {
+    store.setState({ nodes: [...store.getState().nodes, node('two')] });
+    return Response.json({ success: true, data: { id, ...draft.snapshot, version: draft.serverVersion } });
+  };
+  await assert.rejects(saver.flushAndConfirm(id), /画布在确认期间发生变化/);
+});
+
 test('a restored project matching its pending draft clears the old deletion error and reports synced', async t => {
   const { store, saver, repository } = await setup(t);
   store.setState({ nodes: [node('one')] });

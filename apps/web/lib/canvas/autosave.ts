@@ -370,7 +370,7 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
     if (!draft || draft.recovery || draft.confirmedLocalVersion !== draft.localVersion) throw new Error('画布尚未同步到服务器');
     const remote = await readRemote(projectId);
     const current = store.getState();
-    if (current.currentWorkflowId !== projectId || !current.persistenceReady || active?.dirty ||
+    if (current.currentWorkflowId !== projectId || !current.persistenceReady ||
       canonicalJSON(remote.snapshot) !== canonicalJSON(canvasSnapshot(current)) || draft.serverVersion !== remote.version) throw new Error('画布在确认期间发生变化，请重新发送');
     return remote.version;
   }
