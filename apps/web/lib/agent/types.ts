@@ -40,6 +40,7 @@ export interface AgentTask {
     projectId: string;
     modelId: string;
     status: AgentStatus;
+    legacyImported?: boolean;
     question?: AgentQuestion;
     awaitingGeneration?: boolean;
     /** Existing nodes the user let this task rewrite; never carried into another task. */

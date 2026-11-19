@@ -8,7 +8,9 @@ Go 的 `resource` 模块保存项目、文件夹、画布快照、版本化保�
 
 脚本任务创建结果节点与保存正文时，经 `resource/postgres.ScriptCanvas` 在任务事务内更新画布版本并写保存回执；脚本模块只保存任务、检查点与执行状态。脚本输入中的创作要求和参考素材须与已保存画布的节点、连线顺序和内容一致。
 
-普通创作用户先由受控 CLI 创建并验证，使用 Go API 的密码和图片验证码登录。公开自助注册、邮箱验证与找回密码属于账户上线前置，尚未开放。前端仍调用现有 Next.js 接口，本迁移不形成双写。
+普通创作用户先由受控 CLI 创建并验证，使用 Go API 的密码和图片验证码登录。公开自助注册、邮箱验证与找回密码属于账户上线前置，尚未开放。Web 提供登录弹窗，通过 HttpOnly Cookie 保持 Go 会话；`GO_CUTOVER=1` 时，项目列表、画布读写、历史和 Agent 命令由 Next.js 路由转发到 Go，默认仍走旧路径。画布发送给 Agent 前必须确认已在 Go 中保存，避免助手读取过期快照。Go Agent 公开接口另需 `AGENT_GO_EXPERIMENTAL_COMMANDS=1` 和 Runner 密钥；生成审批、删除授权、技能和素材引用尚未具备完整对等能力，因此该开关仅供隔离的本地演练，不能作为生产切流完成的凭据。
+
+本地演练在 Web 环境同时设置 `GO_CUTOVER=1` 和 `NEXT_PUBLIC_GO_CUTOVER=1`，设置 `GO_API_URL`，然后启动 Go API 与 Web。Go 账号由 `pnpm --filter @blow-flow/api creator:setup` 建立。生产前还需完成其他 Next.js 项目相关接口的归属切换、Go Agent 工具对等、数据导入验收和回滚演练，避免同一批项目在两套存储中发生分叉。
 
 ## 一次性历史数据导入
 

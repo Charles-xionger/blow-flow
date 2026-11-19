@@ -29,7 +29,7 @@ function messageStatus(task?: AgentTask): ThreadMessageLike['status'] {
   if (task.status === 'failed') return { type: 'incomplete', reason: 'error', error: task.error };
   if (task.status === 'stopped') return { type: 'incomplete', reason: 'cancelled' };
   if (task.status === 'waiting') return { type: 'requires-action', reason: 'interrupt' };
-  if (task.status === 'queued' || task.status === 'running' || task.status === 'interrupted') return { type: 'running' };
+  if (task.status === 'queued' || task.status === 'running' || task.status === 'interrupted' && !task.legacyImported) return { type: 'running' };
   return { type: 'complete', reason: 'stop' };
 }
 
@@ -278,7 +278,7 @@ export function AgentAssistantUI(props: Props) {
     messages,
     convertMessage: message => message,
     isRunning: running,
-    canResume: props.task?.status === 'interrupted',
+    canResume: props.task?.status === 'interrupted' && !props.task.legacyImported,
     isSendDisabled: props.busy || props.uploading,
     onNew: async message => {
       const directives = selectedSkills.map(skill => `[[skill:${skill.id}|${skill.name}]]`).join(' ');
@@ -299,7 +299,7 @@ export function AgentAssistantUI(props: Props) {
       <ThreadPrimitive.ScrollToBottom className={styles.jump}><ArrowDown size={13}/>回到最新消息</ThreadPrimitive.ScrollToBottom>
       <footer className={styles.footer}>
         {props.picker}
-        {props.task?.status === 'interrupted' ? <ComposerPrimitive.Resume className={styles.resume}>继续创作 <ArrowUp size={14}/></ComposerPrimitive.Resume> : null}
+        {props.task?.status === 'interrupted' && !props.task.legacyImported ? <ComposerPrimitive.Resume className={styles.resume}>继续创作 <ArrowUp size={14}/></ComposerPrimitive.Resume> : null}
         {props.error ? <p role="alert" className={styles.error}>{props.error}</p> : null}
         <ComposerPrimitive.Root className={styles.composer}>
           {props.references.length > 0 ? <div className={styles.references}>{props.references.map((reference, index) => <button key={index} aria-label={`参考：${reference.name || reference.nodeId} ×`} title="移除参考" onClick={() => props.onRemoveReference(index)}><ImagePlus size={12}/><span>参考：{reference.name || reference.nodeId}</span><X size={12}/></button>)}</div> : null}

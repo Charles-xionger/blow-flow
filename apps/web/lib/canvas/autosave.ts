@@ -362,6 +362,18 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
     await commitLocal();
     await sync();
   }
+  async function flushAndConfirm(projectId: string) {
+    if (!store.getState().persistenceReady || store.getState().currentWorkflowId !== projectId) throw new Error('画布尚未准备好');
+    await commitLocal();
+    await sync(true, projectId);
+    const draft = await repository.read(projectId);
+    if (!draft || draft.recovery || draft.confirmedLocalVersion !== draft.localVersion) throw new Error('画布尚未同步到服务器');
+    const remote = await readRemote(projectId);
+    const current = store.getState();
+    if (current.currentWorkflowId !== projectId || !current.persistenceReady || active?.dirty ||
+      canonicalJSON(remote.snapshot) !== canonicalJSON(canvasSnapshot(current)) || draft.serverVersion !== remote.version) throw new Error('画布在确认期间发生变化，请重新发送');
+    return remote.version;
+  }
   function start() {
     if (unsubscribe) return () => {};
     unsubscribe = store.subscribe((state, previous) => {
@@ -533,7 +545,7 @@ export function createCanvasAutosave(store: Store, onError: (error: unknown) => 
     if (store.getState().currentWorkflowId === id) store.setState({
       generationRecoveryReadOnly: store.getState().generationRecoveryReadOnly?.filter(value => value !== nodeId) });
   }
-  return { start, open, save, flush, recover, prepareSwitch, deleted, allowGenerationRecovery,
+  return { start, open, save, flush, flushAndConfirm, recover, prepareSwitch, deleted, allowGenerationRecovery,
     beginInteraction(key: string) { interactions.add(key); clearTimers(); },
     endInteraction(key: string) {
       interactions.delete(key);

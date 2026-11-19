@@ -2,14 +2,40 @@ import { getDatabase } from '../../../../../lib/db';
 
 import { getGenerationService } from '../../../../../lib/generation/server';
 import { generationLabel } from '../../../../../lib/generation/client';
+import { NextRequest, NextResponse } from 'next/server';
+import { creatorAccess, goAuthorized, goCutoverEnabled, goPublic, setCreatorCookies } from '../../../../../lib/go-cutover';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 // Progress is transient; it must not advance the saved canvas revision.
 // The browser fetches the full canvas only when this revision changes.
-export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  if(goCutoverEnabled()){
+    const path=`/v1/projects/${encodeURIComponent(id)}`;
+    const initial=await goAuthorized(request,path).catch(()=>undefined);
+    if(!initial?.response?.ok)return NextResponse.json({error:'请先登录或项目不存在'},{status:initial?.response?.status??503});
+    const token=initial.refreshed?.access??creatorAccess(request);
+    if(!token)return NextResponse.json({error:'请先登录'},{status:401});
+    const encoder=new TextEncoder();
+    const stream=new ReadableStream<Uint8Array>({start(controller){
+      let closed=false;let previous:number|undefined;let heartbeat=Date.now();
+      const close=()=>{if(closed)return;closed=true;clearInterval(timer);request.signal.removeEventListener('abort',close);try{controller.close();}catch{}};
+      const poll=async()=>{if(closed)return;try{
+        const response=await goPublic(path,{headers:{Authorization:`Bearer ${token}`}});
+        if(!response.ok){close();return;}
+        const project=await response.json() as {version:number};
+        const message=project.version!==previous?`data: ${project.version}\n\n`:Date.now()-heartbeat>10000?': heartbeat\n\n':'';
+        if(message){if((controller.desiredSize??0)<=0){close();return;}controller.enqueue(encoder.encode(message));previous=project.version;heartbeat=Date.now();}
+      }catch{close();}};
+      const timer=setInterval(()=>{void poll();},3000);
+      request.signal.addEventListener('abort',close,{once:true});void poll();
+    }});
+    const response=new NextResponse(stream,{headers:{'Content-Type':'text/event-stream','Cache-Control':'no-cache, no-transform','X-Accel-Buffering':'no'}});
+    if(initial.refreshed)setCreatorCookies(response,initial.refreshed.access,initial.refreshed.refresh);
+    return response;
+  }
   const query = getDatabase().prepare('SELECT version, deleted_at FROM workflows WHERE id = ?');
   const generation = getGenerationService();
   const encoder = new TextEncoder();

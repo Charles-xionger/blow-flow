@@ -95,10 +95,12 @@ function AgentConversation({ projectId, close }: { projectId: string; close: () 
   async function send(action: string, value: string, messageReferences = references) {
     setBusy(true); setError('');
     try {
-      await canvasAutosave.flush();
+      let canvasVersion: number | undefined;
+      if (action === 'send' && process.env.NEXT_PUBLIC_GO_CUTOVER === '1') canvasVersion = await canvasAutosave.flushAndConfirm(projectId);
+      else await canvasAutosave.flush();
       const signature = JSON.stringify({ action, value, model, references: messageReferences, questionId: task?.question?.id });
       if (pendingRequest.current?.signature !== signature) pendingRequest.current = { signature, requestId: crypto.randomUUID() };
-      const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, requestId: pendingRequest.current.requestId, text: value, modelId: model || snapshot.models.find(item => item.available)?.id, references: messageReferences, questionId: task?.question?.id }) });
+      const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, requestId: pendingRequest.current.requestId, text: value, modelId: model || snapshot.models.find(item => item.available)?.id, references: messageReferences, questionId: task?.question?.id, canvasVersion }) });
       if (!response.ok) throw new Error((await response.json()).error);
       pendingRequest.current = null; setReferences([]);
       // External-store runtimes expect the host snapshot to carry an accepted
@@ -132,7 +134,7 @@ function AgentConversation({ projectId, close }: { projectId: string; close: () 
   </>;
 
   return <AgentPanelFrame close={close}>
-    <div className={styles.context}><span><Scan size={13}/> 当前画布</span><span role="status"><i data-active={task?.status === 'running' || task?.status === 'queued'}/>{task ? task.status === 'interrupted' ? '待继续' : task.awaitingGeneration ? '等待生成结果' : task.question?.scope?.kind === 'generation' && waiting ? '等待批准' : statusText[task.status] : '可以开始创作'}</span></div>
+    <div className={styles.context}><span><Scan size={13}/> 当前画布</span><span role="status"><i data-active={task?.status === 'running' || task?.status === 'queued'}/>{task ? task.legacyImported && task.status === 'interrupted' ? '历史任务' : task.status === 'interrupted' ? '待继续' : task.awaitingGeneration ? '等待生成结果' : task.question?.scope?.kind === 'generation' && waiting ? '等待批准' : statusText[task.status] : '可以开始创作'}</span></div>
     <AgentAssistantUI messages={snapshot.messages} tasks={snapshot.tasks} task={task} skills={skills} waiting={!!waiting} busy={busy || !snapshot.models.some(item => item.available)} uploading={uploading} error={error} references={references}
       onRemoveReference={index => setReferences(old => old.filter((_, itemIndex) => itemIndex !== index))}
       onSubmit={value => send(waiting ? 'answer' : 'send', value)}

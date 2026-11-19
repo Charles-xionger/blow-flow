@@ -1,13 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAgentService } from '@/lib/agent/server';
 import { publicAgentModels } from '@/lib/agent/config';
+import { goCutoverEnabled, goMapped } from '@/lib/go-cutover';
 export const runtime='nodejs';
 type Context={params:Promise<{projectId:string}>};
+type GoSnapshot = { tasks: Array<{id:string;projectId:string;modelId:string;status:string;createdAt:string;legacyImported?:boolean;question?:{id:string;text:string;options:string[];scope?:{kind:string;items?:Array<{nodeId:string;model:string;prompt:string;width:number;height:number}>};answer?:string;cancelled?:boolean};steps?:Array<{callId:string;runId:string;name:string;arguments:Record<string,unknown>;result?:unknown;status:string;createdAt:string}>}>; messages:Array<{id:string;taskId:string;runId?:string;role:string;text:string;references:unknown[];createdAt:string}>; legacyGenerationBatches?: Array<{id:string;taskId:string;status:string;items:Array<{request:{nodeId:string};note?:string}>}> };
+function mapSnapshot(value:GoSnapshot) {
+  return { tasks:value.tasks.map(task=>({ ...task,createdAt:Date.parse(task.createdAt),steps:(task.steps??[]).map(step=>({id:step.callId,runId:step.runId,name:step.name,args:step.arguments,result:step.result,status:step.status,createdAt:Date.parse(step.createdAt)})),question:task.question?.scope?.kind==='generation' ? {...task.question,scope:{...task.question.scope,items:(task.question.scope.items??[]).map(item=>({nodeId:item.nodeId,modelId:item.model,input:{prompt:item.prompt,width:item.width,height:item.height}}))}} : task.question })),messages:value.messages.map(message=>({...message,createdAt:Date.parse(message.createdAt)})),models:publicAgentModels(),generations:value.legacyGenerationBatches?.map(batch=>({id:batch.id,taskId:batch.taskId,status:'archived',items:batch.items.map(item=>({nodeId:item.request.nodeId,note:item.note??'历史生成记录，已归档'}))}))};
+}
 export async function GET(_request:NextRequest,context:Context){
+  if(goCutoverEnabled()){const {projectId}=await context.params;return goMapped<GoSnapshot>(_request,`/v1/agent/projects/${encodeURIComponent(projectId)}`,{},mapSnapshot,false);}
   try {const {projectId}=await context.params;return NextResponse.json({...getAgentService().snapshot(projectId),models:publicAgentModels()});}
   catch {return NextResponse.json({error:'无法读取创作助手或项目不存在'},{status:404});}
 }
 export async function POST(request:NextRequest,context:Context){
+  if(goCutoverEnabled()){
+    const {projectId}=await context.params;
+    let body:Record<string,unknown>;
+    try{body=await request.json();}catch{return NextResponse.json({error:'请求格式无效'},{status:400});}
+    const requestId=body.requestId;
+    if(typeof requestId!=='string')return NextResponse.json({error:'缺少请求编号'},{status:400});
+    let command:Record<string,unknown>;
+    if(body.action==='send')command={action:'send',requestId,text:body.text,modelId:body.modelId,references:body.references??[],canvasVersion:body.canvasVersion};
+    else if(body.action==='answer')command={action:'answer',requestId,text:body.text,questionId:body.questionId};
+    else if(body.action==='stop'||body.action==='continue')command={action:body.action,requestId};
+    else return NextResponse.json({error:'不支持的操作'},{status:400});
+    return goMapped(request,`/v1/agent/projects/${encodeURIComponent(projectId)}/commands`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(command)},value=>value,false);
+  }
   try {
     const {projectId}=await context.params;const body=await request.json();const service=getAgentService();
     if(typeof body.requestId!=='string')throw new Error('Request identity required');

@@ -23,7 +23,13 @@ func (s *Store) Snapshot(ctx context.Context, owner, project string) (agent.Snap
 			return err
 		}
 		for _, row := range tasks {
-			out.Tasks = append(out.Tasks, row.task())
+			task := row.task()
+			steps, err := loadSteps(tx, row.ID)
+			if err != nil {
+				return err
+			}
+			task.Steps = steps
+			out.Tasks = append(out.Tasks, task)
 		}
 		messages, err := loadMessages(tx, project)
 		if err != nil {

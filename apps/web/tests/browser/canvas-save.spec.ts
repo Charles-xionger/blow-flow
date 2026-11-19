@@ -133,7 +133,7 @@ test('editing a canvas survives clearing browser storage and deleting its last n
   // A new browser context has no IndexedDB/localStorage and reads the same SQLite-backed API.
   const clean = await context.browser()!.newContext();
   const reopened = await clean.newPage();
-  await reopened.goto(`http://127.0.0.1:3217/?project=${id}`);
+  await reopened.goto(`http://127.0.0.1:${process.env.BROWSER_TEST_PORT || 3217}/?project=${id}`);
   await expect(reopened.getByTestId('canvas-save-status')).toHaveText('已同步');
   await expect(reopened.getByText('快捷键保存文字', { exact: true })).toBeVisible();
   await reopened.locator('.react-flow__node').click();
@@ -230,7 +230,7 @@ test('API offline edits survive refresh and automatically sync into a clean brow
   const clean = await context.browser()!.newContext();
   try {
     const reopened = await clean.newPage();
-    await reopened.goto(`http://127.0.0.1:3217/?project=${id}`);
+    await reopened.goto(`http://127.0.0.1:${process.env.BROWSER_TEST_PORT || 3217}/?project=${id}`);
     await expect(reopened.getByRole('button', { name: '离线恢复项目', exact: true })).toBeVisible();
     await expect(reopened.getByText('离线编辑后刷新', { exact: true })).toBeVisible();
     await expect(reopened.getByTestId('canvas-save-status')).toHaveText('已同步');
@@ -290,7 +290,7 @@ for (const mode of ['create', 'update'] as const) {
     const clean = await context.browser()!.newContext();
     try {
       const reopened = await clean.newPage();
-      await reopened.goto(`http://127.0.0.1:3217/?project=${id}`);
+      await reopened.goto(`http://127.0.0.1:${process.env.BROWSER_TEST_PORT || 3217}/?project=${id}`);
       await expect(reopened.getByText('确认前产生的新修改', { exact: true })).toBeVisible();
       await expect(reopened.getByTestId('canvas-save-status')).toHaveText('已同步');
     } finally { await clean.close(); }

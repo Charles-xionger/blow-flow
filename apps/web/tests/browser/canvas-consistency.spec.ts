@@ -121,7 +121,7 @@ for (const choice of ['server', 'copy'] as const) {
     await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
     const remoteContext = await browser.newContext();
     const remote = await remoteContext.newPage();
-    await remote.goto(`http://127.0.0.1:3217/?project=${id}`);
+    await remote.goto(`http://127.0.0.1:${process.env.BROWSER_TEST_PORT || 3217}/?project=${id}`);
     await expect(remote.getByTestId('canvas-save-status')).toHaveText('已同步');
     await rename(remote, `冲突原稿 ${choice}`, `远端 ${choice}`);
     await expect(remote.getByTestId('canvas-save-status')).toHaveText('已同步');

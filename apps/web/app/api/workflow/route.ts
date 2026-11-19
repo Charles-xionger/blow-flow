@@ -1,9 +1,12 @@
 import { handleCanvasSave } from "@/lib/canvas/save-route";
 import { NextRequest, NextResponse } from "next/server";
 import { getAllWorkflows } from "@/lib/db/workflows";
+import { goCutoverEnabled } from '@/lib/go-cutover';
+import { readGoWorkflows, saveGoWorkflow } from '@/lib/go-workflow';
 
 // GET: 获取所有工作流
-export async function GET() {
+export async function GET(request:NextRequest) {
+  if(goCutoverEnabled())return readGoWorkflows(request);
   try {
     const workflows = getAllWorkflows();
     return NextResponse.json({ success: true, data: workflows });
@@ -22,5 +25,6 @@ export async function GET() {
 
 // POST and PUT use the same versioned protocol.
 export async function POST(request: NextRequest) {
+  if(goCutoverEnabled())return saveGoWorkflow(request);
   return handleCanvasSave(request);
 }

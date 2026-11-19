@@ -457,7 +457,7 @@ export const Sidebar = memo(function Sidebar() {
                       {workflow.name}
                     </div>
                     <div className={`text-[11px] ${textMuted}`}>
-                      {workflow.nodes?.length || 0} 节点 ·{" "}
+                      {workflow.nodeCount ?? workflow.nodes?.length ?? 0} 节点 ·{" "}
                       {new Date(workflow.updatedAt).toLocaleDateString("zh-CN")}
                     </div>
                   </div>

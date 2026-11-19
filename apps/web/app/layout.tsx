@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { Toaster } from "sonner";
 import "./globals.css";
+import { CreatorLoginGate } from '@/components/auth/CreatorLoginGate';
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -36,6 +37,7 @@ export default function RootLayout({
           }}
         />
         {children}
+        {process.env.GO_CUTOVER === '1' && <CreatorLoginGate />}
         <Toaster position="bottom-right" richColors />
       </body>
     </html>

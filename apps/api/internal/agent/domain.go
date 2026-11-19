@@ -26,6 +26,7 @@ type Task struct {
 	CreatedAt      time.Time `json:"createdAt"`
 	UpdatedAt      time.Time `json:"updatedAt"`
 	LegacyImported bool      `json:"legacyImported,omitempty"`
+	Steps          []Step    `json:"steps,omitempty"`
 }
 
 type Question struct {
