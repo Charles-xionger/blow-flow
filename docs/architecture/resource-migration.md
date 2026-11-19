@@ -12,6 +12,8 @@ Go 的 `resource` 模块保存项目、文件夹、画布快照、版本化保�
 
 本地演练在 Web 环境同时设置 `GO_CUTOVER=1` 和 `NEXT_PUBLIC_GO_CUTOVER=1`，设置 `GO_API_URL`，然后启动 Go API 与 Web。Go 账号由 `pnpm --filter @blow-flow/api creator:setup` 建立。生产前还需完成其他 Next.js 项目相关接口的归属切换、Go Agent 工具对等、数据导入验收和回滚演练，避免同一批项目在两套存储中发生分叉。
 
+开发模式的 Go API、生成 Worker、脚本 Worker 和 Agent Dispatcher 启动命令会读取仓库根目录的 `.env.local`（原 Next.js 模型/供应商配置），再读取 `apps/api/.env.local`；shell 中显式传入的变量优先。独立 Node Agent Worker 沿用 Web 的同一套加载顺序。现有 `GEMINI_API_KEY`、`ARK_API_KEY`、`RUNNINGHUB_API_KEY` 与 `RUNNINGHUB_BASE_URL` 可直接复用，不复制密钥到源码或提交文件。数据库迁移、资源导入及生产 Go 二进制仍要求明确提供环境变量，避免隐式选择目标数据库。
+
 ## 一次性历史数据导入
 
 1. 在停写窗口停止 Next.js 新项目保存、上传和新生成提交；等待已提交任务完成或确认其原平台任务 ID 已保留。备份 SQLite 文件、WAL/SHM 和 OSS 清单。
