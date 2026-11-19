@@ -26,7 +26,7 @@ Go 的 `resource` 模块保存项目、文件夹、画布快照、版本化保�
    DATABASE_URL='postgres://...' go run ./cmd/import-legacy-resources -file /secure/path/resources.json -owner '<初始所有者 UUID>' -oss-host '<OSS 主机名>' -apply
    ```
 
-4. 核对 `projects`、`project_folders`、`project_save_receipts`、`project_deleted_nodes`、`script_tasks`、`script_requests` 的行数及 ID 集合与导出文件一致；抽查项目画布内容、版本、回收站、素材链接及分镜检查点。导入时旧的排队或运行中脚本任务转为中断，保留正文，不向模型重提。检查其他用户访问返回 404。导入遇到 ID 冲突会整体回滚，不覆盖既有项目。
+4. 核对 `projects`、`project_folders`、`project_save_receipts`、`project_deleted_nodes`、`script_tasks`、`script_requests`、`agent_tasks`、`agent_messages`、`agent_command_receipts`、`agent_legacy_task_snapshots`、`agent_legacy_generation_batches` 的行数及 ID 集合与导出文件一致；抽查项目画布内容、版本、回收站、素材链接、分镜检查点及助手消息。导入时旧的排队、运行中或等待回答的助手任务转为中断；旧确认不能在 Go 中直接批准，原任务和生成批次只作为历史归档，不向模型或生成供应商重提。检查其他用户访问返回 404。导入遇到 ID 冲突会整体回滚，不覆盖既有项目。
 5. 仅在验收通过后，把项目与素材的读写路由和生成任务调用层切换到 Go。保留旧数据库与对象清单以便回滚，不让 Next.js 和 Go 同时写同一批项目。旧任务的原平台任务 ID 只用于查询，不重新提交付费请求。
 
 导出 JSON 包含 Prompt、画布内容和媒体 URL，只能放在受控位置，验收后删除。历史 `media_files` 中仅有 base64 的内容会作为 data URL 保存在素材记录中；真实 OSS 对象不在导入时复制。现有嵌入画布的 OSS 链接按准确主机名索引，不接受任意外部 URL 作为已上传素材。

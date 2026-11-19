@@ -78,14 +78,18 @@ type ScriptRequest struct {
 	Input     string `json:"input"`
 }
 type Export struct {
-	SchemaVersion  int             `json:"schemaVersion"`
-	Projects       []Project       `json:"projects"`
-	Folders        []Folder        `json:"folders"`
-	MediaFiles     []MediaFile     `json:"mediaFiles"`
-	SaveReceipts   []Receipt       `json:"saveReceipts"`
-	DeletedNodes   []DeletedNode   `json:"deletedNodes"`
-	ScriptTasks    []ScriptTask    `json:"scriptTasks"`
-	ScriptRequests []ScriptRequest `json:"scriptRequests"`
+	SchemaVersion          int                  `json:"schemaVersion"`
+	Projects               []Project            `json:"projects"`
+	Folders                []Folder             `json:"folders"`
+	MediaFiles             []MediaFile          `json:"mediaFiles"`
+	SaveReceipts           []Receipt            `json:"saveReceipts"`
+	DeletedNodes           []DeletedNode        `json:"deletedNodes"`
+	ScriptTasks            []ScriptTask         `json:"scriptTasks"`
+	ScriptRequests         []ScriptRequest      `json:"scriptRequests"`
+	AgentTasks             []LegacyAgentTask    `json:"agentTasks"`
+	AgentMessages          []LegacyAgentMessage `json:"agentMessages"`
+	AgentReceipts          []LegacyAgentReceipt `json:"agentReceipts"`
+	AgentGenerationBatches []LegacyAgentBatch   `json:"agentGenerationBatches"`
 }
 
 func (e Export) Validate() error {
@@ -164,7 +168,7 @@ func (e Export) Validate() error {
 		}
 		requests[r.RequestID] = true
 	}
-	return nil
+	return e.validateAgents(projects)
 }
 func valid(s string) bool          { return s != "" && len(s) <= 200 && strings.TrimSpace(s) == s }
 func timestamp(ms int64) time.Time { return time.UnixMilli(ms).UTC() }
@@ -308,6 +312,9 @@ func Apply(ctx context.Context, db *gorm.DB, owner, ossHost string, e Export) er
 			if err := tx.Exec(`INSERT INTO script_requests(owner_id,request_id,task_id,project_id,node_id,input) VALUES(?,?,?::uuid,?,?,?::jsonb)`, owner, request.RequestID, request.TaskID, request.CanvasID, request.NodeID, request.Input).Error; err != nil {
 				return err
 			}
+		}
+		if err := importAgents(tx, owner, e); err != nil {
+			return err
 		}
 		return nil
 	})

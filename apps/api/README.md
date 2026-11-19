@@ -101,6 +101,13 @@ index trusted OSS links already embedded in project snapshots. Follow
 running it against persistent data. The export contains project content and is
 created with mode `0600`; remove it after verifying the import.
 
+The export also carries legacy Agent tasks, messages, request receipts, tool
+steps, and generation batches. The importer stores completed history and archives
+old generation batches without creating Go generation tasks or outbox messages.
+Old active tasks become interrupted and their original snapshots are archived,
+so legacy approvals cannot authorize a new provider submission. This does not by itself enable the production Agent
+route: creator login, Go-owned project writes, and tool parity remain required.
+
 ## Go script tasks
 
 `/v1/script/models` reports server-configured Ark and Gemini text models without exposing keys. Set `ARK_API_KEY` or `GOOGLE_API_KEY`/`GEMINI_API_KEY` in both Go API and worker environments. Run `pnpm --filter @blow-flow/api script:worker` as a separate process. `SCRIPT_CONCURRENCY` sets its local and PostgreSQL claim limit; `SCRIPT_MAX_QUEUED_PER_USER` caps waiting tasks. RabbitMQ carries wakeups and Redis wakes individual task SSE subscribers. PostgreSQL owns task state, leases, workflow checkpoints, immutable task events, request aliases, and output node writes. A provider circuit pauses new model calls after repeated failures; already stored output and checkpoints stay available.

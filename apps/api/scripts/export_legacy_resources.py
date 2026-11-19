@@ -40,6 +40,10 @@ def main():
             "deletedNodes": rows(db, "canvas_deleted_nodes"),
             "scriptTasks": rows(db, "script_tasks") if "script_tasks" in present else [],
             "scriptRequests": rows(db, "script_requests") if "script_requests" in present else [],
+            "agentTasks": rows(db, "agent_tasks") if "agent_tasks" in present else [],
+            "agentMessages": rows(db, "agent_messages") if "agent_messages" in present else [],
+            "agentReceipts": rows(db, "agent_receipts") if "agent_receipts" in present else [],
+            "agentGenerationBatches": rows(db, "agent_generation_batches") if "agent_generation_batches" in present else [],
         }
         db.execute("COMMIT")
     finally:
