@@ -3,8 +3,9 @@ import type { AgentTool, StreamFn } from '@mariozechner/pi-agent-core';
 import type { UserMessage } from '@mariozechner/pi-ai';
 import { Type } from '@sinclair/typebox';
 import { agentModels } from './config';
-import { AGENT_GUIDE } from './guide';
+import { guideForTurn, type AgentSkillDescription } from './guide';
 import { connectAgentMcp } from './mcp';
+import { listSkills } from './skills';
 import { resolveReference } from './references';
 import type { AgentService } from './service';
 import type { AgentRunTrace, AgentTracer } from './tracing';
@@ -13,6 +14,7 @@ export interface PiRuntimeHost {
     isExecuting: (task: AgentRuntimeContext['task']) => boolean;
     connectMcp: (taskId: string) => ReturnType<typeof connectAgentMcp>;
     resolveReference: (projectId: string, reference: AgentMessage['references'][number], options: { historical?: boolean }) => ReturnType<typeof resolveReference>;
+    listSkillDescriptions: () => Promise<AgentSkillDescription[]> | AgentSkillDescription[];
 }
 export function createPiRuntime(service: AgentService, options: {
     apiKey?: string;
@@ -23,6 +25,7 @@ export function createPiRuntime(service: AgentService, options: {
         isExecuting: task => service.isExecuting(task),
         connectMcp: taskId => connectAgentMcp(service, taskId),
         resolveReference: (projectId, reference, settings) => resolveReference(service, projectId, reference, settings),
+        listSkillDescriptions: () => listSkills(),
     }, options);
 }
 export function createPiRuntimeForHost(host: PiRuntimeHost, options: {
@@ -47,7 +50,9 @@ export function createPiRuntimeForHost(host: PiRuntimeHost, options: {
                         text: string;
                     }[], details: {}, terminate: !host.isExecuting(context.task) };
             } }));
-        const agent = new Agent({ initialState: { model, tools, systemPrompt: AGENT_GUIDE }, getApiKey: () => options.apiKey || process.env[config.apiKeyEnv], streamFn: (model, ctx, streamOptions) => { if (!host.isExecuting(context.task))
+        const userMessageCount = context.messages.filter(message => message.role === 'user').length;
+        const systemPrompt = guideForTurn(userMessageCount, userMessageCount === 1 ? await host.listSkillDescriptions() : []);
+        const agent = new Agent({ initialState: { model, tools, systemPrompt }, getApiKey: () => options.apiKey || process.env[config.apiKeyEnv], streamFn: (model, ctx, streamOptions) => { if (!host.isExecuting(context.task))
                 throw new Error('Task paused'); trace?.generation(model.id, { system: ctx.systemPrompt, messages: ctx.messages }); return (options.streamFn ?? streamSimple)(model, ctx, { ...streamOptions, ...(onPayload ? { onPayload } : {}) }); }, toolExecution: 'sequential', beforeToolCall: async () => context.signal.aborted || !host.isExecuting(context.task) ? { block: true, reason: 'Task paused', terminate: true } : undefined });
         const convert = async (message: AgentMessage): Promise<UserMessage> => {
             const content: UserMessage['content'] = [{ type: 'text', text: `${message.role === 'assistant' ? '此前助手回复：' : ''}${message.text}` }];

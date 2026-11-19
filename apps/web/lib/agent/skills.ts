@@ -85,7 +85,7 @@ export function getSkill(id: string, scope: SkillOwnerScope = currentLocalOwner)
 }
 
 export function discoverSkills(scope: SkillOwnerScope = currentLocalOwner) {
-    return listSkills(scope).map(({ id, description }) => ({ id, description }));
+    return listSkills(scope).map(({ id, name, description }) => ({ id, name, description }));
 }
 
 export function readSkill(id: string, resource?: string, scope: SkillOwnerScope = currentLocalOwner) {

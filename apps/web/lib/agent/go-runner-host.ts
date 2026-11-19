@@ -8,6 +8,7 @@ import { resolveReferenceFromCanvas } from './references';
 import { GoCanvasEditor } from './go-canvas';
 import { GoAgentRun, GoAgentRunClient } from './go-runner-client';
 import { createPiRuntimeForHost, type PiRuntimeHost } from './runtime';
+import { discoverSkills, listSkills, readSkill } from './skills';
 import type { AgentReference, AgentTask } from './types';
 import type { CanvasOperation } from './canvas-plan';
 import type { CanvasNode } from '../../types';
@@ -16,6 +17,8 @@ const object = (properties: Record<string, unknown>, required: string[] = []) =>
 const definitions = [
   { name: 'read_canvas', description: 'Read the current project canvas.', inputSchema: object({}) },
   { name: 'read_reference', description: 'Read a node and inspect its image content.', inputSchema: object({ nodeId: { type: 'string' } }, ['nodeId']) },
+  { name: 'discover_skills', description: 'Discover current creative skills by ID and description before loading their instructions.', inputSchema: object({}) },
+  { name: 'read_skill', description: 'Load one discovered creative skill or a named resource only when needed.', inputSchema: object({ id: { type: 'string' }, resource: { type: 'string' } }, ['id']) },
   { name: 'edit_canvas', description: 'Edit the project canvas as one undoable batch. Create new nodes for new content. Existing node content needs user permission.',
     inputSchema: object({ label: { type: 'string' }, operations: { type: 'array', items: { type: 'object' }, maxItems: 100 } }, ['operations']) },
   { name: 'layout_canvas', description: 'Arrange existing nodes on the canvas.', inputSchema: object({ ids: { type: 'array', items: { type: 'string' } } }, ['ids']) },
@@ -27,6 +30,7 @@ const definitions = [
 export class GoPiHost implements PiRuntimeHost {
   constructor(private run: GoAgentRun, private task: AgentTask, private flushReplies: () => Promise<unknown> = async () => {}) {}
   isExecuting = (task: AgentTask) => this.run.isAlive() && task.id === this.task.id;
+  listSkillDescriptions = () => listSkills();
   resolveReference = async (projectId: string, reference: AgentReference, options: { historical?: boolean }) => {
     if (projectId !== this.task.projectId) throw new Error('Run project mismatch');
     const canvas = await this.run.canvas(projectId).read(projectId);
@@ -56,9 +60,18 @@ export class GoPiHost implements PiRuntimeHost {
     if (step.runId !== this.task.runId) throw new Error('Previous tool outcome requires reconciliation');
     try {
       let result: unknown;
-      const store = this.run.canvas(projectId);
       switch (name) {
+        case 'discover_skills': {
+          result = discoverSkills();
+          break;
+        }
+        case 'read_skill': {
+          if (typeof args.id !== 'string' || !args.id || args.resource !== undefined && typeof args.resource !== 'string') throw new Error('Skill ID or resource invalid');
+          result = readSkill(args.id, args.resource as string | undefined);
+          break;
+        }
         case 'read_canvas': {
+          const store = this.run.canvas(projectId);
           const canvas = await store.read(projectId);
           result = { nodes: canvas.snapshot.nodes, edges: canvas.snapshot.edges };
           break;
@@ -74,6 +87,7 @@ export class GoPiHost implements PiRuntimeHost {
           break;
         }
         case 'edit_canvas': {
+          const store = this.run.canvas(projectId);
           if (!Array.isArray(args.operations) || args.operations.length > 100) throw new Error('Operations required');
           let operations = args.operations as CanvasOperation[];
           if (operations.some(op => op.kind === 'delete')) throw new Error('Deletion needs scoped confirmation');
@@ -92,6 +106,7 @@ export class GoPiHost implements PiRuntimeHost {
           break;
         }
         case 'layout_canvas': {
+          const store = this.run.canvas(projectId);
           if (!Array.isArray(args.ids) || !args.ids.every(id => typeof id === 'string')) throw new Error('Node IDs required');
           const current = await store.read(projectId);
           const ids = args.ids as string[];

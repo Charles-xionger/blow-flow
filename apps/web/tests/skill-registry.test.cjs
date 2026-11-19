@@ -31,7 +31,7 @@ test('personal skill library and Agent read the same built-in skill registry', (
   assert.match(getSkill('storyboard').instructions, /生成已成功发起，请耐心等待/);
   assert.deepEqual(screenplay.resources, ['format']);
   assert.match(readSkill('screenplay', 'format'), /场景标题：地点 \/ 时间/);
-  assert.deepEqual(discoverSkills(), listSkills().map(({ id, description }) => ({ id, description })));
+  assert.deepEqual(discoverSkills(), listSkills().map(({ id, name, description }) => ({ id, name, description })));
   assert.equal(readSkill('screenplay'), screenplay.instructions);
 });
 
@@ -50,6 +50,7 @@ test('a valid SKILL.md is immediately discoverable while instructions stay behin
   });
   assert.deepEqual(discoverSkills().find(skill => skill.id === 'lighting-director'), {
     id: 'lighting-director',
+    name: 'lighting-director',
     description: 'Plan expressive lighting for a scene.',
   });
   assert.equal(readSkill('lighting-director'), '# Lighting Director\n\nShape the key, fill, and rim light.');
