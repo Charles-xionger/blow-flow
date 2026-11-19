@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"blow-flow/api/internal/agent"
+	generationpostgres "blow-flow/api/internal/generation/postgres"
 	"blow-flow/api/internal/resource"
 	resourcepostgres "blow-flow/api/internal/resource/postgres"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -159,7 +160,7 @@ func (s *Store) Claim(ctx context.Context, taskID string) (agent.Run, error) {
 		}
 		now := s.Now().UTC()
 		lease := now.Add(leaseDuration)
-		if err := tx.Exec(`UPDATE agent_tasks SET status='running',run_id=?,run_hash=?,lease_until=?,updated_at=? WHERE id=?`, runID, hash, lease, now, taskID).Error; err != nil {
+		if err := tx.Exec(`UPDATE agent_tasks SET status='running',run_id=?,run_hash=?,lease_until=?,claimed_user_count=(SELECT count(*) FROM agent_messages WHERE task_id=? AND role='user'),updated_at=? WHERE id=?`, runID, hash, lease, taskID, now, taskID).Error; err != nil {
 			return err
 		}
 		if err := event(tx, taskID, "running", now); err != nil {
@@ -178,7 +179,7 @@ func (s *Store) activeRun(tx *gorm.DB, token string, lock bool) (taskRow, error)
 	if !ok {
 		return taskRow{}, agent.ErrRunExpired
 	}
-	query := `SELECT id,owner_id,project_id,status,run_id,run_hash,lease_until,editable_node_ids,delete_grants,created_at,updated_at FROM agent_tasks WHERE run_id=?`
+	query := `SELECT id,owner_id,project_id,model_id,status,question,run_id,run_hash,lease_until,editable_node_ids,delete_grants,created_at,updated_at FROM agent_tasks WHERE run_id=?`
 	if lock {
 		query += ` FOR UPDATE`
 	}
@@ -280,10 +281,25 @@ func (s *Store) Finish(ctx context.Context, token, status string) error {
 			return err
 		}
 		now := s.Now().UTC()
+		if status == "completed" {
+			var counts struct{ Seen, Current int64 }
+			if err := tx.Raw(`SELECT claimed_user_count AS seen,(SELECT count(*) FROM agent_messages WHERE task_id=? AND role='user') AS current FROM agent_tasks WHERE id=?`, row.ID, row.ID).Scan(&counts).Error; err != nil {
+				return err
+			}
+			if counts.Current > counts.Seen {
+				status = "queued"
+			}
+		}
 		if err := tx.Exec(`UPDATE agent_tasks SET status=?,run_id=NULL,run_hash=NULL,lease_until=NULL,updated_at=? WHERE id=?`, status, now, row.ID).Error; err != nil {
 			return err
 		}
-		return event(tx, row.ID, status, now)
+		if err := event(tx, row.ID, status, now); err != nil {
+			return err
+		}
+		if status == "queued" {
+			return wake(tx, row.ID)
+		}
+		return nil
 	})
 }
 
@@ -418,7 +434,7 @@ func (s *Store) CommitCanvas(ctx context.Context, token string, input agent.Comm
 		if err != nil {
 			return err
 		}
-		if err := cancelRemovedGenerationNodes(tx, row.OwnerID, row.ProjectID, removedNodes, s.Now().UTC()); err != nil {
+		if err := generationpostgres.DetachRemovedNodes(tx, row.OwnerID, row.ProjectID, generationNodeIDs(removedNodes), s.Now().UTC()); err != nil {
 			return err
 		}
 		out = agent.CanvasReceipt{Version: ack.Version, Label: input.Label, Skipped: input.Skipped, Operations: input.Operations, RemovedNodes: removedJSON}
@@ -446,10 +462,7 @@ func (s *Store) CommitCanvas(ctx context.Context, token string, input agent.Comm
 	return out, err
 }
 
-// A removed canvas node cannot receive a late result. Queued provider calls are
-// canceled in the same transaction as the canvas edit; submitted calls continue
-// to be tracked, but their result mapping is detached from the removed node.
-func cancelRemovedGenerationNodes(tx *gorm.DB, owner, project string, nodes []map[string]any, now time.Time) error {
+func generationNodeIDs(nodes []map[string]any) []string {
 	ids := make([]string, 0, len(nodes))
 	seen := map[string]bool{}
 	for _, node := range nodes {
@@ -464,17 +477,5 @@ func cancelRemovedGenerationNodes(tx *gorm.DB, owner, project string, nodes []ma
 			seen[id] = true
 		}
 	}
-	if len(ids) == 0 {
-		return nil
-	}
-	var canceled []string
-	if err := tx.Raw(`UPDATE generation_tasks SET status='canceled',stage='canceled',updated_at=? WHERE owner_id=? AND project_id=? AND node_id IN ? AND status='queued' RETURNING id`, now, owner, project, ids).Scan(&canceled).Error; err != nil {
-		return err
-	}
-	for _, id := range canceled {
-		if err := tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,stage,occurred_at) VALUES(?,'canceled','canceled',?)`, id, now).Error; err != nil {
-			return err
-		}
-	}
-	return tx.Exec(`DELETE FROM generation_node_results WHERE owner_id=? AND project_id=? AND node_id IN ?`, owner, project, ids).Error
+	return ids
 }

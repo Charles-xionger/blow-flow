@@ -3,10 +3,13 @@ import { readReferenceBody, validReferenceUrl } from '../generation/reference-fi
 import type { AgentReference } from './types';
 import type { AgentService } from './service';
 export async function resolveReference(service: AgentService, projectId: string, reference: AgentReference, options: { historical?: boolean } = {}) {
+    return resolveReferenceFromCanvas(service.canvas(projectId), reference, options);
+}
+export async function resolveReferenceFromCanvas(canvas: {nodes: {id: string;type: string;data: Record<string, unknown>}[]}, reference: AgentReference, options: { historical?: boolean } = {}) {
     let data = reference.data;
     let context = reference.name ?? '用户参考图';
     if (reference.nodeId) {
-        const node = service.canvas(projectId).nodes.find((n: {
+        const node = canvas.nodes.find((n: {
             id: string;
         }) => n.id === reference.nodeId);
         if (!node) {

@@ -38,10 +38,13 @@ The Go Agent store now persists project-scoped commands and messages, validates 
 confirmed canvas version on `send`, and writes an outbox wakeup in the same
 transaction. `pnpm --filter @blow-flow/api agent:dispatcher` publishes queued task
 IDs to the RabbitMQ `agent.tasks.v1` quorum queue with publisher confirms. A
-claimed Node Runner can read `/internal/agent/run/context` and use the scoped
-canvas endpoints. Public `/v1/agent/projects/:projectId` routes intentionally
-return `503` from the production server until the Node Pi Runner consumes this
-queue and records replies, tool steps, and confirmations through Go. The existing
+claimed Node Runner can read `/internal/agent/run/context`, persist replies,
+tool steps and questions, and use the scoped canvas endpoints. An explicit
+`pnpm --filter @blow-flow/web agent:go-worker` can consume the new queue for
+basic conversation and canvas edits. Public `/v1/agent/projects/:projectId`
+routes return `503` by default; `AGENT_GO_EXPERIMENTAL_COMMANDS=1` opens them
+only for controlled smoke tests because the new Runner does not yet cover every
+existing tool and confirmation. The existing
 Next.js Agent remains the active product path. See
 [the migration design](../../docs/architecture/go-agent-migration.md).
 

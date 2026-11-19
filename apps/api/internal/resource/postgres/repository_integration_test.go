@@ -4,6 +4,8 @@ package postgres
 
 import (
 	"blow-flow/api/internal/database"
+	"blow-flow/api/internal/generation"
+	generationpostgres "blow-flow/api/internal/generation/postgres"
 	"blow-flow/api/internal/resource"
 	"context"
 	"errors"
@@ -210,5 +212,36 @@ func TestWorkspaceCountAndCoverFollowCanvasChanges(t *testing.T) {
 	view, err = svc.Workspace(ctx, owner, true)
 	if err != nil || len(view.Folders) != 1 || view.Folders[0].ProjectCount != 0 {
 		t.Fatalf("trash count %+v %v", view, err)
+	}
+}
+
+func TestUserCanvasDeletionCancelsQueuedGenerationAndDetachesResult(t *testing.T) {
+	r, owner, _ := resourceStore(t)
+	r.OnNodesRemoved = generationpostgres.DetachRemovedNodes
+	ctx := context.Background()
+	svc := resource.Service{Repository: r}
+	if _, err := svc.CreateProject(ctx, owner, "p-deletion", "Canvas", nil); err != nil {
+		t.Fatal(err)
+	}
+	withNode := []byte(`{"name":"Canvas","nodes":[{"id":"canvas-node","position":{"x":0,"y":0},"data":{"generationNodeId":"generation-node"}}],"edges":[],"viewport":{"x":0,"y":0,"zoom":1}}`)
+	if _, err := svc.SaveCanvas(ctx, owner, "p-deletion", resource.SaveCanvas{RequestID: "add", BaseVersion: 1, Snapshot: withNode}); err != nil {
+		t.Fatal(err)
+	}
+	store := generationpostgres.New(r.DB)
+	task, err := store.Create(ctx, owner, "queued-deletion", "hash", generation.Input{ProjectID: "p-deletion", NodeID: "generation-node", Model: "runninghub/krea2", Prompt: "cat", Width: 1024, Height: 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	withoutNode := []byte(`{"name":"Canvas","nodes":[],"edges":[],"viewport":{"x":0,"y":0,"zoom":1}}`)
+	if _, err := svc.SaveCanvas(ctx, owner, "p-deletion", resource.SaveCanvas{RequestID: "remove", BaseVersion: 2, Snapshot: withoutNode}); err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := store.Get(ctx, task.ID)
+	if err != nil || got.Status != generation.Canceled {
+		t.Fatalf("task: %+v %v", got, err)
+	}
+	var n int64
+	if err := r.DB.Raw(`SELECT count(*) FROM generation_node_results WHERE owner_id=? AND project_id='p-deletion' AND node_id='generation-node'`, owner).Scan(&n).Error; err != nil || n != 0 {
+		t.Fatalf("mapping=%d %v", n, err)
 	}
 }

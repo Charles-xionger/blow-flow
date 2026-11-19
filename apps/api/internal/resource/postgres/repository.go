@@ -12,7 +12,10 @@ import (
 	"gorm.io/gorm"
 )
 
-type Repository struct{ DB *gorm.DB }
+type Repository struct {
+	DB             *gorm.DB
+	OnNodesRemoved func(*gorm.DB, string, string, []string, time.Time) error
+}
 
 func New(db *gorm.DB) *Repository { return &Repository{DB: db} }
 
@@ -187,7 +190,10 @@ func (r *Repository) SaveCanvas(ctx context.Context, owner, id string, input res
 		}
 		var previous, current struct {
 			Nodes []struct {
-				ID string `json:"id"`
+				ID   string `json:"id"`
+				Data struct {
+					GenerationNodeID string `json:"generationNodeId"`
+				} `json:"data"`
 			} `json:"nodes"`
 			Name string `json:"name"`
 		}
@@ -205,14 +211,25 @@ func (r *Repository) SaveCanvas(ctx context.Context, owner, id string, input res
 		for _, node := range current.Nodes {
 			present[node.ID] = true
 		}
+		removedGenerationIDs := []string{}
 		for _, node := range previous.Nodes {
 			if !present[node.ID] {
 				if err := tx.Exec(`INSERT INTO project_deleted_nodes(project_id,node_id) VALUES(?,?) ON CONFLICT DO NOTHING`, id, node.ID).Error; err != nil {
 					return err
 				}
+				generationID := node.Data.GenerationNodeID
+				if generationID == "" {
+					generationID = node.ID
+				}
+				removedGenerationIDs = append(removedGenerationIDs, generationID)
 			}
 		}
 		now := time.Now().UTC()
+		if r.OnNodesRemoved != nil {
+			if err := r.OnNodesRemoved(tx, owner, id, removedGenerationIDs, now); err != nil {
+				return err
+			}
+		}
 		if err := tx.Exec(`UPDATE projects SET name=?,snapshot=?::jsonb,version=version+1,node_count=?,cover_url=?,updated_at=? WHERE id=?`, current.Name, string(input.Snapshot), nodeCount, cover, now, id).Error; err != nil {
 			return err
 		}

@@ -74,7 +74,9 @@ func run() error {
 			store := generationpostgres.New(db)
 			agentStore = agentpostgres.New(db)
 			agentRuns = agentStore
-			resourceService = &resource.Service{Repository: resourcepostgres.New(db)}
+			resourceRepository := resourcepostgres.New(db)
+			resourceRepository.OnNodesRemoved = generationpostgres.DetachRemovedNodes
+			resourceService = &resource.Service{Repository: resourceRepository}
 			scriptStore := scriptpostgres.New(db)
 			if n, e := strconv.Atoi(os.Getenv("SCRIPT_MAX_QUEUED_PER_USER")); e == nil && n > 0 && n <= 1000 {
 				scriptStore.MaxQueuedPerUser = n
@@ -137,10 +139,15 @@ func run() error {
 		if err != nil || len(key) < 32 {
 			return fmt.Errorf("AGENT_RUNNER_KEY must be at least 32 decoded bytes")
 		}
-		agentRunnerKey = key
+		// The bearer value is the printable Base64 form; the decoded length only
+		// validates entropy. Raw random bytes are not valid HTTP header text.
+		agentRunnerKey = []byte(raw)
 	}
-	// Keep public Agent commands unavailable until the RabbitMQ-backed Pi Runner
-	// is deployed. The routes and store are exercised through isolated API tests.
+	// Controlled smoke-test switch. Product routing remains on Next.js until
+	// the Go Runner has equivalent tools, approvals, and historical data.
+	if os.Getenv("AGENT_GO_EXPERIMENTAL_COMMANDS") == "1" && agentStore != nil && len(agentRunnerKey) >= 32 {
+		agentCommands = agentStore
+	}
 	if addr == "" {
 		addr = "127.0.0.1:8080"
 	}

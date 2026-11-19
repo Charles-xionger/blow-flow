@@ -79,6 +79,29 @@ type Run struct {
 type RunContext struct {
 	Task     Task      `json:"task"`
 	Messages []Message `json:"messages"`
+	Steps    []Step    `json:"steps"`
+}
+
+type Step struct {
+	CallID    string          `json:"callId"`
+	RunID     string          `json:"runId"`
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments"`
+	Status    string          `json:"status"`
+	Result    json.RawMessage `json:"result,omitempty"`
+	CreatedAt time.Time       `json:"createdAt"`
+}
+
+type StepStart struct {
+	CallID    string          `json:"callId"`
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments"`
+}
+
+type StepFinish struct {
+	CallID string          `json:"callId"`
+	Status string          `json:"status"`
+	Result json.RawMessage `json:"result"`
 }
 
 type Canvas struct {

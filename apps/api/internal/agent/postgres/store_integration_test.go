@@ -287,3 +287,100 @@ func TestAgentDeletionCancelsQueuedGenerationAndDetachesLateResult(t *testing.T)
 		t.Fatalf("late result mapping: %d %v", mappings, err)
 	}
 }
+
+func TestRunnerMessagesStepsAndQuestionSurviveResume(t *testing.T) {
+	s, _, owner, project := agentStore(t)
+	ctx := context.Background()
+	task, err := s.Command(ctx, owner, project, agent.Command{RequestID: "send", Action: "send", Text: "帮我规划", ModelID: "gemini", CanvasVersion: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := s.Claim(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := agent.StepStart{CallID: "read-1", Name: "read_canvas", Arguments: json.RawMessage(`{}`)}
+	step, err := s.StartStep(ctx, run.Token, start)
+	if err != nil || step.Status != "running" {
+		t.Fatalf("step start: %+v %v", step, err)
+	}
+	if _, err := s.StartStep(ctx, run.Token, agent.StepStart{CallID: "read-1", Name: "read_canvas", Arguments: json.RawMessage(`{"changed":true}`)}); !errors.Is(err, agent.ErrRequestConflict) {
+		t.Fatalf("step identity: %v", err)
+	}
+	step, err = s.FinishStep(ctx, run.Token, agent.StepFinish{CallID: "read-1", Status: "completed", Result: json.RawMessage(`{"nodes":[]}`)})
+	if err != nil || step.Status != "completed" {
+		t.Fatalf("step finish: %+v %v", step, err)
+	}
+	if err := s.AppendReply(ctx, run.Token, "reply-1", "先规划三幕"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendReply(ctx, run.Token, "reply-1", "先规划三幕"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendReply(ctx, run.Token, "reply-1", "修改回复"); !errors.Is(err, agent.ErrRequestConflict) {
+		t.Fatalf("reply identity: %v", err)
+	}
+	q := agent.Question{ID: "question-1", Text: "需要竖屏吗？", Options: []string{"是", "否"}}
+	if err := s.AskQuestion(ctx, run.Token, q); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Context(ctx, run.Token); !errors.Is(err, agent.ErrRunExpired) {
+		t.Fatalf("waiting token: %v", err)
+	}
+	answer, err := s.Command(ctx, owner, project, agent.Command{RequestID: "answer", Action: "answer", QuestionID: "question-1", Text: "是"})
+	if err != nil || answer.Status != "queued" {
+		t.Fatalf("answer: %+v %v", answer, err)
+	}
+	resumed, err := s.Claim(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	context, err := s.Context(ctx, resumed.Token)
+	if err != nil || len(context.Messages) != 3 || len(context.Steps) != 1 || context.Steps[0].Status != "completed" || context.Task.Question == nil || context.Task.Question.Answer != "是" {
+		t.Fatalf("resumed context: %+v %v", context, err)
+	}
+}
+
+func TestMessageSentDuringRunQueuesAnotherTurn(t *testing.T) {
+	s, _, owner, project := agentStore(t)
+	ctx := context.Background()
+	task, err := s.Command(ctx, owner, project, agent.Command{RequestID: "first", Action: "send", Text: "first", ModelID: "gemini", CanvasVersion: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := s.Claim(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Command(ctx, owner, project, agent.Command{RequestID: "second", Action: "send", Text: "second", ModelID: "gemini", CanvasVersion: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Finish(ctx, run.Token, "completed"); err != nil {
+		t.Fatal(err)
+	}
+	view, err := s.Snapshot(ctx, owner, project)
+	if err != nil || len(view.Tasks) != 1 || view.Tasks[0].Status != "queued" || len(view.Messages) != 2 {
+		t.Fatalf("follow-up: %+v %v", view, err)
+	}
+}
+
+func TestUserReferenceGrantsExistingNodeEditForOnlyThatTask(t *testing.T) {
+	s, resources, owner, project := agentStore(t)
+	ctx := context.Background()
+	start := json.RawMessage(`{"name":"Canvas","nodes":[{"id":"existing","type":"text","position":{"x":0,"y":0},"data":{"type":"text","label":"Original"}}],"edges":[],"viewport":{"x":0,"y":0,"zoom":1},"history":{"schema":1}}`)
+	if _, err := resources.SaveCanvas(ctx, owner, project, resource.SaveCanvas{RequestID: "setup", BaseVersion: 1, Snapshot: start}); err != nil {
+		t.Fatal(err)
+	}
+	task, err := s.Command(ctx, owner, project, agent.Command{RequestID: "referenced", Action: "send", Text: "修改这个节点", ModelID: "gemini", CanvasVersion: 2, References: []agent.Reference{{NodeID: "existing"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := s.Claim(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := json.RawMessage(`{"name":"Canvas","nodes":[{"id":"existing","type":"text","position":{"x":0,"y":0},"data":{"type":"text","label":"Changed","generationContentVersion":1}}],"edges":[],"viewport":{"x":0,"y":0,"zoom":1},"history":{"schema":1}}`)
+	if _, err := s.CommitCanvas(ctx, run.Token, agent.Commit{CallID: "edit-existing", BaseVersion: 2, Operations: json.RawMessage(`[{"kind":"update","id":"existing","data":{"label":"Changed"}}]`), Snapshot: next}); err != nil {
+		t.Fatalf("referenced edit: %v", err)
+	}
+}

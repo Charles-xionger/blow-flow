@@ -93,6 +93,87 @@ func registerAgentInternalRoutes(r *gin.Engine, d Dependencies) {
 		}
 		c.JSON(200, value)
 	})
+	g.POST("/run/reply", func(c *gin.Context) {
+		service, ok := d.AgentRuns.(interface {
+			AppendReply(context.Context, string, string, string) error
+		})
+		if !ok {
+			c.JSON(503, errorBody(c, "service_unavailable"))
+			return
+		}
+		var body struct {
+			CallID string `json:"callId"`
+			Text   string `json:"text"`
+		}
+		if decodeJSONLimited(c, &body, 110<<10) != nil {
+			agentError(c, agent.ErrInvalid)
+			return
+		}
+		if err := service.AppendReply(c.Request.Context(), bearer(c), body.CallID, body.Text); err != nil {
+			agentError(c, err)
+			return
+		}
+		c.Status(204)
+	})
+	g.POST("/run/steps/start", func(c *gin.Context) {
+		service, ok := d.AgentRuns.(interface {
+			StartStep(context.Context, string, agent.StepStart) (agent.Step, error)
+		})
+		if !ok {
+			c.JSON(503, errorBody(c, "service_unavailable"))
+			return
+		}
+		var body agent.StepStart
+		if decodeJSONLimited(c, &body, 1<<20) != nil {
+			agentError(c, agent.ErrInvalid)
+			return
+		}
+		step, err := service.StartStep(c.Request.Context(), bearer(c), body)
+		if err != nil {
+			agentError(c, err)
+			return
+		}
+		c.JSON(200, step)
+	})
+	g.POST("/run/steps/finish", func(c *gin.Context) {
+		service, ok := d.AgentRuns.(interface {
+			FinishStep(context.Context, string, agent.StepFinish) (agent.Step, error)
+		})
+		if !ok {
+			c.JSON(503, errorBody(c, "service_unavailable"))
+			return
+		}
+		var body agent.StepFinish
+		if decodeJSONLimited(c, &body, 13<<20) != nil {
+			agentError(c, agent.ErrInvalid)
+			return
+		}
+		step, err := service.FinishStep(c.Request.Context(), bearer(c), body)
+		if err != nil {
+			agentError(c, err)
+			return
+		}
+		c.JSON(200, step)
+	})
+	g.POST("/run/question", func(c *gin.Context) {
+		service, ok := d.AgentRuns.(interface {
+			AskQuestion(context.Context, string, agent.Question) error
+		})
+		if !ok {
+			c.JSON(503, errorBody(c, "service_unavailable"))
+			return
+		}
+		var body agent.Question
+		if decodeJSONLimited(c, &body, 1<<20) != nil {
+			agentError(c, agent.ErrInvalid)
+			return
+		}
+		if err := service.AskQuestion(c.Request.Context(), bearer(c), body); err != nil {
+			agentError(c, err)
+			return
+		}
+		c.Status(204)
+	})
 	g.POST("/run/deleted-nodes/check", func(c *gin.Context) {
 		var body struct {
 			IDs []string `json:"ids"`

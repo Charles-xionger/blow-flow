@@ -71,6 +71,10 @@ func (s *Store) Context(ctx context.Context, token string) (agent.RunContext, er
 		if err != nil {
 			return err
 		}
+		out.Steps, err = loadSteps(tx, row.ID)
+		if err != nil {
+			return err
+		}
 		return nil
 	})
 	return out, err
@@ -223,6 +227,13 @@ func (s *Store) Command(ctx context.Context, owner, project string, input agent.
 		now := s.Now().UTC()
 		switch input.Action {
 		case "send":
+			referencedNodeIDs := make([]string, 0, len(input.References))
+			for _, ref := range input.References {
+				if ref.NodeID != "" {
+					referencedNodeIDs = append(referencedNodeIDs, ref.NodeID)
+				}
+			}
+			grants, _ := json.Marshal(referencedNodeIDs)
 			if found {
 				if row.OwnerID != owner || row.ModelID != input.ModelID {
 					return agent.ErrConflict
@@ -236,7 +247,7 @@ func (s *Store) Command(ctx context.Context, owner, project string, input agent.
 						return err
 					}
 				}
-				if err := tx.Exec(`UPDATE agent_tasks SET updated_at=? WHERE id=?`, now, row.ID).Error; err != nil {
+				if err := tx.Exec(`UPDATE agent_tasks SET editable_node_ids=(SELECT COALESCE(jsonb_agg(DISTINCT value),'[]'::jsonb) FROM jsonb_array_elements_text(editable_node_ids || ?::jsonb) AS value),updated_at=? WHERE id=?`, string(grants), now, row.ID).Error; err != nil {
 					return err
 				}
 				row.UpdatedAt = now
@@ -246,7 +257,7 @@ func (s *Store) Command(ctx context.Context, owner, project string, input agent.
 					return err
 				}
 				row = taskRow{ID: id, OwnerID: owner, ProjectID: project, ModelID: input.ModelID, Status: "queued", CreatedAt: now, UpdatedAt: now}
-				if err := tx.Exec(`INSERT INTO agent_tasks(id,owner_id,project_id,request_id,model_id,status,created_at,updated_at) VALUES(?,?,?,?,?,'queued',?,?)`, id, owner, project, input.RequestID, input.ModelID, now, now).Error; err != nil {
+				if err := tx.Exec(`INSERT INTO agent_tasks(id,owner_id,project_id,request_id,model_id,status,editable_node_ids,created_at,updated_at) VALUES(?,?,?,?,?,'queued',?::jsonb,?,?)`, id, owner, project, input.RequestID, input.ModelID, string(grants), now, now).Error; err != nil {
 					return err
 				}
 				if err := event(tx, id, "queued", now); err != nil {

@@ -1,12 +1,14 @@
 # 创作助手迁移设计（提案）
 
-状态：实施中。画布计算器、Go 资源适配、运行令牌约束的画布提交、用户命令与消息持久化已落地测试；Runner 切换与生产切流尚未完成。
+状态：实施中。画布计算器、Go 资源适配、运行令牌约束的画布提交、用户命令、消息、工具步骤与问题持久化已落地测试；独立 Go Pi Runner 的基础消费与画布工具路径已接通，但与旧工具尚未等价，生产切流尚未完成。
 
-当前代码边界：`apps/web/lib/agent/canvas-plan.ts` 是不访问数据库的画布编辑计算器，现有 SQLite Agent 工具已复用它。`apps/web/lib/agent/go-canvas.ts` 提供项目所有者资源适配及独立的 `GoRunCanvasHTTP` 内部 Runner 适配，尚未接入生产 Pi Worker。Go `agent` 模块持久化任务状态、消息、命令回执和运行租约，提交入口从运行令牌推导所有者与项目，在同一事务中检查版本、操作范围、删除节点并写快照和工具回执。服务密钥只用于领取任务，不能访问运行画布；过期运行令牌不能提交。`/v1/agent/projects/:projectId` 和 `/commands` 已实现身份与归属边界，但生产 API 暂不注入命令服务，返回 503，避免任务进入尚无 Runner 消费的队列。`agent-dispatcher` 可以从 PostgreSQL outbox 向 RabbitMQ quorum queue 发布带确认的任务 ID；Node Pi Runner 尚未改为消费该队列。前端及生产 Agent 路由保持现状。
+当前代码边界：`apps/web/lib/agent/canvas-plan.ts` 是不访问数据库的画布编辑计算器，现有 SQLite Agent 工具已复用它。`apps/web/lib/agent/go-canvas.ts` 和 `go-runner-host.ts` 为独立 Node Go Runner 提供运行令牌画布适配及进程内 MCP。Go `agent` 模块持久化任务、消息、工具步骤、待回答问题和运行租约，提交入口从运行令牌推导所有者与项目，在同一事务中检查版本、操作范围、删除节点并写快照和工具回执。服务密钥是 Base64 文本，只用于领取任务，不能访问运行画布；过期运行令牌不能提交。`/v1/agent/projects/:projectId` 和 `/commands` 已实现身份与归属边界，默认返回 503；仅通过 `AGENT_GO_EXPERIMENTAL_COMMANDS=1` 可做受控接口冒烟测试，避免不完整工具集接管用户任务。`agent-dispatcher` 从 PostgreSQL outbox 向 RabbitMQ quorum queue 发布带确认的任务 ID；独立 `agent:go-worker` 可以消费并执行基础对话、画布读取与编辑工具，但不在 `dev:all` 中启用。前端及生产 Agent 路由保持现状。
 
 本阶段内部接口：`POST /internal/agent/tasks/:id/claim` 使用 `AGENT_RUNNER_KEY`（标准 Base64 编码的至少 32 字节）；领取后使用返回的独立运行令牌调用 `POST /run/heartbeat`、`GET /run/context`、`GET /run/canvas`、`POST /run/deleted-nodes/check`、`GET /run/canvas/receipt/:callId`、`PUT /run/canvas`、`POST /run/finish`（均在 `/internal/agent` 前缀下）。`PUT /run/canvas` 提交 `callId`、`label`、`baseVersion`、`operations`、`snapshot`、`skipped`。同一工具调用重复提交返回原回执；画布版本冲突需要 Runner 重读后计算，运行过期则停止写入。Go 当前仅允许助手本任务新建节点的内容更新；现有节点的引用或用户确认授权仍待用户命令与确认持久化后接入，不能由 Runner 自报授权。
 
-画布提交只做服务端差异与授权边界校验；TypeScript 计算器仍负责历史补丁、提示词引用和图语义。Agent 画布提交删除节点时已在同一事务中取消排队生成任务、清除节点结果映射；已提交供应商的任务继续跟踪，但无法回填已删除节点。普通用户通过 Go 资源 API 删除节点时仍需接同一生成清理规则，完成前不得切换资源与 Agent 生产写入。`skipped` 是 Runner 报告，不代表 Go 独立推导了跳过原因。
+画布提交只做服务端差异与授权边界校验；TypeScript 计算器仍负责历史补丁、提示词引用和图语义。Agent 画布提交及普通用户经 Go 资源 API 删除节点时，在同一事务中取消排队生成任务、清除节点结果映射；已提交供应商的任务继续跟踪，但无法回填已删除节点。`skipped` 是 Runner 报告，不代表 Go 独立推导了跳过原因。
+
+切流阻塞项：Go Runner 还缺旧版 `delete_canvas_nodes` 的一次性用户授权、已有节点编辑确认、`prepare_generation` 的确认快照与 Go 生成建单、`generation_results`、脚本/技能读取及上传素材引用；现有普通创作前端也未登录 Go 用户账户、未确认画布保存版本，旧 Agent 历史尚未导入。缺一项都不能把生产 `/api/agent` 路由或 `dev:all` 切向 Go。切流时应只保留一个任务写入者，不做双写。
 
 ## 结论
 

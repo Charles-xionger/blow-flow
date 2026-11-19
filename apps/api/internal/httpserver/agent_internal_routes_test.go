@@ -105,3 +105,74 @@ func TestInternalAgentRoutesRequireServiceKeyThenScopedRunToken(t *testing.T) {
 		t.Fatalf("finish: %d", got.Code)
 	}
 }
+
+type agentEventsStub struct {
+	agentRunsStub
+	replies   int
+	steps     int
+	questions int
+}
+
+func (s *agentEventsStub) AppendReply(_ context.Context, token, callID, text string) error {
+	if token != s.runToken {
+		return agent.ErrRunExpired
+	}
+	s.replies++
+	return nil
+}
+func (s *agentEventsStub) StartStep(_ context.Context, token string, input agent.StepStart) (agent.Step, error) {
+	if token != s.runToken {
+		return agent.Step{}, agent.ErrRunExpired
+	}
+	s.steps++
+	return agent.Step{CallID: input.CallID, Status: "running"}, nil
+}
+func (s *agentEventsStub) FinishStep(_ context.Context, token string, input agent.StepFinish) (agent.Step, error) {
+	if token != s.runToken {
+		return agent.Step{}, agent.ErrRunExpired
+	}
+	s.steps++
+	return agent.Step{CallID: input.CallID, Status: input.Status}, nil
+}
+func (s *agentEventsStub) AskQuestion(_ context.Context, token string, _ agent.Question) error {
+	if token != s.runToken {
+		return agent.ErrRunExpired
+	}
+	s.questions++
+	return nil
+}
+func (s *agentEventsStub) Context(_ context.Context, token string) (agent.RunContext, error) {
+	if token != s.runToken {
+		return agent.RunContext{}, agent.ErrRunExpired
+	}
+	return agent.RunContext{Task: agent.Task{ID: "task-1"}, Messages: []agent.Message{}, Steps: []agent.Step{}}, nil
+}
+func TestInternalRunnerEventsUseRunToken(t *testing.T) {
+	s := &agentEventsStub{agentRunsStub: agentRunsStub{runToken: "run-secret"}}
+	r := NewWithDependencies(Dependencies{AgentRuns: s, AgentRunnerKey: []byte(strings.Repeat("s", 32))})
+	call := func(path, token, body string) int {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		r.ServeHTTP(w, req)
+		return w.Code
+	}
+	if got := call("/internal/agent/run/reply", strings.Repeat("s", 32), `{"callId":"reply","text":"hello"}`); got != 401 {
+		t.Fatalf("service key reply: %d", got)
+	}
+	if got := call("/internal/agent/run/reply", "run-secret", `{"callId":"reply","text":"hello"}`); got != 204 {
+		t.Fatalf("reply: %d", got)
+	}
+	if got := call("/internal/agent/run/steps/start", "run-secret", `{"callId":"tool","name":"read_canvas","arguments":{}}`); got != 200 {
+		t.Fatalf("start: %d", got)
+	}
+	if got := call("/internal/agent/run/steps/finish", "run-secret", `{"callId":"tool","status":"completed","result":{}}`); got != 200 {
+		t.Fatalf("finish: %d", got)
+	}
+	if got := call("/internal/agent/run/question", "run-secret", `{"id":"question","text":"Proceed?","options":["yes"]}`); got != 204 {
+		t.Fatalf("question: %d", got)
+	}
+	if s.replies != 1 || s.steps != 2 || s.questions != 1 {
+		t.Fatalf("calls: %+v", s)
+	}
+}
