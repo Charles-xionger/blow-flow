@@ -341,6 +341,107 @@ func TestRunnerMessagesStepsAndQuestionSurviveResume(t *testing.T) {
 	}
 }
 
+func TestGenerationApprovalCreatesExactTasksOnce(t *testing.T) {
+	s, resources, owner, project := agentStore(t)
+	ctx := context.Background()
+	canvas := json.RawMessage(`{"name":"Canvas","nodes":[{"id":"image-1","type":"image","position":{"x":0,"y":0},"data":{"type":"textToImage","prompt":"A cat"}}],"edges":[],"viewport":{"x":0,"y":0,"zoom":1},"history":{"schema":1}}`)
+	if _, err := resources.SaveCanvas(ctx, owner, project, resource.SaveCanvas{RequestID: "setup-generation", BaseVersion: 1, Snapshot: canvas}); err != nil {
+		t.Fatal(err)
+	}
+	task, err := s.Command(ctx, owner, project, agent.Command{RequestID: "generate-send", Action: "send", Text: "画一只猫", ModelID: "gemini", CanvasVersion: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := s.Claim(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := []GenerationItem{{NodeID: "image-1", Model: "runninghub/krea2", Prompt: "A cat", Width: 1024, Height: 1024}}
+	if _, err = s.StartStep(ctx, run.Token, agent.StepStart{CallID: "generation-1", Name: "prepare_generation", Arguments: json.RawMessage(`{"items":[]}`)}); err != nil {
+		t.Fatal(err)
+	}
+	batch, err := s.PrepareGeneration(ctx, run.Token, "generation-1", items)
+	if err != nil || batch.Status != "pending" {
+		t.Fatalf("prepare: %+v %v", batch, err)
+	}
+	if _, err = s.Context(ctx, run.Token); !errors.Is(err, agent.ErrRunExpired) {
+		t.Fatalf("old run remains valid: %v", err)
+	}
+	if _, err = s.Command(ctx, owner, "project-b", agent.Command{RequestID: "foreign-answer", Action: "answer", QuestionID: "generation-1", Text: "确认生成"}); !errors.Is(err, agent.ErrConflict) {
+		t.Fatalf("cross-project approval: %v", err)
+	}
+	answer := agent.Command{RequestID: "generation-answer", Action: "answer", QuestionID: "generation-1", Text: "确认生成"}
+	if _, err = s.Command(ctx, owner, project, answer); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Command(ctx, owner, project, answer); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	var count int64
+	if err = s.DB.Raw(`SELECT count(*) FROM generation_tasks WHERE owner_id=? AND project_id=?`, owner, project).Scan(&count).Error; err != nil || count != 1 {
+		t.Fatalf("task count %d: %v", count, err)
+	}
+	resumed, err := s.Claim(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	results, err := s.GenerationResults(ctx, resumed.Token, batch.ID)
+	if err != nil || results.Status != "approved" || len(results.Tasks) != 1 || results.Tasks[0].Status != generation.Queued {
+		t.Fatalf("results: %+v %v", results, err)
+	}
+	if _, err = s.GenerationResults(ctx, resumed.Token, "another-batch"); !errors.Is(err, agent.ErrNotFound) {
+		t.Fatalf("foreign batch: %v", err)
+	}
+}
+
+func TestGenerationApprovalCancelAndStaleCanvasNeverSubmit(t *testing.T) {
+	for _, mode := range []string{"cancel", "stop", "changed"} {
+		t.Run(mode, func(t *testing.T) {
+			s, resources, owner, project := agentStore(t)
+			ctx := context.Background()
+			canvas := json.RawMessage(`{"name":"Canvas","nodes":[{"id":"image-1","type":"image","position":{"x":0,"y":0},"data":{"type":"textToImage"}}],"edges":[],"viewport":{"x":0,"y":0,"zoom":1},"history":{"schema":1}}`)
+			if _, err := resources.SaveCanvas(ctx, owner, project, resource.SaveCanvas{RequestID: "setup", BaseVersion: 1, Snapshot: canvas}); err != nil {
+				t.Fatal(err)
+			}
+			task, err := s.Command(ctx, owner, project, agent.Command{RequestID: "send", Action: "send", Text: "image", ModelID: "gemini", CanvasVersion: 2})
+			if err != nil {
+				t.Fatal(err)
+			}
+			run, err := s.Claim(ctx, task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = s.StartStep(ctx, run.Token, agent.StepStart{CallID: "gen", Name: "prepare_generation", Arguments: json.RawMessage(`{}`)}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = s.PrepareGeneration(ctx, run.Token, "gen", []GenerationItem{{NodeID: "image-1", Model: "runninghub/krea2", Prompt: "image", Width: 512, Height: 512}}); err != nil {
+				t.Fatal(err)
+			}
+			switch mode {
+			case "cancel":
+				_, err = s.Command(ctx, owner, project, agent.Command{RequestID: "answer", Action: "answer", QuestionID: "gen", Text: "取消生成"})
+			case "stop":
+				_, err = s.Command(ctx, owner, project, agent.Command{RequestID: "stop", Action: "stop"})
+			case "changed":
+				if _, err = resources.SaveCanvas(ctx, owner, project, resource.SaveCanvas{RequestID: "human", BaseVersion: 2, Snapshot: canvas}); err != nil {
+					t.Fatal(err)
+				}
+				_, err = s.Command(ctx, owner, project, agent.Command{RequestID: "answer", Action: "answer", QuestionID: "gen", Text: "确认生成"})
+				if !errors.Is(err, agent.ErrConflict) {
+					t.Fatalf("stale approval: %v", err)
+				}
+			}
+			if mode != "changed" && err != nil {
+				t.Fatal(err)
+			}
+			var count int64
+			if err = s.DB.Raw(`SELECT count(*) FROM generation_tasks WHERE owner_id=?`, owner).Scan(&count).Error; err != nil || count != 0 {
+				t.Fatalf("unapproved task count %d: %v", count, err)
+			}
+		})
+	}
+}
+
 func TestMessageSentDuringRunQueuesAnotherTurn(t *testing.T) {
 	s, _, owner, project := agentStore(t)
 	ctx := context.Background()

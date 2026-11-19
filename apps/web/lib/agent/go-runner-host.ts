@@ -20,6 +20,8 @@ const definitions = [
     inputSchema: object({ label: { type: 'string' }, operations: { type: 'array', items: { type: 'object' }, maxItems: 100 } }, ['operations']) },
   { name: 'layout_canvas', description: 'Arrange existing nodes on the canvas.', inputSchema: object({ ids: { type: 'array', items: { type: 'string' } } }, ['ids']) },
   { name: 'ask_question', description: 'Ask the user a critical question and wait for an answer.', inputSchema: object({ text: { type: 'string' }, options: { type: 'array', items: { type: 'string' } } }, ['text']) },
+  { name: 'prepare_generation', description: 'Freeze a RunningHub Krea2 image batch for explicit user approval. Only empty image nodes are supported. This tool waits for the user and never submits a provider request.', inputSchema: object({ items: { type: 'array', minItems: 1, maxItems: 20, items: object({ nodeId: { type: 'string' }, model: { const: 'runninghub/krea2' }, prompt: { type: 'string' }, width: { type: 'integer' }, height: { type: 'integer' } }, ['nodeId','model','prompt','width','height']) } }, ['items']) },
+  { name: 'generation_results', description: 'Read the status of a previously approved Go generation batch. Never resubmit failed or uncertain items.', inputSchema: object({ batchId: { type: 'string' } }, ['batchId']) },
 ] as const;
 
 export class GoPiHost implements PiRuntimeHost {
@@ -39,6 +41,15 @@ export class GoPiHost implements PiRuntimeHost {
       await this.run.question({ id: callId, text: args.text, options: args.options as string[] ?? [] });
       return { waiting: true, questionId: callId };
     }
+    if (name === 'prepare_generation') {
+      if (!Array.isArray(args.items) || !args.items.length || args.items.length > 20) throw new Error('Generation items required');
+      await this.flushReplies();
+      const step = await this.run.startStep(callId, name, args);
+      if (step.status === 'completed') return step.result;
+      if (step.status !== 'running' || step.runId !== this.task.runId) throw new Error('Previous generation preparation requires reconciliation');
+      const batch = await this.run.prepareGeneration(callId, args.items as { nodeId: string; model: string; prompt: string; width: number; height: number }[]);
+      return { waiting: true, batchId: batch.id, digest: batch.digest };
+    }
     const step = await this.run.startStep(callId, name, args);
     if (step.status === 'completed') return step.result;
     if (step.status === 'failed') throw new Error('Previous tool attempt failed');
@@ -55,6 +66,11 @@ export class GoPiHost implements PiRuntimeHost {
         case 'read_reference': {
           if (typeof args.nodeId !== 'string') throw new Error('Node ID required');
           result = await this.resolveReference(projectId, { nodeId: args.nodeId }, {});
+          break;
+        }
+        case 'generation_results': {
+          if (typeof args.batchId !== 'string') throw new Error('Batch ID required');
+          result = await this.run.generationResults(args.batchId);
           break;
         }
         case 'edit_canvas': {

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"blow-flow/api/internal/generation"
 	"encoding/json"
 	"errors"
 	"time"
@@ -33,6 +34,22 @@ type Question struct {
 	Scope     json.RawMessage `json:"scope,omitempty"`
 	Answer    string          `json:"answer,omitempty"`
 	Cancelled bool            `json:"cancelled,omitempty"`
+}
+
+type GenerationItem struct {
+	NodeID string `json:"nodeId"`
+	Model  string `json:"model"`
+	Prompt string `json:"prompt"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+}
+
+type GenerationBatch struct {
+	ID     string            `json:"id"`
+	Digest string            `json:"digest"`
+	Status string            `json:"status"`
+	Items  []GenerationItem  `json:"items"`
+	Tasks  []generation.Task `json:"tasks"`
 }
 
 type Reference struct {

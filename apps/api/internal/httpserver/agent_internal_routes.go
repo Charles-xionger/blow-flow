@@ -174,6 +174,44 @@ func registerAgentInternalRoutes(r *gin.Engine, d Dependencies) {
 		}
 		c.Status(204)
 	})
+	g.POST("/run/generation/prepare", func(c *gin.Context) {
+		service, ok := d.AgentRuns.(interface {
+			PrepareGeneration(context.Context, string, string, []agent.GenerationItem) (agent.GenerationBatch, error)
+		})
+		if !ok {
+			c.JSON(503, errorBody(c, "service_unavailable"))
+			return
+		}
+		var body struct {
+			CallID string                 `json:"callId"`
+			Items  []agent.GenerationItem `json:"items"`
+		}
+		if decodeJSONLimited(c, &body, 200<<10) != nil {
+			agentError(c, agent.ErrInvalid)
+			return
+		}
+		batch, err := service.PrepareGeneration(c.Request.Context(), bearer(c), body.CallID, body.Items)
+		if err != nil {
+			agentError(c, err)
+			return
+		}
+		c.JSON(200, batch)
+	})
+	g.GET("/run/generation/batches/:id", func(c *gin.Context) {
+		service, ok := d.AgentRuns.(interface {
+			GenerationResults(context.Context, string, string) (agent.GenerationBatch, error)
+		})
+		if !ok {
+			c.JSON(503, errorBody(c, "service_unavailable"))
+			return
+		}
+		batch, err := service.GenerationResults(c.Request.Context(), bearer(c), c.Param("id"))
+		if err != nil {
+			agentError(c, err)
+			return
+		}
+		c.JSON(200, batch)
+	})
 	g.POST("/run/deleted-nodes/check", func(c *gin.Context) {
 		var body struct {
 			IDs []string `json:"ids"`

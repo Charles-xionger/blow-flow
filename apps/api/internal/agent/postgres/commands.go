@@ -235,6 +235,9 @@ func (s *Store) Command(ctx context.Context, owner, project string, input agent.
 			}
 			grants, _ := json.Marshal(referencedNodeIDs)
 			if found {
+				if err := cancelPendingGeneration(tx, row.ID, now); err != nil {
+					return err
+				}
 				if row.OwnerID != owner || row.ModelID != input.ModelID {
 					return agent.ErrConflict
 				}
@@ -289,6 +292,9 @@ func (s *Store) Command(ctx context.Context, owner, project string, input agent.
 			if !found || row.OwnerID != owner {
 				return agent.ErrConflict
 			}
+			if err := cancelPendingGeneration(tx, row.ID, now); err != nil {
+				return err
+			}
 			if err := tx.Exec(`UPDATE agent_tasks SET status='stopped',run_id=NULL,run_hash=NULL,lease_until=NULL,question=NULL,updated_at=? WHERE id=?`, now, row.ID).Error; err != nil {
 				return err
 			}
@@ -305,6 +311,9 @@ func (s *Store) Command(ctx context.Context, owner, project string, input agent.
 			var question agent.Question
 			if json.Unmarshal(row.Question, &question) != nil || question.ID != input.QuestionID {
 				return agent.ErrConflict
+			}
+			if err := approveGeneration(tx, row, question, input.Text, now); err != nil {
+				return err
 			}
 			question.Answer = input.Text
 			value, _ := json.Marshal(question)

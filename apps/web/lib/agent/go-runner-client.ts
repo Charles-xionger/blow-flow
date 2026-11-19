@@ -60,6 +60,12 @@ export class GoAgentRun {
   startStep(callId: string, name: string, args: Record<string, unknown>) { return this.call<WireStep>('/run/steps/start', { method: 'POST', body: JSON.stringify({ callId, name, arguments: args }) }); }
   finishStep(callId: string, status: 'completed' | 'failed', result: unknown) { return this.call<WireStep>('/run/steps/finish', { method: 'POST', body: JSON.stringify({ callId, status, result }) }); }
   async question(question: AgentQuestion) { await this.call<void>('/run/question', { method: 'POST', body: JSON.stringify(question) }); this.alive = false; }
+  async prepareGeneration(callId: string, items: { nodeId: string; model: string; prompt: string; width: number; height: number }[]) {
+    const batch = await this.call<{ id: string; digest: string; status: string }>('/run/generation/prepare', { method: 'POST', body: JSON.stringify({ callId, items }) });
+    this.alive = false;
+    return batch;
+  }
+  generationResults(batchId: string) { return this.call<{ id: string; digest: string; status: string; items: unknown[]; tasks: unknown[] }>(`/run/generation/batches/${encodeURIComponent(batchId)}`); }
   async finish(status: 'completed' | 'failed' | 'stopped') { await this.call<void>('/run/finish', { method: 'POST', body: JSON.stringify({ status }) }); this.alive = false; }
   async receipt(projectId: string, callId: string) { return this.canvas(projectId).receipt(projectId, callId); }
   async edit(projectId: string, callId: string, operations: CanvasOperation[], snapshot: unknown, baseVersion: number, label: string, skipped: string[]) {
