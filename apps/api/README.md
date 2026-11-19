@@ -32,6 +32,19 @@ pnpm dev:api
 
 首位管理员仍由本地引导。Go API 还提供受控创建的普通创作用户登录：运行 `CREATOR_SETUP_PASSWORD=... pnpm --filter @blow-flow/api creator:setup -- -email creator@example.com`，随后调用 `POST /v1/auth/user/login`（邮箱、密码、图片验证码）获取 15 分钟 JWT 和仅限认证路径的刷新 Cookie。管理员与创作者分别调用 `/v1/auth/admin/refresh` 或 `/v1/auth/user/refresh` 轮换 Cookie 并取得新 JWT，退出时调用对应 `/logout`。Admin 前端已自动续期；普通创作前端尚未接入 Go 登录。迁移 `00010_auth_sessions.sql` 必须先于新 API 部署执行。公开自助注册、邮箱验证、找回密码、跨实例共享验证码与登录限流、签名密钥轮换和主动撤销已签发 JWT 尚未提供，生产开放前须补齐。
 
+## Agent migration boundary
+
+The Go Agent store now persists project-scoped commands and messages, validates the
+confirmed canvas version on `send`, and writes an outbox wakeup in the same
+transaction. `pnpm --filter @blow-flow/api agent:dispatcher` publishes queued task
+IDs to the RabbitMQ `agent.tasks.v1` quorum queue with publisher confirms. A
+claimed Node Runner can read `/internal/agent/run/context` and use the scoped
+canvas endpoints. Public `/v1/agent/projects/:projectId` routes intentionally
+return `503` from the production server until the Node Pi Runner consumes this
+queue and records replies, tool steps, and confirmations through Go. The existing
+Next.js Agent remains the active product path. See
+[the migration design](../../docs/architecture/go-agent-migration.md).
+
 ## Go generation service
 
 The Go API exposes `POST /v1/generation/tasks`, `GET /v1/generation/tasks/{id}` and

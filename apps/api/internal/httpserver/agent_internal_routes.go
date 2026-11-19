@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"context"
 	"crypto/subtle"
 	"errors"
 	"net/http"
@@ -76,6 +77,21 @@ func registerAgentInternalRoutes(r *gin.Engine, d Dependencies) {
 			return
 		}
 		c.JSON(200, canvas)
+	})
+	g.GET("/run/context", func(c *gin.Context) {
+		service, ok := d.AgentRuns.(interface {
+			Context(context.Context, string) (agent.RunContext, error)
+		})
+		if !ok {
+			c.JSON(503, errorBody(c, "service_unavailable"))
+			return
+		}
+		value, err := service.Context(c.Request.Context(), bearer(c))
+		if err != nil {
+			agentError(c, err)
+			return
+		}
+		c.JSON(200, value)
 	})
 	g.POST("/run/deleted-nodes/check", func(c *gin.Context) {
 		var body struct {

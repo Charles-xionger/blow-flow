@@ -30,17 +30,25 @@ type Store struct {
 func New(db *gorm.DB) *Store { return &Store{DB: db, Now: time.Now} }
 
 type taskRow struct {
-	ID, OwnerID, ProjectID, RequestID, Status string
-	RunID                                     *string
-	RunHash                                   []byte
-	LeaseUntil                                *time.Time
-	EditableNodeIDs                           []byte
-	DeleteGrants                              []byte
-	CreatedAt, UpdatedAt                      time.Time
+	ID, OwnerID, ProjectID, RequestID, ModelID, Status string
+	RunID                                              *string
+	RunHash                                            []byte
+	LeaseUntil                                         *time.Time
+	Question                                           []byte
+	EditableNodeIDs                                    []byte
+	DeleteGrants                                       []byte
+	CreatedAt, UpdatedAt                               time.Time
 }
 
 func (r taskRow) task() agent.Task {
-	return agent.Task{ID: r.ID, OwnerID: r.OwnerID, ProjectID: r.ProjectID, Status: r.Status, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+	task := agent.Task{ID: r.ID, OwnerID: r.OwnerID, ProjectID: r.ProjectID, ModelID: r.ModelID, Status: r.Status, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+	if len(r.Question) > 0 {
+		var q agent.Question
+		if json.Unmarshal(r.Question, &q) == nil {
+			task.Question = &q
+		}
+	}
+	return task
 }
 
 func uuid() (string, error) {
@@ -96,7 +104,7 @@ func (s *Store) Enqueue(ctx context.Context, owner, project, requestID string) (
 			return agent.ErrNotFound
 		}
 		var previous taskRow
-		q = tx.Raw(`SELECT id,owner_id,project_id,status,created_at,updated_at FROM agent_tasks WHERE owner_id=? AND request_id=?`, owner, requestID).Scan(&previous)
+		q = tx.Raw(`SELECT id,owner_id,project_id,model_id,status,question,created_at,updated_at FROM agent_tasks WHERE owner_id=? AND request_id=?`, owner, requestID).Scan(&previous)
 		if q.Error != nil {
 			return q.Error
 		}
@@ -131,7 +139,7 @@ func (s *Store) Claim(ctx context.Context, taskID string) (agent.Run, error) {
 	var out agent.Run
 	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var row taskRow
-		q := tx.Raw(`SELECT id,owner_id,project_id,status,created_at,updated_at FROM agent_tasks WHERE id=? FOR UPDATE`, taskID).Scan(&row)
+		q := tx.Raw(`SELECT id,owner_id,project_id,model_id,status,question,created_at,updated_at FROM agent_tasks WHERE id=? FOR UPDATE`, taskID).Scan(&row)
 		if q.Error != nil {
 			return q.Error
 		}
@@ -410,6 +418,9 @@ func (s *Store) CommitCanvas(ctx context.Context, token string, input agent.Comm
 		if err != nil {
 			return err
 		}
+		if err := cancelRemovedGenerationNodes(tx, row.OwnerID, row.ProjectID, removedNodes, s.Now().UTC()); err != nil {
+			return err
+		}
 		out = agent.CanvasReceipt{Version: ack.Version, Label: input.Label, Skipped: input.Skipped, Operations: input.Operations, RemovedNodes: removedJSON}
 		encoded, err := json.Marshal(out)
 		if err != nil {
@@ -433,4 +444,37 @@ func (s *Store) CommitCanvas(ctx context.Context, token string, input agent.Comm
 		return event(tx, row.ID, "canvas_committed", s.Now().UTC())
 	})
 	return out, err
+}
+
+// A removed canvas node cannot receive a late result. Queued provider calls are
+// canceled in the same transaction as the canvas edit; submitted calls continue
+// to be tracked, but their result mapping is detached from the removed node.
+func cancelRemovedGenerationNodes(tx *gorm.DB, owner, project string, nodes []map[string]any, now time.Time) error {
+	ids := make([]string, 0, len(nodes))
+	seen := map[string]bool{}
+	for _, node := range nodes {
+		id := idOf(node)
+		if data := data(node); data != nil {
+			if value, ok := data["generationNodeId"].(string); ok && value != "" {
+				id = value
+			}
+		}
+		if id != "" && !seen[id] {
+			ids = append(ids, id)
+			seen[id] = true
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	var canceled []string
+	if err := tx.Raw(`UPDATE generation_tasks SET status='canceled',stage='canceled',updated_at=? WHERE owner_id=? AND project_id=? AND node_id IN ? AND status='queued' RETURNING id`, now, owner, project, ids).Scan(&canceled).Error; err != nil {
+		return err
+	}
+	for _, id := range canceled {
+		if err := tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,stage,occurred_at) VALUES(?,'canceled','canceled',?)`, id, now).Error; err != nil {
+			return err
+		}
+	}
+	return tx.Exec(`DELETE FROM generation_node_results WHERE owner_id=? AND project_id=? AND node_id IN ?`, owner, project, ids).Error
 }

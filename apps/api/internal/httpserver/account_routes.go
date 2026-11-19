@@ -32,6 +32,7 @@ func registerAccountRoutes(router *gin.Engine, dependencies Dependencies) {
 	registerGenerationRoutes(v1, dependencies)
 	registerResourceRoutes(v1, dependencies)
 	registerScriptRoutes(v1, dependencies)
+	registerAgentRoutes(v1, dependencies)
 	v1.GET("/me", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"user": currentUser(c)})
 	})

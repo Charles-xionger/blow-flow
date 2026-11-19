@@ -56,6 +56,7 @@ func run() error {
 	var refreshSessions httpserver.RefreshSessions
 	var refreshStore *session.Store
 	var agentRuns httpserver.AgentRuns
+	var agentCommands httpserver.AgentCommands
 	var agentStore *agentpostgres.Store
 	var agentRunnerKey []byte
 	var generationService httpserver.GenerationService
@@ -138,6 +139,8 @@ func run() error {
 		}
 		agentRunnerKey = key
 	}
+	// Keep public Agent commands unavailable until the RabbitMQ-backed Pi Runner
+	// is deployed. The routes and store are exercised through isolated API tests.
 	if addr == "" {
 		addr = "127.0.0.1:8080"
 	}
@@ -183,7 +186,7 @@ func run() error {
 			}
 		}()
 	}
-	server := &http.Server{Handler: httpserver.NewWithDependencies(httpserver.Dependencies{Ping: ping, Accounts: accounts, IdentityVerifier: identityVerifier, LocalAdmin: localAdmin, CreatorAuth: creatorAuth, Captcha: captcha, RefreshSessions: refreshSessions, AgentRuns: agentRuns, AgentRunnerKey: agentRunnerKey, Generation: generationService, GenerationWakeups: wakeups, GenerationStreamClose: ctx.Done(), Resources: resourceService, ResourceBlobs: resourceoss.FromEnv(), Scripts: scriptService, ScriptWakeups: scriptWakeups, TextModels: textModels}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
+	server := &http.Server{Handler: httpserver.NewWithDependencies(httpserver.Dependencies{Ping: ping, Accounts: accounts, IdentityVerifier: identityVerifier, LocalAdmin: localAdmin, CreatorAuth: creatorAuth, Captcha: captcha, RefreshSessions: refreshSessions, AgentRuns: agentRuns, AgentCommands: agentCommands, AgentRunnerKey: agentRunnerKey, Generation: generationService, GenerationWakeups: wakeups, GenerationStreamClose: ctx.Done(), Resources: resourceService, ResourceBlobs: resourceoss.FromEnv(), Scripts: scriptService, ScriptWakeups: scriptWakeups, TextModels: textModels}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(listener) }()
 	slog.Info("API listening", "address", listener.Addr().String())

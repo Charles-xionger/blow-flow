@@ -19,9 +19,54 @@ type Task struct {
 	ID        string    `json:"id"`
 	OwnerID   string    `json:"-"`
 	ProjectID string    `json:"projectId"`
+	ModelID   string    `json:"modelId"`
 	Status    string    `json:"status"`
+	Question  *Question `json:"question,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+type Question struct {
+	ID        string          `json:"id"`
+	Text      string          `json:"text"`
+	Options   []string        `json:"options"`
+	Scope     json.RawMessage `json:"scope,omitempty"`
+	Answer    string          `json:"answer,omitempty"`
+	Cancelled bool            `json:"cancelled,omitempty"`
+}
+
+type Reference struct {
+	NodeID   string `json:"nodeId,omitempty"`
+	AssetID  string `json:"assetId,omitempty"`
+	URL      string `json:"url,omitempty"`
+	Data     string `json:"data,omitempty"`
+	MimeType string `json:"mimeType,omitempty"`
+	Name     string `json:"name,omitempty"`
+}
+
+type Message struct {
+	ID         string      `json:"id"`
+	TaskID     string      `json:"taskId"`
+	RunID      string      `json:"runId,omitempty"`
+	Role       string      `json:"role"`
+	Text       string      `json:"text"`
+	References []Reference `json:"references"`
+	CreatedAt  time.Time   `json:"createdAt"`
+}
+
+type Snapshot struct {
+	Tasks    []Task    `json:"tasks"`
+	Messages []Message `json:"messages"`
+}
+
+type Command struct {
+	RequestID     string      `json:"requestId"`
+	Action        string      `json:"action"`
+	Text          string      `json:"text,omitempty"`
+	ModelID       string      `json:"modelId,omitempty"`
+	QuestionID    string      `json:"questionId,omitempty"`
+	References    []Reference `json:"references,omitempty"`
+	CanvasVersion int64       `json:"canvasVersion,omitempty"`
 }
 
 type Run struct {
@@ -29,6 +74,11 @@ type Run struct {
 	RunID      string    `json:"runId"`
 	Token      string    `json:"token"`
 	LeaseUntil time.Time `json:"leaseUntil"`
+}
+
+type RunContext struct {
+	Task     Task      `json:"task"`
+	Messages []Message `json:"messages"`
 }
 
 type Canvas struct {

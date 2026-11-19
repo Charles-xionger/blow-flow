@@ -50,6 +50,11 @@ type AgentRuns interface {
 	Finish(context.Context, string, string) error
 }
 
+type AgentCommands interface {
+	Snapshot(context.Context, string, string) (agent.Snapshot, error)
+	Command(context.Context, string, string, agent.Command) (agent.Task, error)
+}
+
 type AccountService interface {
 	Resolve(context.Context, account.Identity) (account.User, error)
 	ListUsers(context.Context, account.User, account.ListUsersQuery) (account.UserPage, error)
@@ -66,6 +71,7 @@ type Dependencies struct {
 	Captcha               ImageCaptcha
 	RefreshSessions       RefreshSessions
 	AgentRuns             AgentRuns
+	AgentCommands         AgentCommands
 	AgentRunnerKey        []byte
 	Accounts              AccountService
 	Generation            GenerationService
