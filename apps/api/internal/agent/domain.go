@@ -17,14 +17,15 @@ var (
 )
 
 type Task struct {
-	ID        string    `json:"id"`
-	OwnerID   string    `json:"-"`
-	ProjectID string    `json:"projectId"`
-	ModelID   string    `json:"modelId"`
-	Status    string    `json:"status"`
-	Question  *Question `json:"question,omitempty"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID             string    `json:"id"`
+	OwnerID        string    `json:"-"`
+	ProjectID      string    `json:"projectId"`
+	ModelID        string    `json:"modelId"`
+	Status         string    `json:"status"`
+	Question       *Question `json:"question,omitempty"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+	LegacyImported bool      `json:"legacyImported,omitempty"`
 }
 
 type Question struct {
@@ -72,8 +73,9 @@ type Message struct {
 }
 
 type Snapshot struct {
-	Tasks    []Task    `json:"tasks"`
-	Messages []Message `json:"messages"`
+	Tasks                   []Task            `json:"tasks"`
+	Messages                []Message         `json:"messages"`
+	LegacyGenerationBatches []json.RawMessage `json:"legacyGenerationBatches,omitempty"`
 }
 
 type Command struct {

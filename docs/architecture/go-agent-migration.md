@@ -1,6 +1,6 @@
 # 创作助手迁移设计（提案）
 
-状态：实施中。画布计算器、Go 资源适配、运行令牌约束的画布提交、用户命令、消息、工具步骤与问题持久化已落地测试；独立 Go Pi Runner 已接通基础画布工具和受确认的 Krea2 文生图任务。旧 Agent 任务、消息、命令回执、工具步骤和生成批次已纳入一次性资源导出/导入，旧批次只归档、不触发供应商请求。Runner 仍未与旧工具等价，生产切流尚未完成。
+状态：实施中。画布计算器、Go 资源适配、运行令牌约束的画布提交、用户命令、消息、工具步骤与问题持久化已落地测试；独立 Go Pi Runner 已接通基础画布工具和受确认的 Krea2 文生图任务。旧 Agent 任务、消息、命令回执、画布回执、工具步骤和生成批次已纳入一次性资源导出/导入；旧任务带只读标记，不占用项目活动任务名额，也不能被 Go Runner 领取，旧批次只归档、不触发供应商请求。Runner 仍未与旧工具等价，生产切流尚未完成。
 
 当前代码边界：`apps/web/lib/agent/canvas-plan.ts` 是不访问数据库的画布编辑计算器，现有 SQLite Agent 工具已复用它。`apps/web/lib/agent/go-canvas.ts` 和 `go-runner-host.ts` 为独立 Node Go Runner 提供运行令牌画布适配及进程内 MCP。Go `agent` 模块持久化任务、消息、工具步骤、待回答问题和运行租约，提交入口从运行令牌推导所有者与项目，在同一事务中检查版本、操作范围、删除节点并写快照和工具回执。服务密钥是 Base64 文本，只用于领取任务，不能访问运行画布；过期运行令牌不能提交。`/v1/agent/projects/:projectId` 和 `/commands` 已实现身份与归属边界，默认返回 503；仅通过 `AGENT_GO_EXPERIMENTAL_COMMANDS=1` 可做受控接口冒烟测试，避免不完整工具集接管用户任务。`agent-dispatcher` 从 PostgreSQL outbox 向 RabbitMQ quorum queue 发布带确认的任务 ID；独立 `agent:go-worker` 可以消费并执行基础对话、画布读取与编辑工具，但不在 `dev:all` 中启用。前端及生产 Agent 路由保持现状。
 

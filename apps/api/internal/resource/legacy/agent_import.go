@@ -34,6 +34,12 @@ type LegacyAgentBatch struct {
 	TaskID string `json:"task_id"`
 	Data   string `json:"data"`
 }
+type LegacyAgentCanvasReceipt struct {
+	ProjectID string `json:"project_id"`
+	Identity  string `json:"identity"`
+	Digest    string `json:"digest"`
+	Result    string `json:"result"`
+}
 
 type oldAgentTask struct {
 	ID        string          `json:"id"`
@@ -89,6 +95,7 @@ func (e Export) validateAgents(projects map[string]bool) error {
 	messages := map[string]bool{}
 	receipts := map[string]bool{}
 	batches := map[string]bool{}
+	canvasReceipts := map[string]bool{}
 	for _, row := range e.AgentTasks {
 		var task oldAgentTask
 		if !uuidLike(row.ID) || !projects[row.ProjectID] || tasks[row.ID] != "" || json.Unmarshal([]byte(row.Data), &task) != nil || task.ID != row.ID || task.ProjectID != row.ProjectID || task.Status != row.Status || task.CreatedAt <= 0 || !strings.Contains("|queued|running|waiting|interrupted|completed|failed|stopped|", "|"+task.Status+"|") {
@@ -127,6 +134,13 @@ func (e Export) validateAgents(projects map[string]bool) error {
 		}
 		batches[row.ID] = true
 	}
+	for _, row := range e.AgentCanvasReceipts {
+		key := row.ProjectID + "\x00" + row.Identity
+		if !projects[row.ProjectID] || !valid(row.Identity) || row.Digest == "" || !json.Valid([]byte(row.Result)) || canvasReceipts[key] {
+			return errors.New("invalid legacy agent canvas receipt")
+		}
+		canvasReceipts[key] = true
+	}
 	return nil
 }
 
@@ -136,11 +150,11 @@ func importAgents(tx *gorm.DB, owner string, e Export) error {
 		_ = json.Unmarshal([]byte(row.Data), &task)
 		status := task.Status
 		question := normalizedJSON(task.Question, "null")
-		if status == "queued" || status == "running" || status == "waiting" {
+		if status == "queued" || status == "running" || status == "waiting" || status == "interrupted" {
 			status = "interrupted"
 			question = "null" // Old approval scopes cannot authorize new Go tool calls.
 		}
-		result := tx.Exec(`INSERT INTO agent_tasks(id,owner_id,project_id,request_id,model_id,status,question,created_at,updated_at) VALUES(?::uuid,?,?,?, ?,?,?::jsonb,?,?) ON CONFLICT(id) DO NOTHING`, row.ID, owner, row.ProjectID, "legacy:"+row.ID, task.ModelID, status, question, timestamp(task.CreatedAt), timestamp(task.CreatedAt))
+		result := tx.Exec(`INSERT INTO agent_tasks(id,owner_id,project_id,request_id,model_id,status,question,legacy_imported,created_at,updated_at) VALUES(?::uuid,?,?,?, ?,?,?::jsonb,true,?,?) ON CONFLICT(id) DO NOTHING`, row.ID, owner, row.ProjectID, "legacy:"+row.ID, task.ModelID, status, question, timestamp(task.CreatedAt), timestamp(task.CreatedAt))
 		if result.Error != nil {
 			return result.Error
 		}
@@ -190,7 +204,12 @@ func importAgents(tx *gorm.DB, owner string, e Export) error {
 		}
 	}
 	for _, row := range e.AgentReceipts {
-		if err := tx.Exec(`INSERT INTO agent_command_receipts(owner_id,request_id,digest,task_id,created_at) VALUES(?,?,?,?,now())`, owner, row.RequestID, "legacy:"+row.Digest, row.TaskID).Error; err != nil {
+		if err := tx.Exec(`INSERT INTO agent_legacy_command_receipts(project_id,request_id,digest,task_id) VALUES(?,?,?,?::uuid)`, row.ProjectID, row.RequestID, row.Digest, row.TaskID).Error; err != nil {
+			return err
+		}
+	}
+	for _, row := range e.AgentCanvasReceipts {
+		if err := tx.Exec(`INSERT INTO agent_legacy_canvas_receipts(project_id,identity,digest,result) VALUES(?,?,?,?::jsonb)`, row.ProjectID, row.Identity, row.Digest, row.Result).Error; err != nil {
 			return err
 		}
 	}

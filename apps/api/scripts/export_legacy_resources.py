@@ -44,6 +44,7 @@ def main():
             "agentMessages": rows(db, "agent_messages") if "agent_messages" in present else [],
             "agentReceipts": rows(db, "agent_receipts") if "agent_receipts" in present else [],
             "agentGenerationBatches": rows(db, "agent_generation_batches") if "agent_generation_batches" in present else [],
+            "agentCanvasReceipts": rows(db, "agent_canvas_receipts") if "agent_canvas_receipts" in present else [],
         }
         db.execute("COMMIT")
     finally:

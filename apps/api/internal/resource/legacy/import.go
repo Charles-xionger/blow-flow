@@ -78,18 +78,19 @@ type ScriptRequest struct {
 	Input     string `json:"input"`
 }
 type Export struct {
-	SchemaVersion          int                  `json:"schemaVersion"`
-	Projects               []Project            `json:"projects"`
-	Folders                []Folder             `json:"folders"`
-	MediaFiles             []MediaFile          `json:"mediaFiles"`
-	SaveReceipts           []Receipt            `json:"saveReceipts"`
-	DeletedNodes           []DeletedNode        `json:"deletedNodes"`
-	ScriptTasks            []ScriptTask         `json:"scriptTasks"`
-	ScriptRequests         []ScriptRequest      `json:"scriptRequests"`
-	AgentTasks             []LegacyAgentTask    `json:"agentTasks"`
-	AgentMessages          []LegacyAgentMessage `json:"agentMessages"`
-	AgentReceipts          []LegacyAgentReceipt `json:"agentReceipts"`
-	AgentGenerationBatches []LegacyAgentBatch   `json:"agentGenerationBatches"`
+	SchemaVersion          int                        `json:"schemaVersion"`
+	Projects               []Project                  `json:"projects"`
+	Folders                []Folder                   `json:"folders"`
+	MediaFiles             []MediaFile                `json:"mediaFiles"`
+	SaveReceipts           []Receipt                  `json:"saveReceipts"`
+	DeletedNodes           []DeletedNode              `json:"deletedNodes"`
+	ScriptTasks            []ScriptTask               `json:"scriptTasks"`
+	ScriptRequests         []ScriptRequest            `json:"scriptRequests"`
+	AgentTasks             []LegacyAgentTask          `json:"agentTasks"`
+	AgentMessages          []LegacyAgentMessage       `json:"agentMessages"`
+	AgentReceipts          []LegacyAgentReceipt       `json:"agentReceipts"`
+	AgentGenerationBatches []LegacyAgentBatch         `json:"agentGenerationBatches"`
+	AgentCanvasReceipts    []LegacyAgentCanvasReceipt `json:"agentCanvasReceipts"`
 }
 
 func (e Export) Validate() error {

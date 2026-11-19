@@ -31,7 +31,7 @@ func main() {
 	if err = export.Validate(); err != nil {
 		fatal(err)
 	}
-	fmt.Printf("validated: projects=%d folders=%d media=%d receipts=%d deletedNodes=%d scriptTasks=%d scriptRequests=%d agentTasks=%d agentMessages=%d agentReceipts=%d agentBatches=%d\n", len(export.Projects), len(export.Folders), len(export.MediaFiles), len(export.SaveReceipts), len(export.DeletedNodes), len(export.ScriptTasks), len(export.ScriptRequests), len(export.AgentTasks), len(export.AgentMessages), len(export.AgentReceipts), len(export.AgentGenerationBatches))
+	fmt.Printf("validated: projects=%d folders=%d media=%d receipts=%d deletedNodes=%d scriptTasks=%d scriptRequests=%d agentTasks=%d agentMessages=%d agentReceipts=%d agentCanvasReceipts=%d agentBatches=%d\n", len(export.Projects), len(export.Folders), len(export.MediaFiles), len(export.SaveReceipts), len(export.DeletedNodes), len(export.ScriptTasks), len(export.ScriptRequests), len(export.AgentTasks), len(export.AgentMessages), len(export.AgentReceipts), len(export.AgentCanvasReceipts), len(export.AgentGenerationBatches))
 	if !*apply {
 		fmt.Println("dry run; PostgreSQL unchanged")
 		return

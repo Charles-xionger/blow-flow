@@ -39,10 +39,12 @@ type taskRow struct {
 	EditableNodeIDs                                    []byte
 	DeleteGrants                                       []byte
 	CreatedAt, UpdatedAt                               time.Time
+	LegacyImported                                     bool
 }
 
 func (r taskRow) task() agent.Task {
 	task := agent.Task{ID: r.ID, OwnerID: r.OwnerID, ProjectID: r.ProjectID, ModelID: r.ModelID, Status: r.Status, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+	task.LegacyImported = r.LegacyImported
 	if len(r.Question) > 0 {
 		var q agent.Question
 		if json.Unmarshal(r.Question, &q) == nil {
@@ -140,14 +142,14 @@ func (s *Store) Claim(ctx context.Context, taskID string) (agent.Run, error) {
 	var out agent.Run
 	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var row taskRow
-		q := tx.Raw(`SELECT id,owner_id,project_id,model_id,status,question,created_at,updated_at FROM agent_tasks WHERE id=? FOR UPDATE`, taskID).Scan(&row)
+		q := tx.Raw(`SELECT id,owner_id,project_id,model_id,status,question,legacy_imported,created_at,updated_at FROM agent_tasks WHERE id=? FOR UPDATE`, taskID).Scan(&row)
 		if q.Error != nil {
 			return q.Error
 		}
 		if q.RowsAffected != 1 {
 			return agent.ErrNotFound
 		}
-		if row.Status != "queued" {
+		if row.Status != "queued" || row.LegacyImported {
 			return agent.ErrConflict
 		}
 		runID, err := uuid()

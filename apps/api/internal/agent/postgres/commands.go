@@ -19,7 +19,7 @@ func (s *Store) Snapshot(ctx context.Context, owner, project string) (agent.Snap
 			return err
 		}
 		var tasks []taskRow
-		if err := tx.Raw(`SELECT id,owner_id,project_id,model_id,status,question,created_at,updated_at FROM agent_tasks WHERE owner_id=? AND project_id=? ORDER BY created_at,id`, owner, project).Scan(&tasks).Error; err != nil {
+		if err := tx.Raw(`SELECT id,owner_id,project_id,model_id,status,question,legacy_imported,created_at,updated_at FROM agent_tasks WHERE owner_id=? AND project_id=? ORDER BY created_at,id`, owner, project).Scan(&tasks).Error; err != nil {
 			return err
 		}
 		for _, row := range tasks {
@@ -30,6 +30,13 @@ func (s *Store) Snapshot(ctx context.Context, owner, project string) (agent.Snap
 			return err
 		}
 		out.Messages = messages
+		var archived []struct{ Data []byte }
+		if err := tx.Raw(`SELECT data FROM agent_legacy_generation_batches WHERE task_id IN (SELECT id FROM agent_tasks WHERE owner_id=? AND project_id=?) ORDER BY id`, owner, project).Scan(&archived).Error; err != nil {
+			return err
+		}
+		for _, item := range archived {
+			out.LegacyGenerationBatches = append(out.LegacyGenerationBatches, json.RawMessage(item.Data))
+		}
 		return nil
 	})
 	return out, err
@@ -130,7 +137,7 @@ func validCommand(input agent.Command) bool {
 
 func activeTask(tx *gorm.DB, project string) (taskRow, bool, error) {
 	var row taskRow
-	q := tx.Raw(`SELECT id,owner_id,project_id,model_id,status,question,created_at,updated_at FROM agent_tasks WHERE project_id=? AND status IN ('queued','running','waiting','interrupted') FOR UPDATE`, project).Scan(&row)
+	q := tx.Raw(`SELECT id,owner_id,project_id,model_id,status,question,created_at,updated_at FROM agent_tasks WHERE project_id=? AND status IN ('queued','running','waiting','interrupted') AND NOT legacy_imported FOR UPDATE`, project).Scan(&row)
 	return row, q.RowsAffected > 0, q.Error
 }
 
@@ -194,6 +201,13 @@ func (s *Store) Command(ctx context.Context, owner, project string, input agent.
 		}
 		if err := ownedProject(tx, owner, project, 0); err != nil {
 			return err
+		}
+		var legacyReceipt int64
+		if err := tx.Raw(`SELECT count(*) FROM agent_legacy_command_receipts WHERE project_id=? AND request_id=?`, project, input.RequestID).Scan(&legacyReceipt).Error; err != nil {
+			return err
+		}
+		if legacyReceipt > 0 {
+			return agent.ErrRequestConflict
 		}
 		var prior struct{ Digest, TaskID string }
 		q := tx.Raw(`SELECT digest,task_id FROM agent_command_receipts WHERE owner_id=? AND request_id=?`, owner, input.RequestID).Scan(&prior)

@@ -101,10 +101,10 @@ index trusted OSS links already embedded in project snapshots. Follow
 running it against persistent data. The export contains project content and is
 created with mode `0600`; remove it after verifying the import.
 
-The export also carries legacy Agent tasks, messages, request receipts, tool
+The export also carries legacy Agent tasks, messages, request and canvas receipts, tool
 steps, and generation batches. The importer stores completed history and archives
 old generation batches without creating Go generation tasks or outbox messages.
-Old active tasks become interrupted and their original snapshots are archived,
+Old active tasks become read-only interrupted history and their original snapshots are archived,
 so legacy approvals cannot authorize a new provider submission. This does not by itself enable the production Agent
 route: creator login, Go-owned project writes, and tool parity remain required.
 
