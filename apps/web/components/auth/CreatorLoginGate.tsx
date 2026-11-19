@@ -47,18 +47,18 @@ export function CreatorLoginGate() {
     } catch (cause) { setError(cause instanceof Error ? cause.message : '登录失败'); await reloadCaptcha(); }
     finally { setBusy(false); }
   }
-  return <Dialog open={state !== 'ready'} onOpenChange={() => {}}>
-    <DialogContent showCloseButton={false} className="max-w-md border-border/70 p-0 overflow-hidden" onEscapeKeyDown={event => event.preventDefault()} onPointerDownOutside={event => event.preventDefault()}>
-      <div className="bg-primary px-7 py-6 text-primary-foreground"><BrandMark size={28}/><p className="mt-4 text-xl font-semibold">登录 Blow Flow</p><p className="mt-1 text-sm opacity-80">使用创作用户账户继续管理项目与助手任务。</p></div>
+  return <Dialog open={state === 'login'} onOpenChange={() => {}}>
+    <DialogContent showCloseButton={false} className="max-w-md overflow-hidden border-border bg-card p-0 text-card-foreground shadow-xl" onEscapeKeyDown={event => event.preventDefault()} onPointerDownOutside={event => event.preventDefault()}>
+      <div className="border-b border-border bg-muted/40 px-7 py-6"><BrandMark size={28}/><p className="mt-4 text-xl font-semibold">登录 Blow Flow</p><p className="mt-1 text-sm leading-6 text-muted-foreground">使用创作用户账户继续管理项目与助手任务。</p></div>
       <div className="px-7 pb-7 pt-6">
-        {state === 'checking' ? <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 size={17} className="animate-spin"/>正在验证登录状态…</p> : <form onSubmit={event => void submit(event)} className="space-y-4">
+        <form onSubmit={event => void submit(event)} className="space-y-4">
           <DialogHeader className="sr-only"><DialogTitle>创作用户登录</DialogTitle><DialogDescription>输入邮箱、密码和图片验证码</DialogDescription></DialogHeader>
           <label className="block text-sm font-medium">邮箱<input type="email" autoComplete="username" required value={email} onChange={event => setEmail(event.target.value)} className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring"/></label>
           <label className="block text-sm font-medium">密码<input type="password" autoComplete="current-password" required value={password} onChange={event => setPassword(event.target.value)} className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring"/></label>
           <div><label htmlFor="creator-captcha" className="block text-sm font-medium">图片验证码</label><div className="mt-2 flex items-center gap-2"><input id="creator-captcha" inputMode="numeric" pattern="[0-9]{4}" maxLength={4} required value={answer} onChange={event => setAnswer(event.target.value)} placeholder="4 位数字" className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring"/>{captcha ? <Image unoptimized src={captcha.image} alt="图片验证码" width={122} height={40} className="h-10 w-[122px] rounded border object-contain"/> : <span className="h-10 w-[122px] rounded border bg-muted"/>}<button type="button" aria-label="更换验证码" onClick={() => void reloadCaptcha()} className="rounded p-2 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"><RefreshCw size={18}/></button></div></div>
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <Button type="submit" className="w-full" disabled={busy || !captcha}>{busy ? <Loader2 className="animate-spin"/> : <ShieldCheck/>}登录</Button>
-        </form>}
+        </form>
       </div>
     </DialogContent>
   </Dialog>;

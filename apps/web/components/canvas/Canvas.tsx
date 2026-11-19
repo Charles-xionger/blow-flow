@@ -23,6 +23,7 @@ import "@xyflow/react/dist/style.css";
 
 import { CanvasEdge } from "./CanvasEdge";
 import { CanvasRecovery } from "./CanvasRecovery";
+import { CanvasOpeningState } from "./CanvasOpeningState";
 import { canvasAutosave, useCanvasStore } from "@/store/useCanvasStore";
 import { isValidCanvasConnection } from "@/lib/canvas/connections";
 import { canvasRenderNodes } from "@/lib/canvas/render-nodes";
@@ -247,12 +248,7 @@ function CanvasInner() {
     },
   }), [mounted, isDarkMode]);
 
-  if (!persistenceReady) return (
-    <div className="flex h-full items-center justify-center" role="status">
-      {saveError || "正在恢复画布…"}
-      <CanvasRecovery />
-    </div>
-  );
+  if (!persistenceReady) return <CanvasOpeningState error={saveError}><CanvasRecovery /></CanvasOpeningState>;
 
   return (
     <div ref={reactFlowWrapper} className="relative flex w-full h-full"
