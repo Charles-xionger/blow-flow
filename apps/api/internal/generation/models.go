@@ -59,7 +59,7 @@ func ValidInput(in Input) bool {
 		}
 		return false
 	default:
-		return false
+		return ValidWorkflowInput(in)
 	}
 }
 

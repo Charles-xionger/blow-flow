@@ -32,8 +32,16 @@ func (s *Store) Create(ctx context.Context, owner, key, hash string, input gener
 		return generation.Task{}, err
 	}
 	connection := generation.ConnectionForModel(input.Model)
+	if input.Workflow != nil {
+		connection = input.Workflow.ConnectionID
+	}
 	if connection == "" {
 		return generation.Task{}, generation.ErrInvalid
+	}
+	if input.Workflow != nil {
+		if err := s.ensureWorkflowConnection(ctx, input.Workflow); err != nil {
+			return generation.Task{}, err
+		}
 	}
 	err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Serialize admissions across API instances on the connection's limit row.
