@@ -1,0 +1,185 @@
+{
+  "cases": {
+    "all_resource_counts": "pass",
+    "all_resource_identifiers": "pass",
+    "generation_replay_failure_and_lost_wakeup": "pass",
+    "go_canvas_agent_confirm_delivery": "pass",
+    "go_only_export_reconciled": "pass",
+    "image_video_reference_and_cancel": "pass",
+    "import_dry_run_and_idempotent_apply": "pass",
+    "imported_agent_is_read_only": "pass",
+    "imported_api_journey": "pass",
+    "imported_project_owner": "pass",
+    "isolated_services": "pass",
+    "isolated_teardown": "pass",
+    "legacy_read_only_entry_restored": "pass",
+    "media_content_ids_and_owner": "pass",
+    "old_confirmation_interrupted_without_requeue": "pass",
+    "project_content_ids_versions_and_trash": "pass",
+    "script_checkpoint_replay": "pass",
+    "single_writer_sqlite_unchanged": "pass",
+    "skill_binary_content_and_owner": "pass",
+    "stop_and_delta_manifest": "pass"
+  },
+  "commit": "5a3b4a51f3ab0118e91d3eefb85c7a10f8ec0ad0",
+  "delta": {
+    "deliveredGenerationCount": 2,
+    "goAgentTaskIds": [
+      "abf1dd98-ac14-4a97-96ab-560f3d65b6d8"
+    ],
+    "goCanvasVersions": [
+      "go-rehearsal-5f5da2682d20:7"
+    ],
+    "goGenerationTaskIds": [
+      "a811bedf5cd9a6f0af427d4470b5f3e4",
+      "e16fb0d78ab26d56341b33f84f1086f9"
+    ],
+    "goOnlyProjectIds": [
+      "go-rehearsal-5f5da2682d20"
+    ],
+    "goScriptTaskIds": [
+      "31f65ce9-7c5c-4107-8322-33e51074ae40"
+    ],
+    "projectsAfter": 3,
+    "projectsBefore": 2
+  },
+  "deltaExportSha256": "3cb3ca4fe0c41a15f3d7a86eeb7aa9a8c4e84fd75b4366b34c98dc291912c654",
+  "finishedAt": 1795183958.649434,
+  "fixture": {
+    "counts": {
+      "agentCanvasReceipts": 1,
+      "agentGenerationBatches": 1,
+      "agentMessages": 2,
+      "agentReceipts": 1,
+      "agentTasks": 2,
+      "deletedNodes": 1,
+      "folders": 1,
+      "mediaFiles": 2,
+      "projects": 2,
+      "saveReceipts": 1,
+      "scriptRequests": 2,
+      "scriptTasks": 2,
+      "userSkillResources": 1,
+      "userSkills": 1
+    },
+    "exportSha256": "8d712164115eb7926984e306dc7da25307d32b35328dbe6e32b2b4f8b7b01af8",
+    "externalMediaSha256": "0200893f991b6bc8745c07433dd09fb43fffb082a5daa0e9e31457a099427334",
+    "ids": {
+      "agentCanvasReceipts": [
+        ""
+      ],
+      "agentGenerationBatches": [
+        "fixture-old-batch"
+      ],
+      "agentMessages": [
+        "55555555-5555-4555-8555-555555555555",
+        "66666666-6666-4666-8666-666666666666"
+      ],
+      "agentReceipts": [
+        "fixture-agent-request"
+      ],
+      "agentTasks": [
+        "33333333-3333-4333-8333-333333333333",
+        "44444444-4444-4444-8444-444444444444"
+      ],
+      "deletedNodes": [
+        ""
+      ],
+      "folders": [
+        "fixture-folder"
+      ],
+      "mediaFiles": [
+        "fixture-media-inline",
+        "fixture-media-oss"
+      ],
+      "projects": [
+        "fixture-project-active",
+        "fixture-project-trashed"
+      ],
+      "saveReceipts": [
+        "fixture-save-request"
+      ],
+      "scriptRequests": [
+        "fixture-script-done",
+        "fixture-script-running"
+      ],
+      "scriptTasks": [
+        "11111111-1111-4111-8111-111111111111",
+        "22222222-2222-4222-8222-222222222222"
+      ],
+      "userSkillResources": [
+        ""
+      ],
+      "userSkills": [
+        "fixture-skill"
+      ]
+    },
+    "inlineMediaSha256": "bd54b02fae14b6b9ed73887ded339b8ef846fbcba0d4e5f9d95470ac23ade242",
+    "ossHost": "fixture.invalid",
+    "schemaVersion": 1,
+    "skillResourceSha256": "912c7c8ce6c525ab77397692fcb53c395f7f2ac3a8467d9ee687489ae9288bfc"
+  },
+  "fixtureCounts": {
+    "agentCanvasReceipts": 1,
+    "agentGenerationBatches": 1,
+    "agentMessages": 2,
+    "agentReceipts": 1,
+    "agentTasks": 2,
+    "deletedNodes": 1,
+    "folders": 1,
+    "mediaFiles": 2,
+    "projects": 2,
+    "saveReceipts": 1,
+    "scriptRequests": 2,
+    "scriptTasks": 2,
+    "userSkillResources": 1,
+    "userSkills": 1
+  },
+  "fixtureSha256": "8d712164115eb7926984e306dc7da25307d32b35328dbe6e32b2b4f8b7b01af8",
+  "importedCounts": {
+    "agentCanvasReceipts": 1,
+    "agentGenerationBatches": 1,
+    "agentMessages": 2,
+    "agentReceipts": 1,
+    "agentTasks": 2,
+    "deletedNodes": 1,
+    "folders": 1,
+    "mediaFiles": 2,
+    "projects": 2,
+    "saveReceipts": 1,
+    "scriptRequests": 2,
+    "scriptTasks": 2,
+    "userSkillResources": 1,
+    "userSkills": 1
+  },
+  "ownerId": "07f21c35-49f5-4733-b7b0-3756f7c6741d",
+  "ports": {
+    "postgres": 55440,
+    "rabbit": 55442,
+    "rabbit_management": 55443,
+    "redis": 55441
+  },
+  "productionGates": [
+    "production backup and destination confirmed",
+    "production provider credentialed smoke run",
+    "Go-only data disposition or reverse migration before rollback",
+    "operations monitoring and public account lifecycle"
+  ],
+  "rollback": {
+    "entry": {
+      "goOnlyProjectIdsVisible": [],
+      "legacyProjectIds": [
+        "fixture-project-active",
+        "fixture-project-trashed"
+      ],
+      "mode": "read-only"
+    },
+    "goOnlyDisposition": "Synthetic Go-only rows exported and reconciled, then deliberately discarded with disposable infrastructure; no production reverse migration is claimed."
+  },
+  "runId": "rehearsal_5f5da2682d20",
+  "sqliteSha256AfterGoWrites": "ec6efaf140c0ba0690bb1ada4cadf7f6a5111c51e9903b582544966e199195da",
+  "startedAt": 1795183884.218714,
+  "startupAttempts": [
+    "pass"
+  ]
+}

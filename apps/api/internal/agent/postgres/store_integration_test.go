@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -478,7 +479,7 @@ func TestAgentDeliveryWritesSavedResultToCanvasOnce(t *testing.T) {
 			if mode == "existing" {
 				image = `"imageSrc":"https://assets.example/old.png",`
 			}
-			canvas := json.RawMessage(fmt.Sprintf(`{"name":"Canvas","nodes":[{"id":"image-1","type":"image","position":{"x":0,"y":0},"data":{"type":"textToImage",%s"prompt":"cat"}}],"edges":[],"viewport":{"x":0,"y":0,"zoom":1},"history":{"schema":1}}`, image))
+			canvas := json.RawMessage(fmt.Sprintf(`{"name":"Canvas","nodes":[{"id":"image-1","type":"image","position":{"x":0,"y":0},"data":{"type":"textToImage",%s"prompt":"cat","externalId":9007199254740993}}],"edges":[],"viewport":{"x":0,"y":0,"zoom":1},"history":{"schema":1}}`, image))
 			if _, err := resources.SaveCanvas(ctx, owner, project, resource.SaveCanvas{RequestID: "setup-delivery", BaseVersion: 1, Snapshot: canvas}); err != nil {
 				t.Fatal(err)
 			}
@@ -541,6 +542,9 @@ func TestAgentDeliveryWritesSavedResultToCanvasOnce(t *testing.T) {
 			}
 			if err = json.Unmarshal([]byte(saved), &graph); err != nil {
 				t.Fatal(err)
+			}
+			if mode != "deleted" && !strings.Contains(saved, `9007199254740993`) {
+				t.Fatalf("large canvas identifier changed during delivery: %s", saved)
 			}
 			expected := 1
 			if mode == "existing" {

@@ -6,17 +6,27 @@ The raw SQLite and export are removed on exit; sanitized evidence remains in --r
 """
 
 import argparse
+import base64
+from contextlib import contextmanager
 import hashlib
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 import re
 import secrets
 import shutil
 import socket
+import sqlite3
 import subprocess
+import sys
 import tempfile
+from threading import Thread
 import time
+from urllib.request import urlopen
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from rehearsal_legacy_fixture import EXTERNAL_MEDIA_BYTES
 
 ROOT = Path(__file__).resolve().parents[3]
 API = ROOT / "apps/api"
@@ -62,7 +72,9 @@ def run(args, *, env=None, cwd=ROOT, capture=True):
                             stdout=subprocess.PIPE if capture else None,
                             stderr=subprocess.STDOUT if capture else None)
     if result.returncode:
-        raise RuntimeError(f"{args[0]} failed ({result.returncode}): {(result.stdout or '')[-3000:]}")
+        output = result.stdout or ""
+        failures = [line for line in output.splitlines() if "--- FAIL:" in line or "_test.go:" in line or line.startswith("FAIL")]
+        raise RuntimeError(f"{args[0]} failed ({result.returncode}): {'; '.join(failures)[:3000] or output[-3000:]}")
     return result.stdout or ""
 
 
@@ -78,6 +90,68 @@ def validate_identity(run_id, env):
     ports = [int(env[key]) for key in ("POSTGRES_PORT", "REDIS_PORT", "RABBITMQ_PORT", "RABBITMQ_MANAGEMENT_PORT")]
     if len(set(ports)) != 4 or any(port <= 1024 or port in {5432, 6379, 5672, 15672, 15432, 16379, 15673} for port in ports):
         raise ValueError("unsafe or shared service port")
+
+
+@contextmanager
+def external_media_fixture():
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path != "/fixture/video.mp4":
+                self.send_error(404)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "video/mp4")
+            self.send_header("Content-Length", str(len(EXTERNAL_MEDIA_BYTES)))
+            self.end_headers()
+            self.wfile.write(EXTERNAL_MEDIA_BYTES)
+
+        def log_message(self, *_):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}/fixture/video.mp4"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def verify_imported_media(inline_url, external_url, expected_external_url, manifest):
+    if external_url != expected_external_url or not inline_url.startswith("data:image/png;base64,"):
+        return False
+    try:
+        inline = base64.b64decode(inline_url.split(",", 1)[1], validate=True)
+        with urlopen(external_url, timeout=5) as response:
+            external = response.read(len(EXTERNAL_MEDIA_BYTES) + 1)
+    except Exception:
+        return False
+    return (hashlib.sha256(inline).hexdigest() == manifest["inlineMediaSha256"]
+            and hashlib.sha256(external).hexdigest() == manifest["externalMediaSha256"])
+
+
+def restore_legacy_read_entry(database, legacy_project_ids, go_project_ids):
+    """Reopen the disposable pre-cutover entry without permitting a new writer."""
+    uri = database.resolve().as_uri() + "?mode=ro&immutable=1"
+    with sqlite3.connect(uri, uri=True) as connection:
+        connection.execute("PRAGMA query_only=ON")
+        found_legacy = sorted(row[0] for row in connection.execute(
+            "SELECT id FROM workflows WHERE id IN (" + ",".join("?" for _ in legacy_project_ids) + ")",
+            legacy_project_ids))
+        visible_go = sorted(row[0] for row in connection.execute(
+            "SELECT id FROM workflows WHERE id IN (" + ",".join("?" for _ in go_project_ids) + ")",
+            go_project_ids)) if go_project_ids else []
+        if found_legacy != sorted(legacy_project_ids) or visible_go:
+            raise RuntimeError("restored legacy entry differs from pre-cutover state")
+        try:
+            connection.execute("INSERT INTO workflows(id,data) VALUES('forbidden-rollback-write','{}')")
+        except sqlite3.OperationalError:
+            pass
+        else:
+            raise RuntimeError("legacy rollback entry accepted a write")
+    return {"legacyProjectIds": found_legacy, "goOnlyProjectIdsVisible": visible_go, "mode": "read-only"}
 
 
 def main():
@@ -116,7 +190,7 @@ def main():
                     "production backup and destination confirmed", "production provider credentialed smoke run",
                     "Go-only data disposition or reverse migration before rollback", "operations monitoring and public account lifecycle"]}
     report.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix=run_id + "_") as tmp:
+    with tempfile.TemporaryDirectory(prefix=run_id + "_") as tmp, external_media_fixture() as media_url:
         fixture_dir = Path(tmp) / ("go-cutover-" + run_id.removeprefix("rehearsal_"))
         legacy_db = fixture_dir / "legacy.sqlite"
         export = fixture_dir / "legacy-export.json"
@@ -132,7 +206,8 @@ def main():
                     if attempt == 1:
                         raise
             evidence["cases"]["isolated_services"] = "pass"
-            run(["python3", str(API / "scripts/rehearsal_legacy_fixture.py"), "--run-id", run_id.removeprefix("rehearsal_"), "--run-dir", str(fixture_dir)])
+            run(["python3", str(API / "scripts/rehearsal_legacy_fixture.py"), "--run-id", run_id.removeprefix("rehearsal_"), "--run-dir", str(fixture_dir), "--media-url", media_url])
+            env["REHEARSAL_MEDIA_URL"] = media_url
             evidence["fixture"] = json.loads((fixture_dir / "fixture-manifest.json").read_text())
             before_sqlite_digest = hashlib.sha256(legacy_db.read_bytes()).hexdigest()
             evidence["fixtureSha256"] = hashlib.sha256(export.read_bytes()).hexdigest()
@@ -174,7 +249,7 @@ def main():
             evidence["cases"]["skill_binary_content_and_owner"] = "pass" if hashlib.sha256(bytes.fromhex(skill_hex)).hexdigest() == evidence["fixture"]["skillResourceSha256"] else "fail: skill resource differs"
             inline_url = pg(compose, env, "SELECT url FROM media_assets WHERE id='fixture-media-inline' AND owner_id='" + owner + "'")
             oss_url = pg(compose, env, "SELECT url FROM media_assets WHERE id='fixture-media-oss' AND owner_id='" + owner + "'")
-            evidence["cases"]["media_content_ids_and_owner"] = "pass" if inline_url.startswith("data:image/") and oss_url == "https://fixture.invalid/fixture/video.mp4" else "fail: imported media differs"
+            evidence["cases"]["media_content_ids_and_owner"] = "pass" if verify_imported_media(inline_url, oss_url, media_url, evidence["fixture"]) else "fail: imported media bytes differ"
             legacy_status = pg(compose, env, "SELECT status || ':' || legacy_imported FROM agent_tasks WHERE id='44444444-4444-4444-8444-444444444444'")
             no_legacy_outbox = pg(compose, env, "SELECT count(*) FROM agent_outbox") == "0" and pg(compose, env, "SELECT count(*) FROM generation_outbox") == "0"
             evidence["cases"]["old_confirmation_interrupted_without_requeue"] = "pass" if legacy_status == "interrupted:true" and no_legacy_outbox else "fail: old task may be executable"
@@ -184,12 +259,12 @@ def main():
                     run(["go", "test", "-tags=integration", "-count=1", "./internal/...", "-run", "^(" + pattern + ")$"], cwd=API, env=env)
                     evidence["cases"][name] = "pass"
                 except Exception as exc:
-                    evidence["cases"][name] = "fail: " + str(exc)[-600:]
+                    evidence["cases"][name] = "fail: " + str(exc)[-3000:]
             try:
                 run(["go", "test", "-tags=integration", "-count=1", "./internal/httpserver", "-run", "^TestImportedCutoverAPIJourney$"], cwd=API, env=env)
                 evidence["cases"]["imported_api_journey"] = "pass"
             except Exception as exc:
-                evidence["cases"]["imported_api_journey"] = "fail: " + str(exc)[-600:]
+                evidence["cases"]["imported_api_journey"] = "fail: " + str(exc)[-3000:]
             after = pg(compose, env, "SELECT count(*) FROM projects")
             evidence["delta"] = {"projectsBefore": int(baseline), "projectsAfter": int(after),
                                  "goOnlyProjectIds": pg(compose, env, "SELECT coalesce(string_agg(id,',' ORDER BY id),'') FROM projects WHERE id LIKE 'go-rehearsal-%'").split(","),
@@ -203,6 +278,25 @@ def main():
             evidence["cases"]["stop_and_delta_manifest"] = "pass" if int(after) > int(baseline) and not go_ids.intersection(legacy_ids) and evidence["delta"]["deliveredGenerationCount"] > 0 else "fail: Go-only data not reconciled"
             evidence["sqliteSha256AfterGoWrites"] = hashlib.sha256(legacy_db.read_bytes()).hexdigest()
             evidence["cases"]["single_writer_sqlite_unchanged"] = "pass" if evidence["sqliteSha256AfterGoWrites"] == before_sqlite_digest else "fail: legacy SQLite changed"
+            # The API/worker journey has stopped. Export its synthetic Go-only
+            # rows before switching back to the immutable legacy entry.
+            delta_export = {
+                "projects": json.loads(pg(compose, env, "SELECT coalesce(json_agg(t),'[]'::json) FROM (SELECT id,owner_id,name,snapshot,version FROM projects WHERE id LIKE 'go-rehearsal-%' ORDER BY id) t")),
+                "agentTasks": json.loads(pg(compose, env, "SELECT coalesce(json_agg(t),'[]'::json) FROM (SELECT id,project_id,status FROM agent_tasks WHERE legacy_imported=false ORDER BY id) t")),
+                "generationTasks": json.loads(pg(compose, env, "SELECT coalesce(json_agg(t),'[]'::json) FROM (SELECT id,project_id,status,result_url FROM generation_tasks ORDER BY id) t")),
+                "scriptTasks": json.loads(pg(compose, env, "SELECT coalesce(json_agg(t),'[]'::json) FROM (SELECT id,project_id,status,text FROM script_tasks WHERE request_id='rehearsal-script' ORDER BY id) t")),
+            }
+            delta_bytes = json.dumps(delta_export, sort_keys=True, separators=(",", ":")).encode()
+            delta_path = Path(tmp) / "go-only-delta.json"
+            delta_path.write_bytes(delta_bytes)
+            delta_path.chmod(0o600)
+            reconciled = (sorted(row["id"] for row in delta_export["projects"]) == sorted(go_ids)
+                          and sorted(row["id"] for row in delta_export["generationTasks"]) == sorted(x for x in evidence["delta"]["goGenerationTaskIds"] if x))
+            evidence["deltaExportSha256"] = hashlib.sha256(delta_path.read_bytes()).hexdigest()
+            evidence["cases"]["go_only_export_reconciled"] = "pass" if reconciled else "fail: Go-only export IDs differ"
+            restored = restore_legacy_read_entry(legacy_db, sorted(legacy_ids), sorted(go_ids))
+            evidence["rollback"] = {"entry": restored, "goOnlyDisposition": "Synthetic Go-only rows exported and reconciled, then deliberately discarded with disposable infrastructure; no production reverse migration is claimed."}
+            evidence["cases"]["legacy_read_only_entry_restored"] = "pass" if restored["mode"] == "read-only" and hashlib.sha256(legacy_db.read_bytes()).hexdigest() == before_sqlite_digest else "fail: legacy entry not restored"
         except Exception as exc:
             evidence["fatal"] = str(exc)[-1500:]
         finally:

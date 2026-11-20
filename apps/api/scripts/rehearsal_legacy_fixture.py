@@ -29,6 +29,7 @@ MESSAGE_DONE = "55555555-5555-4555-8555-555555555555"
 MESSAGE_WAITING = "66666666-6666-4666-8666-666666666666"
 SKILL_BYTES = b"\x00\xfffixture skill resource\n"
 MEDIA_BYTES = b"\x89PNG\r\n\x1a\nfixture"
+EXTERNAL_MEDIA_BYTES = b"\x00\x00\x00\x18ftypmp42fixture-video"
 
 
 def compact(value):
@@ -50,7 +51,7 @@ def initialize_application_schema(database):
     )
 
 
-def seed(database):
+def seed(database, media_url="https://fixture.invalid/fixture/video.mp4"):
     active_canvas = {"name": "Fixture active", "nodes": [
         {"id": "fixture-script-node", "type": "script", "position": {"x": 40, "y": 50}, "data": {"prompt": "Fixture scene"}},
         {"id": "fixture-text-node", "type": "text", "position": {"x": 350, "y": 50}, "data": {"text": "Saved scene"}},
@@ -69,7 +70,7 @@ def seed(database):
         db.execute("INSERT INTO workflows(id,name,data,created_at,updated_at,version,deleted_at,folder_id,purged_at,cover_url,node_count) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                    (TRASHED, "Fixture trashed", compact(trashed_canvas), STAMP, STAMP + 3, 2, STAMP + 3, None, None, None, 0))
         db.execute("INSERT INTO media_files VALUES(?,?,?,?,?,?)", ("fixture-media-inline", "image", None, base64.b64encode(MEDIA_BYTES).decode(), len(MEDIA_BYTES), STAMP))
-        db.execute("INSERT INTO media_files VALUES(?,?,?,?,?,?)", ("fixture-media-oss", "video", "https://fixture.invalid/fixture/video.mp4", None, 123, STAMP))
+        db.execute("INSERT INTO media_files VALUES(?,?,?,?,?,?)", ("fixture-media-oss", "video", media_url, None, len(EXTERNAL_MEDIA_BYTES), STAMP))
         db.execute("INSERT INTO canvas_save_receipts VALUES(?,?,?,?)", (PROJECT, "fixture-save-request", "fixture-save-digest", 3))
         db.execute("INSERT INTO canvas_deleted_nodes VALUES(?,?)", (PROJECT, "fixture-deleted-node"))
         for task_id, request_id, status, text, pipeline, output_saved, phase, revision in [
@@ -92,7 +93,7 @@ def seed(database):
         db.execute("INSERT INTO user_skill_resources VALUES(?,?,?,?)", ("local-user-v1", "fixture-skill", "assets/reference.bin", SKILL_BYTES))
 
 
-def create_fixture(run_id, run_dir):
+def create_fixture(run_id, run_dir, media_url="https://fixture.invalid/fixture/video.mp4"):
     if not re.fullmatch(r"[a-z0-9]{6,32}", run_id):
         raise ValueError("run ID must be 6-32 lowercase letters or digits")
     run_dir = Path(run_dir)
@@ -104,7 +105,7 @@ def create_fixture(run_id, run_dir):
     database = run_dir / "legacy.sqlite"
     exported = run_dir / "legacy-export.json"
     initialize_application_schema(database)
-    seed(database)
+    seed(database, media_url)
     subprocess.run(["python3", str(Path(__file__).with_name("export_legacy_resources.py")), "--database", str(database), "--output", str(exported)], check=True)
     content = exported.read_bytes()
     payload = json.loads(content)
@@ -114,6 +115,7 @@ def create_fixture(run_id, run_dir):
         "exportSha256": hashlib.sha256(content).hexdigest(),
         "skillResourceSha256": hashlib.sha256(SKILL_BYTES).hexdigest(),
         "inlineMediaSha256": hashlib.sha256(MEDIA_BYTES).hexdigest(),
+        "externalMediaSha256": hashlib.sha256(EXTERNAL_MEDIA_BYTES).hexdigest(),
         "counts": {key: len(value) for key, value in payload.items() if isinstance(value, list)},
         "ids": {key: sorted(str(row.get("id", row.get("name", row.get("request_id", "")))) for row in value)
                 for key, value in payload.items() if isinstance(value, list)},
@@ -129,8 +131,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--run-dir", required=True, type=Path)
+    parser.add_argument("--media-url", default="https://fixture.invalid/fixture/video.mp4")
     args = parser.parse_args()
-    create_fixture(args.run_id, args.run_dir)
+    create_fixture(args.run_id, args.run_dir, args.media_url)
 
 
 if __name__ == "__main__":

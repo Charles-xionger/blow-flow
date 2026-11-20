@@ -14,12 +14,12 @@ type Providers struct {
 }
 
 func (p Providers) Submit(ctx context.Context, in generation.Input) (string, error) {
-	switch in.Model {
-	case generation.Krea2Model:
+	switch generation.RouteForModel(in.Model) {
+	case "runninghub-image":
 		return p.RunningHub.Submit(ctx, in)
-	case generation.H3Model:
+	case "runninghub-video":
 		return (H3{p.RunningHub}).Submit(ctx, in)
-	case generation.Seedream55Model, generation.Seedream50Model:
+	case "seedream":
 		return p.Seedream.Submit(ctx, in)
 	default:
 		return p.submitWorkflow(ctx, in)
@@ -33,7 +33,7 @@ func (p Providers) QueryInput(ctx context.Context, in generation.Input, id strin
 	return (Krea2{BaseURL: m.Connection.BaseURL, APIKey: os.Getenv(m.Connection.APIKeyEnv), Client: p.RunningHub.Client}).query(ctx, id, m.OutputNode, m.Category == "VIDEO")
 }
 func (p Providers) SubmitTask(ctx context.Context, taskID string, in generation.Input) (string, error) {
-	if in.Model == generation.GeminiImageModel {
+	if generation.RouteForModel(in.Model) == "gemini" {
 		return p.Gemini.SubmitTask(ctx, taskID, in)
 	}
 	return p.Submit(ctx, in)
@@ -42,16 +42,16 @@ func (p Providers) Query(ctx context.Context, id string) (Observation, error) {
 	return p.RunningHub.Query(ctx, id)
 }
 func (p Providers) QueryModel(ctx context.Context, model, id string) (Observation, error) {
-	switch model {
-	case generation.H3Model:
+	switch generation.RouteForModel(model) {
+	case "runninghub-video":
 		return (H3{p.RunningHub}).Query(ctx, id)
-	case generation.Seedream55Model, generation.Seedream50Model:
+	case "seedream":
 		parts := strings.SplitN(strings.TrimPrefix(id, "direct:"), ":", 2)
 		if !strings.HasPrefix(id, "direct:") || len(parts) != 2 {
 			return Observation{}, generation.ErrInvalid
 		}
 		return Observation{OutputURL: parts[1], FileType: parts[0]}, nil
-	case generation.GeminiImageModel:
+	case "gemini":
 		if !strings.HasPrefix(id, "inline:") || p.Gemini.Stage == nil {
 			return Observation{}, generation.ErrInvalid
 		}

@@ -1,4 +1,8 @@
 import importlib.util
+import hashlib
+import base64
+import sqlite3
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -9,6 +13,27 @@ spec.loader.exec_module(module)
 
 
 class IsolationTest(unittest.TestCase):
+    def test_rollback_entry_reopens_legacy_read_only_and_excludes_go_delta(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            database = Path(temporary) / "legacy.sqlite"
+            with sqlite3.connect(database) as connection:
+                connection.execute("CREATE TABLE workflows(id TEXT PRIMARY KEY, data TEXT)")
+                connection.execute("INSERT INTO workflows VALUES('legacy-project', '{}')")
+            restored = module.restore_legacy_read_entry(database, ["legacy-project"], ["go-project"])
+            self.assertEqual(restored["legacyProjectIds"], ["legacy-project"])
+            self.assertEqual(restored["goOnlyProjectIdsVisible"], [])
+
+    def test_external_media_bytes_are_fetched_and_checked(self):
+        inline = b"\x89PNG\r\n\x1a\nfixture"
+        video = b"\x00\x00\x00\x18ftypmp42fixture-video"
+        manifest = {"inlineMediaSha256": hashlib.sha256(inline).hexdigest(),
+                    "externalMediaSha256": hashlib.sha256(video).hexdigest()}
+        inline_url = "data:image/png;base64," + base64.b64encode(inline).decode()
+        with module.external_media_fixture() as url:
+            self.assertTrue(module.verify_imported_media(inline_url, url, url, manifest))
+            self.assertFalse(module.verify_imported_media(inline_url, url, url, {**manifest, "externalMediaSha256": "0" * 64}))
+            self.assertFalse(module.verify_imported_media(inline_url, url, url + "?other", manifest))
+
     def test_accepts_only_run_specific_project_volumes_and_ports(self):
         run_id = "rehearsal_012345abcdef"
         env = {"COMPOSE_PROJECT_NAME": run_id, "POSTGRES_VOLUME_NAME": run_id + "_postgres",
