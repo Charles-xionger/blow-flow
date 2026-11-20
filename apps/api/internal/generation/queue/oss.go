@@ -50,7 +50,14 @@ func (o OSS) Save(ctx context.Context, source, taskID, fileType string) (string,
 	if fileType == "jpg" || fileType == "jpeg" {
 		ext, contentType = "jpeg", "image/jpeg"
 	}
-	key := "images/generation/" + taskID + "/0." + ext
+	if fileType == "mp4" {
+		ext, contentType = "mp4", "video/mp4"
+	}
+	prefix := "images"
+	if fileType == "mp4" {
+		prefix = "videos"
+	}
+	key := prefix + "/generation/" + taskID + "/0." + ext
 	sdk := o.sdk()
 	headCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	_, headErr := sdk.HeadObject(headCtx, &aliyunoss.HeadObjectRequest{Bucket: aliyunoss.Ptr(o.Bucket), Key: aliyunoss.Ptr(key)})
@@ -83,21 +90,57 @@ func (o OSS) Save(ctx context.Context, source, taskID, fileType string) (string,
 	if download.StatusCode != 200 {
 		return "", fmt.Errorf("provider file HTTP %d", download.StatusCode)
 	}
-	const maxImage = 50 << 20
-	content, err := io.ReadAll(io.LimitReader(download.Body, maxImage+1))
+	maxArtifact := int64(50 << 20)
+	if fileType == "mp4" {
+		maxArtifact = 200 << 20
+	}
+	content, err := io.ReadAll(io.LimitReader(download.Body, maxArtifact+1))
 	if err != nil {
 		return "", err
 	}
-	if len(content) == 0 || len(content) > maxImage {
+	if len(content) == 0 || int64(len(content)) > maxArtifact {
 		return "", errors.New("invalid image size")
 	}
 	detected := http.DetectContentType(content)
-	if detected != contentType {
+	if detected != contentType && !(fileType == "mp4" && (detected == "application/octet-stream" || detected == "video/mp4")) {
 		return "", errors.New("provider file format mismatch")
 	}
 	uploadCtx, cancelUpload := context.WithTimeout(ctx, 60*time.Second)
 	defer cancelUpload()
 	_, err = sdk.PutObject(uploadCtx, &aliyunoss.PutObjectRequest{Bucket: aliyunoss.Ptr(o.Bucket), Key: aliyunoss.Ptr(key), Body: bytes.NewReader(content), ContentType: aliyunoss.Ptr(contentType)})
+	if err != nil {
+		return "", err
+	}
+	return o.objectURL(key), nil
+}
+func (o OSS) SaveBytes(ctx context.Context, taskID, fileType string, content []byte) (string, error) {
+	if o.Region == "" || o.Bucket == "" || o.AccessKeyID == "" || o.AccessKeySecret == "" {
+		return "", errors.New("OSS unconfigured")
+	}
+	contentType := "image/png"
+	if fileType == "jpeg" {
+		contentType = "image/jpeg"
+	} else if fileType != "png" {
+		return "", errors.New("invalid inline image type")
+	}
+	if len(content) == 0 || len(content) > 50<<20 || http.DetectContentType(content) != contentType {
+		return "", errors.New("invalid inline image")
+	}
+	key := "images/generation/" + taskID + "/0." + fileType
+	sdk := o.sdk()
+	headCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	_, headErr := sdk.HeadObject(headCtx, &aliyunoss.HeadObjectRequest{Bucket: aliyunoss.Ptr(o.Bucket), Key: aliyunoss.Ptr(key)})
+	cancel()
+	if headErr == nil {
+		return o.objectURL(key), nil
+	}
+	var serviceErr *aliyunoss.ServiceError
+	if !errors.As(headErr, &serviceErr) || serviceErr.StatusCode != 404 {
+		return "", headErr
+	}
+	uploadCtx, cancelUpload := context.WithTimeout(ctx, 60*time.Second)
+	defer cancelUpload()
+	_, err := sdk.PutObject(uploadCtx, &aliyunoss.PutObjectRequest{Bucket: aliyunoss.Ptr(o.Bucket), Key: aliyunoss.Ptr(key), Body: bytes.NewReader(content), ContentType: aliyunoss.Ptr(contentType)})
 	if err != nil {
 		return "", err
 	}

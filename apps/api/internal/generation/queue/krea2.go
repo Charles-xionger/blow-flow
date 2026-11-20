@@ -31,7 +31,7 @@ type nodeOverride struct {
 }
 
 func (p Krea2) Submit(ctx context.Context, input generation.Input) (string, error) {
-	if input.Model != "runninghub/krea2" || strings.TrimSpace(input.Prompt) == "" || input.Width < 64 || input.Width > 8192 || input.Height < 64 || input.Height > 8192 || input.Width%8 != 0 || input.Height%8 != 0 || input.Seed < 0 || len(input.ReferenceIDs) > 0 {
+	if input.Model != generation.Krea2Model || !generation.ValidInput(input) {
 		return "", generation.ErrInvalid
 	}
 	if p.BaseURL == "" || p.APIKey == "" {
@@ -54,11 +54,12 @@ func (p Krea2) Submit(ctx context.Context, input generation.Input) (string, erro
 		return "", err
 	}
 	body, err := json.Marshal(struct {
-		APIKey     string         `json:"apiKey"`
-		WorkflowID string         `json:"workflowId"`
-		Workflow   string         `json:"workflow"`
-		Nodes      []nodeOverride `json:"nodeInfoList"`
-	}{p.APIKey, "2109340746494357505", string(workflow), overrides})
+		APIKey       string         `json:"apiKey"`
+		WorkflowID   string         `json:"workflowId"`
+		Workflow     string         `json:"workflow"`
+		Nodes        []nodeOverride `json:"nodeInfoList"`
+		InstanceType string         `json:"instanceType,omitempty"`
+	}{p.APIKey, "2109340746494357505", string(workflow), overrides, input.InstanceType})
 	if err != nil {
 		return "", err
 	}

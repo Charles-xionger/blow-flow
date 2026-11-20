@@ -1,0 +1,86 @@
+package queue
+
+import (
+	"blow-flow/api/internal/generation"
+	"context"
+	"strings"
+)
+
+type Providers struct {
+	RunningHub Krea2
+	Seedream   Seedream
+	Gemini     Gemini
+}
+
+func (p Providers) Submit(ctx context.Context, in generation.Input) (string, error) {
+	switch in.Model {
+	case generation.Krea2Model:
+		return p.RunningHub.Submit(ctx, in)
+	case generation.H3Model:
+		return (H3{p.RunningHub}).Submit(ctx, in)
+	case generation.Seedream55Model, generation.Seedream50Model:
+		return p.Seedream.Submit(ctx, in)
+	default:
+		return "", generation.ErrInvalid
+	}
+}
+func (p Providers) SubmitTask(ctx context.Context, taskID string, in generation.Input) (string, error) {
+	if in.Model == generation.GeminiImageModel {
+		return p.Gemini.SubmitTask(ctx, taskID, in)
+	}
+	return p.Submit(ctx, in)
+}
+func (p Providers) Query(ctx context.Context, id string) (Observation, error) {
+	return p.RunningHub.Query(ctx, id)
+}
+func (p Providers) QueryModel(ctx context.Context, model, id string) (Observation, error) {
+	switch model {
+	case generation.H3Model:
+		return (H3{p.RunningHub}).Query(ctx, id)
+	case generation.Seedream55Model, generation.Seedream50Model:
+		parts := strings.SplitN(strings.TrimPrefix(id, "direct:"), ":", 2)
+		if !strings.HasPrefix(id, "direct:") || len(parts) != 2 {
+			return Observation{}, generation.ErrInvalid
+		}
+		return Observation{OutputURL: parts[1], FileType: parts[0]}, nil
+	case generation.GeminiImageModel:
+		if !strings.HasPrefix(id, "inline:") || p.Gemini.Stage == nil {
+			return Observation{}, generation.ErrInvalid
+		}
+		_, fileType, err := p.Gemini.Stage.InlineResult(ctx, strings.TrimPrefix(id, "inline:"))
+		if err != nil {
+			return Observation{}, err
+		}
+		if fileType != "png" && fileType != "jpeg" {
+			return Observation{}, generation.ErrInvalid
+		}
+		return Observation{OutputURL: id, FileType: fileType}, nil
+	default:
+		return p.RunningHub.Query(ctx, id)
+	}
+}
+
+type Artifacts struct {
+	OSS   OSS
+	Stage InlineStager
+}
+
+func (a Artifacts) Save(ctx context.Context, source, taskID, fileType string) (string, error) {
+	if strings.HasPrefix(source, "inline:") {
+		if a.Stage == nil || strings.TrimPrefix(source, "inline:") != taskID {
+			return "", generation.ErrInvalid
+		}
+		body, storedType, err := a.Stage.InlineResult(ctx, taskID)
+		if err != nil {
+			return "", err
+		}
+		if fileType != storedType {
+			return "", generation.ErrInvalid
+		}
+		return a.OSS.SaveBytes(ctx, taskID, fileType, body)
+	}
+	return a.OSS.Save(ctx, source, taskID, fileType)
+}
+func (p Providers) Watch(ctx context.Context, url string, emit func(Progress) error) error {
+	return p.RunningHub.Watch(ctx, url, emit)
+}

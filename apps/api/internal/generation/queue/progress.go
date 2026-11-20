@@ -31,6 +31,12 @@ type Progress struct {
 
 // Query is authoritative for output. The socket can only suggest that this query is due.
 func (p Krea2) Query(ctx context.Context, taskID string) (Observation, error) {
+	return p.query(ctx, taskID, "103", false)
+}
+func (p H3) Query(ctx context.Context, taskID string) (Observation, error) {
+	return p.Krea2.query(ctx, taskID, "148", true)
+}
+func (p Krea2) query(ctx context.Context, taskID, outputNode string, video bool) (Observation, error) {
 	if taskID == "" || p.BaseURL == "" || p.APIKey == "" {
 		return Observation{}, generation.ErrInvalid
 	}
@@ -89,7 +95,7 @@ func (p Krea2) Query(ctx context.Context, taskID string) (Observation, error) {
 			NodeID   string `json:"nodeId"`
 		}
 		for i := range files {
-			if files[i].NodeID == "103" {
+			if files[i].NodeID == outputNode {
 				output = &files[i]
 				break
 			}
@@ -101,10 +107,14 @@ func (p Krea2) Query(ctx context.Context, taskID string) (Observation, error) {
 		if err != nil || u.Scheme != "https" || u.Host == "" {
 			return Observation{}, errors.New("runninghub returned invalid result URL")
 		}
-		if output.FileType != "png" && output.FileType != "jpg" && output.FileType != "jpeg" {
+		if (!video && output.FileType != "png" && output.FileType != "jpg" && output.FileType != "jpeg") || (video && output.FileType != "mp4" && output.FileType != "video/mp4") {
 			return Observation{}, errors.New("runninghub returned unsupported image format")
 		}
-		return Observation{OutputURL: output.FileURL, FileType: output.FileType}, nil
+		fileType := output.FileType
+		if video {
+			fileType = "mp4"
+		}
+		return Observation{OutputURL: output.FileURL, FileType: fileType}, nil
 	}
 	var pending struct {
 		NetWSSURL  string `json:"netWssUrl"`
