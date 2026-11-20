@@ -157,7 +157,7 @@ func TestOperationsAuditsAdminReadAndReportsBacklog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if view.QueueLength != 1 || len(view.Workers) != 1 || len(view.Circuits) != 3 {
+	if view.QueueLength != 1 || len(view.Workers) != 1 || len(view.Circuits) != 9 {
 		t.Fatalf("operations=%+v", view)
 	}
 	var n int64
