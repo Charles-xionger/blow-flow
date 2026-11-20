@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
+	"net/url"
 	"os"
 	"strings"
 )
@@ -30,6 +30,7 @@ type WorkflowSnapshot struct {
 type WorkflowNode struct {
 	Inputs    map[string]any `json:"inputs"`
 	ClassType string         `json:"class_type"`
+	Meta      map[string]any `json:"_meta,omitempty"`
 }
 type WorkflowField struct {
 	NodeID    string `json:"nodeId"`
@@ -127,7 +128,8 @@ func validWorkflowSnapshot(m *WorkflowSnapshot) bool {
 	if m == nil || m.ID == "" || m.Version == "" || m.Adapter != "runninghub-workflow" || (m.Category != "IMAGE" && m.Category != "VIDEO") || m.WorkflowID == "" || m.Connection.ID == "" || m.Connection.ID != m.ConnectionID || m.Connection.BaseURL == "" || m.Connection.APIKeyEnv == "" || m.Connection.Concurrency < 1 || m.Connection.RequestTimeoutMS < 1 || m.Connection.PollIntervalMS < 1 || m.Connection.QueryTimeoutMS < 1 || m.Connection.MaxQueryErrors < 1 {
 		return false
 	}
-	if !strings.HasPrefix(m.Connection.BaseURL, "https://") && !strings.HasPrefix(m.Connection.BaseURL, "http://") {
+	u, err := url.Parse(m.Connection.BaseURL)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
 		return false
 	}
 	if len(m.Workflow) == 0 || len(m.Workflow) > 5000 || m.Workflow[m.OutputNode].Inputs == nil || !m.Capabilities.Prompt {
@@ -152,7 +154,7 @@ func validWorkflowSnapshot(m *WorkflowSnapshot) bool {
 	}
 	if m.Category == "VIDEO" {
 		v := m.Capabilities.Video
-		if v == nil || v.MinDuration < 1 || v.MaxDuration < v.MinDuration || v.FPS < 1 || m.References == nil {
+		if v == nil || v.MinDuration < 1 || v.MaxDuration < v.MinDuration || v.FPS < 1 || m.References == nil || !m.Capabilities.ReferenceImages || m.Workflow[m.References.NodeID].Inputs == nil || m.Workflow[m.References.ImageLoader].Inputs == nil || m.Workflow[m.References.VideoLoader].Inputs == nil || m.Workflow[m.References.AudioLoader].Inputs == nil {
 			return false
 		}
 		f, ok := m.Mapping["duration"]
@@ -166,7 +168,7 @@ func validWorkflowSnapshot(m *WorkflowSnapshot) bool {
 		if _, ok = n.Inputs[f.FieldName]; !ok {
 			return false
 		}
-	} else if m.Capabilities.Video != nil || m.References != nil {
+	} else if m.Capabilities.Video != nil || m.References != nil || m.Capabilities.ReferenceImages {
 		return false
 	}
 	var scan func(any) bool
@@ -218,25 +220,3 @@ func ValidWorkflowInput(in Input) bool {
 	}
 	return in.Duration >= v.MinDuration && in.Duration <= v.MaxDuration && counts["image"] <= v.MaxImages && counts["video"] <= v.MaxVideos && counts["audio"] <= v.MaxAudios
 }
-func ModelConfigured(modelID string) bool {
-	if ConnectionForModel(modelID) != "" {
-		return true
-	}
-	m, _, err := ResolveModel(modelID)
-	return err == nil && os.Getenv(m.Connection.APIKeyEnv) != ""
-}
-func ModelCategory(modelID string) string {
-	switch modelID {
-	case Krea2Model, Seedream55Model, Seedream50Model, GeminiImageModel:
-		return "IMAGE"
-	case H3Model:
-		return "VIDEO"
-	}
-	m, _, err := ResolveModel(modelID)
-	if err != nil {
-		return ""
-	}
-	return m.Category
-}
-
-var ErrInvalidWorkflow = errors.New("invalid workflow snapshot")
