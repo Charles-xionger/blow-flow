@@ -38,6 +38,52 @@ test('Go Pi host edits canvas through scoped HTTP store without SQLite', async (
   } finally { await mcp.close(); }
 });
 
+test('Go Pi host exposes scoped canvas tools and waits before editing existing content', async () => {
+  const node = { id: 'old', type: 'text', position: { x: 0, y: 0 }, data: { type: 'text', label: 'Original' } };
+  const snapshot = { name: 'Canvas', nodes: [node], edges: [], viewport: { x: 0, y: 0, zoom: 1 } };
+  let questioned;
+  let saves = 0;
+  const run = { isAlive: () => true, canvas: () => ({ read: async () => ({ snapshot, version: 1 }), deleted: async () => [], receipt: async () => undefined, save: async () => { saves++; return { version: 2 }; } }),
+    startStep: async (callId, name) => ({ callId, name, status: 'running', runId: 'run-1' }), finishStep: async () => {},
+    question: async value => { questioned = value; } };
+  const host = new GoPiHost(run, { id: 'task-1', projectId: 'project-1', runId: 'run-1' });
+  const mcp = await host.connectMcp('task-1');
+  try {
+    const tools = (await mcp.client.listTools()).tools;
+    assert.ok(tools.some(tool => tool.name === 'delete_canvas_nodes'));
+    assert.ok(tools.some(tool => tool.name === 'canvas_models'));
+    assert.ok(tools.find(tool => tool.name === 'edit_canvas').inputSchema.properties.operations.items.oneOf);
+    const result = await mcp.client.callTool({ name: 'edit_canvas', arguments: { _callId: 'edit-old', operations: [{ kind: 'update', id: 'old', data: { label: 'Changed' } }] } });
+    assert.equal(JSON.parse(result.content[0].text).waiting, true);
+    assert.deepEqual(questioned.scope, { kind: 'edit', ids: ['old'] });
+    assert.equal(saves, 0);
+  } finally { await mcp.close(); }
+});
+
+test('Go Pi host keeps a denied edit untouched and applies an approved deletion once', async () => {
+  const node = { id: 'old', type: 'text', position: { x: 0, y: 0 }, data: { type: 'text', label: 'Original' } };
+  let snapshot = { name: 'Canvas', nodes: [node], edges: [], viewport: { x: 0, y: 0, zoom: 1 } };
+  let version = 1;
+  let saves = 0;
+  const store = { read: async () => ({ snapshot, version }), deleted: async () => [], receipt: async () => undefined,
+    save: async (_project, _request, base, next, operations) => { assert.equal(base, version); assert.equal(operations[0].kind, 'delete'); saves++; snapshot = next; return { version: ++version }; } };
+  const run = { isAlive: () => true, canvas: () => store,
+    startStep: async (callId, name) => ({ callId, name, status: 'running', runId: 'run-1' }), finishStep: async () => {} };
+  const task = { id: 'task-1', projectId: 'project-1', runId: 'run-1', question: { id: 'question', scope: { kind: 'edit', ids: ['old'] }, answer: '改为新建节点' } };
+  const host = new GoPiHost(run, task);
+  const mcp = await host.connectMcp('task-1');
+  try {
+    const denied = await mcp.client.callTool({ name: 'edit_canvas', arguments: { _callId: 'denied', operations: [{ kind: 'update', id: 'old', data: { label: 'Changed' } }] } });
+    assert.equal(JSON.parse(denied.content[0].text).cancelled, true);
+    assert.equal(saves, 0);
+    task.question = { id: 'delete-question', scope: { kind: 'delete', ids: ['old'] }, answer: '确认删除' };
+    const removed = await mcp.client.callTool({ name: 'delete_canvas_nodes', arguments: { _callId: 'remove', ids: ['old'] } });
+    assert.equal(JSON.parse(removed.content[0].text).version, 2);
+    assert.deepEqual(snapshot.nodes, []);
+    assert.equal(saves, 1);
+  } finally { await mcp.close(); }
+});
+
 test('Go Pi host discovers account-scoped skills and reads instructions only on demand', async () => {
   let uploaded = [];
   const run = {

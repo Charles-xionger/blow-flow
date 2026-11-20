@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"regexp"
 	"strings"
 	"time"
 
@@ -141,9 +142,32 @@ func validCommand(input agent.Command) bool {
 	return false
 }
 
+var explicitDelete = regexp.MustCompile(`(?i)^(?:请)?删除(?:节点)?\s+(.+)$|^delete nodes?\s+(.+)$`)
+var deleteSeparators = regexp.MustCompile(`[、，,\s]+`)
+
+func requestedDeletion(text string) []string {
+	match := explicitDelete.FindStringSubmatch(strings.TrimSpace(text))
+	if match == nil {
+		return nil
+	}
+	value := match[1]
+	if value == "" {
+		value = match[2]
+	}
+	ids := deleteSeparators.Split(value, -1)
+	seen, out := map[string]bool{}, []string{}
+	for _, id := range ids {
+		if id != "" && !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
 func activeTask(tx *gorm.DB, project string) (taskRow, bool, error) {
 	var row taskRow
-	q := tx.Raw(`SELECT id,owner_id,project_id,model_id,status,question,created_at,updated_at FROM agent_tasks WHERE project_id=? AND status IN ('queued','running','waiting','interrupted') AND NOT legacy_imported FOR UPDATE`, project).Scan(&row)
+	q := tx.Raw(`SELECT id,owner_id,project_id,model_id,status,question,editable_node_ids,delete_grants,created_at,updated_at FROM agent_tasks WHERE project_id=? AND status IN ('queued','running','waiting','interrupted') AND NOT legacy_imported FOR UPDATE`, project).Scan(&row)
 	return row, q.RowsAffected > 0, q.Error
 }
 
@@ -248,12 +272,14 @@ func (s *Store) Command(ctx context.Context, owner, project string, input agent.
 		switch input.Action {
 		case "send":
 			referencedNodeIDs := make([]string, 0, len(input.References))
+			deletionIDs := requestedDeletion(input.Text)
 			for _, ref := range input.References {
 				if ref.NodeID != "" {
 					referencedNodeIDs = append(referencedNodeIDs, ref.NodeID)
 				}
 			}
 			grants, _ := json.Marshal(referencedNodeIDs)
+			deleteGrants, _ := json.Marshal(deletionIDs)
 			if found {
 				if err := cancelPendingGeneration(tx, row.ID, now); err != nil {
 					return err
@@ -273,6 +299,9 @@ func (s *Store) Command(ctx context.Context, owner, project string, input agent.
 				if err := tx.Exec(`UPDATE agent_tasks SET editable_node_ids=(SELECT COALESCE(jsonb_agg(DISTINCT value),'[]'::jsonb) FROM jsonb_array_elements_text(editable_node_ids || ?::jsonb) AS value),updated_at=? WHERE id=?`, string(grants), now, row.ID).Error; err != nil {
 					return err
 				}
+				if err := tx.Exec(`UPDATE agent_tasks SET delete_grants=?::jsonb WHERE id=?`, string(deleteGrants), row.ID).Error; err != nil {
+					return err
+				}
 				row.UpdatedAt = now
 			} else {
 				id, err := uuid()
@@ -280,7 +309,7 @@ func (s *Store) Command(ctx context.Context, owner, project string, input agent.
 					return err
 				}
 				row = taskRow{ID: id, OwnerID: owner, ProjectID: project, ModelID: input.ModelID, Status: "queued", CreatedAt: now, UpdatedAt: now}
-				if err := tx.Exec(`INSERT INTO agent_tasks(id,owner_id,project_id,request_id,model_id,status,editable_node_ids,created_at,updated_at) VALUES(?,?,?,?,?,'queued',?::jsonb,?,?)`, id, owner, project, input.RequestID, input.ModelID, string(grants), now, now).Error; err != nil {
+				if err := tx.Exec(`INSERT INTO agent_tasks(id,owner_id,project_id,request_id,model_id,status,editable_node_ids,delete_grants,created_at,updated_at) VALUES(?,?,?,?,?,'queued',?::jsonb,?::jsonb,?,?)`, id, owner, project, input.RequestID, input.ModelID, string(grants), string(deleteGrants), now, now).Error; err != nil {
 					return err
 				}
 				if err := event(tx, id, "queued", now); err != nil {
@@ -332,8 +361,42 @@ func (s *Store) Command(ctx context.Context, owner, project string, input agent.
 			if json.Unmarshal(row.Question, &question) != nil || question.ID != input.QuestionID {
 				return agent.ErrConflict
 			}
-			if err := approveGeneration(tx, row, question, input.Text, now); err != nil {
-				return err
+			var scope struct {
+				Kind string   `json:"kind"`
+				IDs  []string `json:"ids"`
+			}
+			if len(question.Scope) > 0 && json.Unmarshal(question.Scope, &scope) != nil {
+				return agent.ErrInvalid
+			}
+			switch scope.Kind {
+			case "edit", "delete":
+				if len(scope.IDs) == 0 || len(scope.IDs) > 100 {
+					return agent.ErrInvalid
+				}
+				approve := scope.Kind == "edit" && input.Text == "确认修改" || scope.Kind == "delete" && input.Text == "确认删除"
+				deny := scope.Kind == "edit" && input.Text == "改为新建节点" || scope.Kind == "delete" && input.Text == "保留"
+				if !approve && !deny {
+					return agent.ErrInvalid
+				}
+				if approve {
+					ids, _ := json.Marshal(scope.IDs)
+					if scope.Kind == "delete" {
+						if err := tx.Exec(`UPDATE agent_tasks SET delete_grants=?::jsonb WHERE id=?`, string(ids), row.ID).Error; err != nil {
+							return err
+						}
+					} else {
+						if err := tx.Exec(`UPDATE agent_tasks SET editable_node_ids=(SELECT COALESCE(jsonb_agg(DISTINCT value),'[]'::jsonb) FROM jsonb_array_elements_text(editable_node_ids || ?::jsonb) AS value) WHERE id=?`, string(ids), row.ID).Error; err != nil {
+							return err
+						}
+					}
+				}
+			case "generation":
+				if err := approveGeneration(tx, row, question, input.Text, now); err != nil {
+					return err
+				}
+			case "":
+			default:
+				return agent.ErrInvalid
 			}
 			question.Answer = input.Text
 			value, _ := json.Marshal(question)

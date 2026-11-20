@@ -10,6 +10,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"reflect"
+	"sort"
 	"strings"
 	"time"
 
@@ -51,6 +53,8 @@ func (r taskRow) task() agent.Task {
 			task.Question = &q
 		}
 	}
+	_ = json.Unmarshal(r.EditableNodeIDs, &task.EditableNodeIDs)
+	_ = json.Unmarshal(r.DeleteGrants, &task.DeleteGrants)
 	return task
 }
 
@@ -399,6 +403,26 @@ func (s *Store) CommitCanvas(ctx context.Context, token string, input agent.Comm
 		created, removed, err := validateCanvasEdit(p.Snapshot, input.Snapshot, input.Operations, editable, grants)
 		if err != nil {
 			return err
+		}
+		if len(removed) > 0 {
+			var operations []struct {
+				Kind string `json:"kind"`
+				ID   string `json:"id"`
+			}
+			if json.Unmarshal(input.Operations, &operations) != nil {
+				return agent.ErrInvalid
+			}
+			requested := []string{}
+			for _, operation := range operations {
+				if operation.Kind == "delete" {
+					requested = append(requested, operation.ID)
+				}
+			}
+			sort.Strings(requested)
+			sort.Strings(grants)
+			if !reflect.DeepEqual(requested, grants) {
+				return agent.ErrForbidden
+			}
 		}
 		if len(created) > 0 {
 			var tombstones int64
