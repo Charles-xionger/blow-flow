@@ -42,6 +42,10 @@ func TestImportedCutoverAPIJourney(t *testing.T) {
 	if owner == "" || filename == "" || email == "" || password == "" || os.Getenv("TEST_DATABASE_URL") == "" {
 		t.Fatal("rehearsal owner, export, creator credentials and database required")
 	}
+	// Model availability is checked when the confirmation is prepared. These
+	// disposable values never reach a provider: the test drives store transitions.
+	t.Setenv("RUNNINGHUB_API_KEY", "rehearsal-fake-key")
+	t.Setenv("RUNNINGHUB_BASE_URL", "https://fake-provider.test")
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatal(err)
@@ -264,7 +268,7 @@ func TestImportedCutoverAPIJourney(t *testing.T) {
 			t.Fatalf("agent result did not reach completed: %v", approved)
 		}
 	}
-	scriptInput := script.Create{RequestID: "rehearsal-script", CanvasID: projectID, NodeID: "rehearsal-script", Input: script.Input{Model: "fake-script-model", Requirements: "Write a short paper city scene", Preset: "free"}}
+	scriptInput := script.Create{RequestID: "rehearsal-script", CanvasID: projectID, NodeID: "rehearsal-script", Input: script.Input{Model: "fake-script-model", Requirements: "Write a scene", Preset: "free"}}
 	scriptTask := call(owned, "POST", "/v1/script/tasks", scriptInput, nil, 202)
 	scriptID, _ := scriptTask["id"].(string)
 	if scriptID == "" {
