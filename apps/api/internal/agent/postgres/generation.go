@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"strings"
 	"time"
 
 	"blow-flow/api/internal/agent"
@@ -16,6 +15,72 @@ import (
 
 type GenerationItem = agent.GenerationItem
 type GenerationBatch = agent.GenerationBatch
+
+func generationInput(item GenerationItem, project string) (generation.Input, error) {
+	input := generation.Input{ProjectID: project, NodeID: item.NodeID, Model: item.Model, Prompt: item.Prompt, Width: item.Width, Height: item.Height}
+	if len(item.Input) > 0 {
+		if item.Model != "" || item.Prompt != "" || item.Width != 0 || item.Height != 0 {
+			return generation.Input{}, agent.ErrInvalid
+		}
+		var fields map[string]json.RawMessage
+		if item.ModelID == "" || json.Unmarshal(item.Input, &fields) != nil || len(fields) == 0 {
+			return generation.Input{}, agent.ErrInvalid
+		}
+		for key := range fields {
+			switch key {
+			case "prompt", "width", "height", "duration", "references", "instanceType", "imageOptions":
+			default:
+				return generation.Input{}, agent.ErrInvalid
+			}
+		}
+		if json.Unmarshal(item.Input, &input) != nil {
+			return generation.Input{}, agent.ErrInvalid
+		}
+		if rawRefs, ok := fields["references"]; ok {
+			var refFields []map[string]json.RawMessage
+			if json.Unmarshal(rawRefs, &refFields) != nil || len(refFields) != len(input.References) {
+				return generation.Input{}, agent.ErrInvalid
+			}
+			for i, ref := range input.References {
+				for key := range refFields[i] {
+					switch key {
+					case "kind", "url", "useAudio":
+					default:
+						return generation.Input{}, agent.ErrInvalid
+					}
+				}
+				if ref.Kind == "video" && refFields[i]["useAudio"] == nil {
+					input.References[i].UseAudio = true
+				}
+				if ref.Kind != "video" && refFields[i]["useAudio"] != nil {
+					return generation.Input{}, agent.ErrInvalid
+				}
+			}
+		}
+		if options, ok := fields["imageOptions"]; ok {
+			var optionFields map[string]json.RawMessage
+			if json.Unmarshal(options, &optionFields) != nil {
+				return generation.Input{}, agent.ErrInvalid
+			}
+			for key := range optionFields {
+				switch key {
+				case "outputFormat", "watermark", "promptOptimization", "background":
+				default:
+					return generation.Input{}, agent.ErrInvalid
+				}
+			}
+		}
+		input.ProjectID, input.NodeID = project, item.NodeID
+		input.Model = item.ModelID
+	}
+	if input.Model == "runninghub-krea2" {
+		input.Model = "runninghub/krea2"
+	}
+	if input.Model == "runninghub-h3" {
+		input.Model = "runninghub/h3"
+	}
+	return input, nil
+}
 
 func (s *Store) PrepareGeneration(ctx context.Context, token, callID string, items []GenerationItem) (GenerationBatch, error) {
 	if callID == "" || len(callID) > 80 || len(items) == 0 || len(items) > 20 {
@@ -65,41 +130,45 @@ func (s *Store) PrepareGeneration(ctx context.Context, token, callID string, ite
 		if q.RowsAffected == 0 {
 			return agent.ErrNotFound
 		}
-		var canvas struct {
-			Nodes []struct {
-				ID   string `json:"id"`
-				Data struct {
-					Type            string            `json:"type"`
-					ImageSrc        string            `json:"imageSrc"`
-					VideoSrc        string            `json:"videoSrc"`
-					OutputArtifacts []json.RawMessage `json:"outputArtifacts"`
-				} `json:"data"`
-			} `json:"nodes"`
-		}
-		if json.Unmarshal(project.Snapshot, &canvas) != nil {
-			return agent.ErrInvalid
-		}
-		nodes := map[string]bool{}
-		for _, n := range canvas.Nodes {
-			if n.Data.Type == "textToImage" || n.Data.Type == "image" {
-				nodes[n.ID] = n.Data.ImageSrc == "" && n.Data.VideoSrc == "" && len(n.Data.OutputArtifacts) == 0
-			}
-		}
 		seen := map[string]bool{}
+		bindings := map[string]string{}
+		modelSnapshots := make([]*generation.WorkflowSnapshot, 0, len(items))
+		scopeItems := make([]map[string]any, 0, len(items))
 		for _, item := range items {
-			if item.NodeID == "" || len(item.NodeID) > 200 || !nodes[item.NodeID] || seen[item.NodeID] || item.Model != "runninghub/krea2" || strings.TrimSpace(item.Prompt) == "" || len(item.Prompt) > 8000 || item.Width < 64 || item.Width > 8192 || item.Height < 64 || item.Height > 8192 || item.Width%8 != 0 || item.Height%8 != 0 {
+			input, err := generationInput(item, row.ProjectID)
+			if err != nil {
+				return err
+			}
+			if generation.ConnectionForModel(input.Model) == "" {
+				snapshot, _, err := generation.ResolveModel(input.Model)
+				if err != nil {
+					return agent.ErrInvalid
+				}
+				input.Workflow = snapshot
+			}
+			modelSnapshots = append(modelSnapshots, input.Workflow)
+			binding, nodeType, exists := generationBinding(project.Snapshot, item.NodeID)
+			isVideo := generation.ModelCategory(input.Model) == "VIDEO"
+			validTarget := isVideo && (nodeType == "textToVideo" || nodeType == "imageToVideo" || nodeType == "startEndToVideo" || nodeType == "video") || !isVideo && (nodeType == "textToImage" || nodeType == "imageToImage" || nodeType == "image")
+			if item.NodeID == "" || len(item.NodeID) > 200 || seen[item.NodeID] || !exists || !validTarget || !generation.ModelConfigured(input.Model) || !generation.ValidInput(input) || !ownedGenerationReferences(tx, row.OwnerID, row.ProjectID, item.NodeID, project.Snapshot, input.References) {
 				return agent.ErrInvalid
 			}
 			seen[item.NodeID] = true
+			bindings[item.NodeID] = binding
+			visible := input
+			visible.Workflow = nil
+			scopeItems = append(scopeItems, map[string]any{"nodeId": item.NodeID, "modelId": input.Model, "input": visible, "newNode": hasGenerationResult(project.Snapshot, item.NodeID)})
 		}
 		now := s.Now().UTC()
 		if err := tx.Exec(`UPDATE agent_generation_batches SET status='cancelled',updated_at=? WHERE task_id=? AND status='pending'`, now, row.ID).Error; err != nil {
 			return err
 		}
-		if err := tx.Exec(`INSERT INTO agent_generation_batches(id,task_id,digest,canvas_version,status,items,created_at,updated_at) VALUES(?,?,?,?,'pending',?::jsonb,?,?)`, id, row.ID, digest, project.Version, string(encoded), now, now).Error; err != nil {
+		bound, _ := json.Marshal(bindings)
+		frozen, _ := json.Marshal(modelSnapshots)
+		if err := tx.Exec(`INSERT INTO agent_generation_batches(id,task_id,digest,canvas_version,status,items,bindings,model_snapshots,created_at,updated_at) VALUES(?,?,?,?,'pending',?::jsonb,?::jsonb,?::jsonb,?,?)`, id, row.ID, digest, project.Version, string(encoded), string(bound), string(frozen), now, now).Error; err != nil {
 			return err
 		}
-		scope, _ := json.Marshal(map[string]any{"kind": "generation", "batchId": id, "digest": digest, "items": items})
+		scope, _ := json.Marshal(map[string]any{"kind": "generation", "batchId": id, "digest": digest, "items": scopeItems})
 		question := agent.Question{ID: callID, Text: "确认生成这批内容？", Options: []string{"确认生成", "取消生成"}, Scope: scope}
 		value, _ := json.Marshal(question)
 		result, _ := json.Marshal(map[string]any{"waiting": true, "batchId": id, "digest": digest})
@@ -122,7 +191,10 @@ func (s *Store) PrepareGeneration(ctx context.Context, token, callID string, ite
 }
 
 func cancelPendingGeneration(tx *gorm.DB, taskID string, now time.Time) error {
-	return tx.Exec(`UPDATE agent_generation_batches SET status='cancelled',updated_at=? WHERE task_id=? AND status='pending'`, now, taskID).Error
+	if err := tx.Exec(`UPDATE agent_generation_batches SET status='cancelled',updated_at=? WHERE task_id=? AND status='pending'`, now, taskID).Error; err != nil {
+		return err
+	}
+	return tx.Exec(`WITH stopped AS (UPDATE generation_tasks SET status='canceled',stage='canceled',updated_at=? WHERE id IN (SELECT jsonb_array_elements_text(generation_task_ids) FROM agent_generation_batches WHERE task_id=? AND status='approved') AND status='queued' RETURNING id,owner_id,project_id,node_id) INSERT INTO generation_task_events(task_id,event_type,stage,occurred_at) SELECT id,'canceled','canceled',? FROM stopped`, now, taskID, now).Error
 }
 
 func approveGeneration(tx *gorm.DB, row taskRow, question agent.Question, answer string, now time.Time) error {
@@ -136,9 +208,10 @@ func approveGeneration(tx *gorm.DB, row taskRow, question agent.Question, answer
 	var batch struct {
 		Digest, Status string
 		Items          []byte
-		CanvasVersion  int64
+		Bindings       []byte
+		ModelSnapshots []byte
 	}
-	q := tx.Raw(`SELECT digest,status,items,canvas_version FROM agent_generation_batches WHERE id=? AND task_id=? FOR UPDATE`, scope.BatchID, row.ID).Scan(&batch)
+	q := tx.Raw(`SELECT digest,status,items,bindings,model_snapshots FROM agent_generation_batches WHERE id=? AND task_id=? FOR UPDATE`, scope.BatchID, row.ID).Scan(&batch)
 	if q.Error != nil {
 		return q.Error
 	}
@@ -163,34 +236,37 @@ func approveGeneration(tx *gorm.DB, row taskRow, question agent.Question, answer
 	if q.RowsAffected == 0 {
 		return agent.ErrNotFound
 	}
-	if project.Version != batch.CanvasVersion {
-		return agent.ErrConflict
-	}
-	var canvas struct {
-		Nodes []struct {
-			ID   string `json:"id"`
-			Data struct {
-				ImageSrc        string            `json:"imageSrc"`
-				VideoSrc        string            `json:"videoSrc"`
-				OutputArtifacts []json.RawMessage `json:"outputArtifacts"`
-			} `json:"data"`
-		} `json:"nodes"`
-	}
-	if json.Unmarshal(project.Snapshot, &canvas) != nil {
+	var bindings map[string]string
+	if json.Unmarshal(batch.Bindings, &bindings) != nil {
 		return agent.ErrInvalid
 	}
-	valid := map[string]bool{}
-	for _, n := range canvas.Nodes {
-		valid[n.ID] = n.Data.ImageSrc == "" && n.Data.VideoSrc == "" && len(n.Data.OutputArtifacts) == 0
+	var frozen []*generation.WorkflowSnapshot
+	if json.Unmarshal(batch.ModelSnapshots, &frozen) != nil {
+		return agent.ErrInvalid
+	}
+	if len(frozen) == 0 {
+		frozen = make([]*generation.WorkflowSnapshot, len(items))
+	}
+	if len(frozen) != len(items) {
+		return agent.ErrConflict
 	}
 	ids := make([]string, 0, len(items))
 	service := generation.Service{Store: generationpostgres.New(tx), Resources: generationpostgres.Resources{DB: tx}}
 	for i, item := range items {
-		if !valid[item.NodeID] {
+		current, _, exists := generationBinding(project.Snapshot, item.NodeID)
+		if !exists || current != bindings[item.NodeID] {
 			return agent.ErrConflict
 		}
-		task, err := service.Create(tx.Statement.Context, generation.Actor{ID: row.OwnerID}, scope.BatchID+":"+string(rune('a'+i)), generation.Input{ProjectID: row.ProjectID, NodeID: item.NodeID, Model: item.Model, Prompt: item.Prompt, Width: item.Width, Height: item.Height})
+		input, err := generationInput(item, row.ProjectID)
 		if err != nil {
+			return err
+		}
+		input.Workflow = frozen[i]
+		task, err := service.Create(tx.Statement.Context, generation.Actor{ID: row.OwnerID}, scope.BatchID+":"+string(rune('a'+i)), input)
+		if err != nil {
+			return err
+		}
+		if err := tx.Exec(`INSERT INTO agent_generation_submission_bindings(task_id,node_id,digest) VALUES(?,?,?) ON CONFLICT(task_id) DO NOTHING`, task.ID, item.NodeID, bindings[item.NodeID]).Error; err != nil {
 			return err
 		}
 		ids = append(ids, task.ID)
@@ -236,4 +312,25 @@ func (s *Store) GenerationResults(ctx context.Context, token, batchID string) (G
 		return nil
 	})
 	return out, err
+}
+
+// RetryGenerationSave only resumes delivery of an already paid provider result.
+func (s *Store) RetryGenerationSave(ctx context.Context, token, batchID string) (GenerationBatch, error) {
+	batch, err := s.GenerationResults(ctx, token, batchID)
+	if err != nil {
+		return batch, err
+	}
+	service := generation.Service{Store: generationpostgres.New(s.DB)}
+	row, err := s.activeRun(s.DB.WithContext(ctx), token, false)
+	if err != nil {
+		return batch, err
+	}
+	for _, task := range batch.Tasks {
+		if task.Status == generation.SaveExhausted || task.Status == "save_failed" {
+			if _, err := service.Resume(ctx, generation.Actor{ID: row.OwnerID}, task.ID); err != nil {
+				return batch, err
+			}
+		}
+	}
+	return s.GenerationResults(ctx, token, batchID)
 }

@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"blow-flow/api/internal/agent"
+	"blow-flow/api/internal/generation"
+	generationpostgres "blow-flow/api/internal/generation/postgres"
 	"gorm.io/gorm"
 )
 
@@ -37,6 +39,35 @@ func (s *Store) Snapshot(ctx context.Context, owner, project string) (agent.Snap
 			return err
 		}
 		out.Messages = messages
+		var batches []struct {
+			ID, TaskID, Status string
+			Items, IDs         []byte
+		}
+		if err := tx.Raw(`SELECT id,task_id,status,items,generation_task_ids AS ids FROM agent_generation_batches WHERE task_id IN (SELECT id FROM agent_tasks WHERE owner_id=? AND project_id=?) ORDER BY created_at`, owner, project).Scan(&batches).Error; err != nil {
+			return err
+		}
+		gen := generation.Service{Store: generationpostgres.New(tx)}
+		for _, batch := range batches {
+			var items []agent.GenerationItem
+			var ids []string
+			if json.Unmarshal(batch.Items, &items) != nil || json.Unmarshal(batch.IDs, &ids) != nil {
+				return agent.ErrInvalid
+			}
+			summary := agent.GenerationSummary{ID: batch.ID, TaskID: batch.TaskID, Status: batch.Status}
+			for i, item := range items {
+				row := agent.GenerationSummaryItem{NodeID: item.NodeID}
+				if i < len(ids) {
+					task, err := gen.Get(ctx, generation.Actor{ID: owner}, ids[i])
+					if err != nil {
+						return err
+					}
+					row.Task = &task
+					row.Note = task.AttachmentNote
+				}
+				summary.Items = append(summary.Items, row)
+			}
+			out.GenerationBatches = append(out.GenerationBatches, summary)
+		}
 		var archived []struct{ Data []byte }
 		if err := tx.Raw(`SELECT data FROM agent_legacy_generation_batches WHERE task_id IN (SELECT id FROM agent_tasks WHERE owner_id=? AND project_id=?) ORDER BY id`, owner, project).Scan(&archived).Error; err != nil {
 			return err

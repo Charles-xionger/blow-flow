@@ -31,6 +31,18 @@ func (s *Store) Create(ctx context.Context, owner, key, hash string, input gener
 	if err != nil {
 		return generation.Task{}, err
 	}
+	connection := generation.ConnectionForModel(input.Model)
+	if input.Workflow != nil {
+		connection = input.Workflow.ConnectionID
+	}
+	if connection == "" {
+		return generation.Task{}, generation.ErrInvalid
+	}
+	if input.Workflow != nil {
+		if err := s.ensureWorkflowConnection(ctx, input.Workflow); err != nil {
+			return generation.Task{}, err
+		}
+	}
 	err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Serialize admissions across API instances on the connection's limit row.
 		var priorHash string
@@ -47,7 +59,7 @@ func (s *Store) Create(ctx context.Context, owner, key, hash string, input gener
 			Scope     string
 			MaxQueued int
 		}
-		if err := tx.Raw(`SELECT scope,max_queued FROM generation_queue_limits WHERE (scope='user' AND key IN (?, '*')) OR (scope='model' AND key IN (?, '*')) OR (scope='connection' AND key IN ('runninghub-international','*')) ORDER BY scope,key FOR UPDATE`, owner, input.Model).Scan(&limits).Error; err != nil {
+		if err := tx.Raw(`SELECT scope,max_queued FROM generation_queue_limits WHERE (scope='user' AND key IN (?, '*')) OR (scope='model' AND key IN (?, '*')) OR (scope='connection' AND key IN (?, '*')) ORDER BY scope,key FOR UPDATE`, owner, input.Model, connection).Scan(&limits).Error; err != nil {
 			return err
 		}
 		if len(limits) == 0 {
@@ -64,7 +76,7 @@ func (s *Store) Create(ctx context.Context, owner, key, hash string, input gener
 			case "model":
 				value = input.Model
 			case "connection":
-				value = "runninghub-international"
+				value = connection
 			}
 			if err := tx.Raw(`SELECT count(*) FROM generation_tasks WHERE status='queued' AND `+where+`=?`, value).Scan(&n).Error; err != nil {
 				return err
@@ -80,7 +92,7 @@ func (s *Store) Create(ctx context.Context, owner, key, hash string, input gener
 				}
 			}
 		}
-		result := tx.Exec(`INSERT INTO generation_tasks(id,owner_id,project_id,node_id,model,input_snapshot,input_hash,idempotency_key,status,created_at,updated_at) VALUES(?,?,?,?,?,?::jsonb,?,?,'queued',?,?) ON CONFLICT(owner_id,idempotency_key) DO NOTHING`, id, owner, input.ProjectID, input.NodeID, input.Model, string(data), hash, key, now, now)
+		result := tx.Exec(`INSERT INTO generation_tasks(id,owner_id,project_id,node_id,model,connection_id,input_snapshot,input_hash,idempotency_key,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?::jsonb,?,?,'queued',?,?) ON CONFLICT(owner_id,idempotency_key) DO NOTHING`, id, owner, input.ProjectID, input.NodeID, input.Model, connection, string(data), hash, key, now, now)
 		if result.Error != nil {
 			return result.Error
 		}
@@ -121,20 +133,20 @@ func (s *Store) Create(ctx context.Context, owner, key, hash string, input gener
 }
 func (s *Store) Get(ctx context.Context, id string) (generation.Task, string, error) {
 	var r struct {
-		ID, OwnerID, ProjectID, NodeID, Model, ResultURL, Stage, FailureCode string
-		Percent                                                              *float64
-		Status                                                               generation.Status
-		CreatedAt, UpdatedAt                                                 time.Time
-		Version                                                              int64
+		ID, OwnerID, ProjectID, NodeID, Model, ResultURL, Stage, FailureCode, AttachedNodeID, AttachmentNote string
+		Percent                                                                                              *float64
+		Status                                                                                               generation.Status
+		CreatedAt, UpdatedAt                                                                                 time.Time
+		Version                                                                                              int64
 	}
-	tx := s.DB.WithContext(ctx).Raw(`SELECT t.id,owner_id,project_id,node_id,model,result_url,status,stage,percent,COALESCE(failure_code,'') AS failure_code,created_at,updated_at,COALESCE((SELECT max(id) FROM generation_task_events WHERE task_id=t.id),0) AS version FROM generation_tasks t WHERE id=?`, id).Scan(&r)
+	tx := s.DB.WithContext(ctx).Raw(`SELECT t.id,t.owner_id,t.project_id,t.node_id,t.model,t.result_url,t.status,t.stage,t.percent,COALESCE(t.failure_code,'') AS failure_code,COALESCE(a.node_id,'') AS attached_node_id,COALESCE(a.note,'') AS attachment_note,t.created_at,t.updated_at,COALESCE((SELECT max(id) FROM generation_task_events WHERE task_id=t.id),0) AS version FROM generation_tasks t LEFT JOIN agent_generation_attachments a ON a.task_id=t.id WHERE t.id=?`, id).Scan(&r)
 	if tx.Error != nil {
 		return generation.Task{}, "", tx.Error
 	}
 	if tx.RowsAffected == 0 {
 		return generation.Task{}, "", generation.ErrNotFound
 	}
-	return generation.Task{ID: r.ID, Version: r.Version, ProjectID: r.ProjectID, NodeID: r.NodeID, Model: r.Model, ResultURL: r.ResultURL, Status: r.Status, Stage: r.Stage, Percent: r.Percent, FailureCode: r.FailureCode, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}, r.OwnerID, nil
+	return generation.Task{ID: r.ID, Version: r.Version, ProjectID: r.ProjectID, NodeID: r.NodeID, Model: r.Model, ResultURL: r.ResultURL, AttachedNodeID: r.AttachedNodeID, AttachmentNote: r.AttachmentNote, Status: r.Status, Stage: r.Stage, Percent: r.Percent, FailureCode: r.FailureCode, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}, r.OwnerID, nil
 }
 func (s *Store) Cancel(ctx context.Context, id, owner string) (generation.Task, error) {
 	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

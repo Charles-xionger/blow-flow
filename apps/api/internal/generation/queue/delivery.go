@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"blow-flow/api/internal/generation"
 	"blow-flow/api/internal/generation/postgres"
 	"context"
 	"errors"
@@ -10,6 +11,12 @@ import (
 type Tracker interface {
 	Query(context.Context, string) (Observation, error)
 	Watch(context.Context, string, func(Progress) error) error
+}
+type ModelTracker interface {
+	QueryModel(context.Context, string, string) (Observation, error)
+}
+type InputTracker interface {
+	QueryInput(context.Context, generation.Input, string) (Observation, error)
 }
 type ArtifactStore interface {
 	Save(context.Context, string, string, string) (string, error)
@@ -76,7 +83,18 @@ func (w DeliveryWorker) ProcessOne(ctx context.Context, id string) error {
 	if !allowed {
 		return w.Store.DeferOperation(ctx, claim)
 	}
-	observation, queryErr := w.Provider.Query(ctx, claim.ProviderID)
+	query := func() (Observation, error) {
+		if claim.Input.Workflow != nil {
+			if routed, ok := w.Provider.(InputTracker); ok {
+				return routed.QueryInput(ctx, claim.Input, claim.ProviderID)
+			}
+		}
+		if routed, ok := w.Provider.(ModelTracker); ok {
+			return routed.QueryModel(ctx, claim.Model, claim.ProviderID)
+		}
+		return w.Provider.Query(ctx, claim.ProviderID)
+	}
+	observation, queryErr := query()
 	if err := w.Store.RecordOperation(ctx, claim, "query", queryErr); err != nil {
 		return err
 	}
@@ -97,7 +115,7 @@ func (w DeliveryWorker) ProcessOne(ctx context.Context, id string) error {
 		})
 		cancel()
 		// Socket completion, disconnection and timeout all lead back to the same HTTP query.
-		observation, queryErr = w.Provider.Query(ctx, claim.ProviderID)
+		observation, queryErr = query()
 		if err := w.Store.RecordOperation(ctx, claim, "query", queryErr); err != nil {
 			return err
 		}

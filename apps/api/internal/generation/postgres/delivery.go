@@ -3,15 +3,17 @@ package postgres
 import (
 	"blow-flow/api/internal/generation"
 	"context"
+	"encoding/json"
 	"errors"
 	"gorm.io/gorm"
 	"time"
 )
 
 type DeliveryClaim struct {
-	TaskID, ProviderID, ProviderURL, FileType, Token, Status string
-	StartedAt                                                time.Time
-	Attempts, SaveAttempts                                   int
+	TaskID, ProviderID, ProviderURL, FileType, Token, Status, Model string
+	Input                                                           generation.Input
+	StartedAt                                                       time.Time
+	Attempts, SaveAttempts                                          int
 }
 
 func (s *Store) DueDeliveries(ctx context.Context, limit int) ([]string, error) {
@@ -33,7 +35,14 @@ func (s *Store) ClaimDelivery(ctx context.Context, id string) (DeliveryClaim, bo
 	if res.RowsAffected == 0 {
 		return claim, false, nil
 	}
-	err = s.DB.WithContext(ctx).Raw(`SELECT id AS task_id,provider_task_id AS provider_id,COALESCE(provider_result_url,'') AS provider_url,COALESCE(provider_result_type,'') AS file_type,status,tracking_started_at AS started_at,poll_attempts AS attempts,save_attempts FROM generation_tasks WHERE id=?`, id).Scan(&claim).Error
+	err = s.DB.WithContext(ctx).Raw(`SELECT id AS task_id,provider_task_id AS provider_id,COALESCE(provider_result_url,'') AS provider_url,COALESCE(provider_result_type,'') AS file_type,status,model,tracking_started_at AS started_at,poll_attempts AS attempts,save_attempts FROM generation_tasks WHERE id=?`, id).Scan(&claim).Error
+	if err == nil {
+		var raw string
+		err = s.DB.WithContext(ctx).Raw(`SELECT input_snapshot::text FROM generation_tasks WHERE id=?`, id).Scan(&raw).Error
+		if err == nil {
+			err = json.Unmarshal([]byte(raw), &claim.Input)
+		}
+	}
 	claim.Token = token
 	return claim, err == nil, err
 }
@@ -177,6 +186,14 @@ func (s *Store) Delivered(ctx context.Context, c DeliveryClaim, url string) erro
 		}
 		if err := tx.Exec(`UPDATE generation_node_results n SET result_url=?,updated_at=? FROM generation_tasks t WHERE t.id=? AND t.node_id<>'' AND n.owner_id=t.owner_id AND n.project_id=t.project_id AND n.node_id=t.node_id AND n.task_id=t.id`, url, now, c.TaskID).Error; err != nil {
 			return err
+		}
+		if err := attachAgentResult(tx, c.TaskID, url, now); err != nil {
+			return err
+		}
+		if c.Model == generation.GeminiImageModel {
+			if err := tx.Exec(`DELETE FROM generation_inline_results WHERE task_id=?`, c.TaskID).Error; err != nil {
+				return err
+			}
 		}
 		return tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,stage,occurred_at) VALUES(?,'delivered','delivered',?)`, c.TaskID, now).Error
 	})

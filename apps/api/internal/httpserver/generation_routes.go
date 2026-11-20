@@ -44,6 +44,12 @@ func registerGenerationRoutes(v1 *gin.RouterGroup, d Dependencies) {
 			generationError(c, generation.ErrInvalid)
 			return
 		}
+		// Frozen admin workflow snapshots are only supplied by the internal agent
+		// approval path; clients may select a model but cannot author its graph.
+		if input.Workflow != nil {
+			generationError(c, generation.ErrInvalid)
+			return
+		}
 		t, err := d.Generation.Create(c.Request.Context(), generationActor(c), c.GetHeader("Idempotency-Key"), input)
 		if err != nil {
 			generationError(c, err)
