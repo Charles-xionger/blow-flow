@@ -6,6 +6,7 @@ CREATE TABLE agent_generation_attachments (
     attached_at timestamptz NOT NULL
 );
 ALTER TABLE agent_generation_batches ADD COLUMN bindings jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE agent_generation_batches ADD COLUMN model_snapshots jsonb NOT NULL DEFAULT '[]'::jsonb;
 CREATE TABLE agent_generation_submission_bindings (
     task_id text PRIMARY KEY REFERENCES generation_tasks(id),
     node_id text NOT NULL,
@@ -16,3 +17,4 @@ CREATE TABLE agent_generation_submission_bindings (
 DROP TABLE agent_generation_attachments;
 DROP TABLE agent_generation_submission_bindings;
 ALTER TABLE agent_generation_batches DROP COLUMN bindings;
+ALTER TABLE agent_generation_batches DROP COLUMN model_snapshots;

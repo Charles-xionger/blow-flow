@@ -98,12 +98,19 @@ func (s *Store) PrepareGeneration(ctx context.Context, token, callID string, ite
 		}
 		seen := map[string]bool{}
 		bindings := map[string]string{}
+		modelSnapshots:=make([]*generation.WorkflowSnapshot,0,len(items))
 		scopeItems := make([]map[string]any, 0, len(items))
 		for _, item := range items {
 			input, err := generationInput(item, row.ProjectID)
 			if err != nil {
 				return err
 			}
+			if generation.ConnectionForModel(input.Model)=="" {
+				snapshot,_,err:=generation.ResolveModel(input.Model)
+				if err!=nil{return agent.ErrInvalid}
+				input.Workflow=snapshot
+			}
+			modelSnapshots=append(modelSnapshots,input.Workflow)
 			binding, nodeType, exists := generationBinding(project.Snapshot, item.NodeID)
 			isVideo := generation.ModelCategory(input.Model) == "VIDEO"
 			validTarget := isVideo && (nodeType == "textToVideo" || nodeType == "imageToVideo" || nodeType == "startEndToVideo" || nodeType == "video") || !isVideo && (nodeType == "textToImage" || nodeType == "imageToImage" || nodeType == "image")
@@ -112,14 +119,16 @@ func (s *Store) PrepareGeneration(ctx context.Context, token, callID string, ite
 			}
 			seen[item.NodeID] = true
 			bindings[item.NodeID] = binding
-			scopeItems = append(scopeItems, map[string]any{"nodeId": item.NodeID, "modelId": input.Model, "input": input, "newNode": hasGenerationResult(project.Snapshot, item.NodeID)})
+			visible:=input;visible.Workflow=nil
+			scopeItems = append(scopeItems, map[string]any{"nodeId": item.NodeID, "modelId": input.Model, "input": visible, "newNode": hasGenerationResult(project.Snapshot, item.NodeID)})
 		}
 		now := s.Now().UTC()
 		if err := tx.Exec(`UPDATE agent_generation_batches SET status='cancelled',updated_at=? WHERE task_id=? AND status='pending'`, now, row.ID).Error; err != nil {
 			return err
 		}
 		bound, _ := json.Marshal(bindings)
-		if err := tx.Exec(`INSERT INTO agent_generation_batches(id,task_id,digest,canvas_version,status,items,bindings,created_at,updated_at) VALUES(?,?,?,?,'pending',?::jsonb,?::jsonb,?,?)`, id, row.ID, digest, project.Version, string(encoded), string(bound), now, now).Error; err != nil {
+		frozen,_:=json.Marshal(modelSnapshots)
+		if err := tx.Exec(`INSERT INTO agent_generation_batches(id,task_id,digest,canvas_version,status,items,bindings,model_snapshots,created_at,updated_at) VALUES(?,?,?,?,'pending',?::jsonb,?::jsonb,?::jsonb,?,?)`, id, row.ID, digest, project.Version, string(encoded), string(bound), string(frozen), now, now).Error; err != nil {
 			return err
 		}
 		scope, _ := json.Marshal(map[string]any{"kind": "generation", "batchId": id, "digest": digest, "items": scopeItems})
@@ -163,8 +172,9 @@ func approveGeneration(tx *gorm.DB, row taskRow, question agent.Question, answer
 		Digest, Status string
 		Items          []byte
 		Bindings       []byte
+		ModelSnapshots []byte
 	}
-	q := tx.Raw(`SELECT digest,status,items,bindings FROM agent_generation_batches WHERE id=? AND task_id=? FOR UPDATE`, scope.BatchID, row.ID).Scan(&batch)
+	q := tx.Raw(`SELECT digest,status,items,bindings,model_snapshots FROM agent_generation_batches WHERE id=? AND task_id=? FOR UPDATE`, scope.BatchID, row.ID).Scan(&batch)
 	if q.Error != nil {
 		return q.Error
 	}
@@ -193,6 +203,10 @@ func approveGeneration(tx *gorm.DB, row taskRow, question agent.Question, answer
 	if json.Unmarshal(batch.Bindings, &bindings) != nil {
 		return agent.ErrInvalid
 	}
+	var frozen []*generation.WorkflowSnapshot
+	if json.Unmarshal(batch.ModelSnapshots,&frozen)!=nil{return agent.ErrInvalid}
+	if len(frozen)==0 { frozen=make([]*generation.WorkflowSnapshot,len(items)) }
+	if len(frozen)!=len(items){return agent.ErrConflict}
 	ids := make([]string, 0, len(items))
 	service := generation.Service{Store: generationpostgres.New(tx), Resources: generationpostgres.Resources{DB: tx}}
 	for i, item := range items {
@@ -204,6 +218,7 @@ func approveGeneration(tx *gorm.DB, row taskRow, question agent.Question, answer
 		if err != nil {
 			return err
 		}
+		input.Workflow=frozen[i]
 		task, err := service.Create(tx.Statement.Context, generation.Actor{ID: row.OwnerID}, scope.BatchID+":"+string(rune('a'+i)), input)
 		if err != nil {
 			return err
