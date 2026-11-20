@@ -7,6 +7,7 @@ import (
 	"blow-flow/api/internal/generation"
 	generationpostgres "blow-flow/api/internal/generation/postgres"
 	"context"
+	"errors"
 	"fmt"
 	"github.com/pressly/goose/v3"
 	"net/http"
@@ -139,7 +140,7 @@ func TestSubmissionCapacityAndUncertainResponse(t *testing.T) {
 		t.Fatalf("claim: %v %v", ok, err)
 	}
 	id, submitErr := (Krea2{BaseURL: lostServer.URL, APIKey: "secret", Client: lostServer.Client()}).Submit(ctx, claim.Input)
-	if id != "" || submitErr != ErrSubmissionUncertain {
+	if id != "" || !errors.Is(submitErr, ErrSubmissionUncertain) {
 		t.Fatalf("lost response=%q %v", id, submitErr)
 	}
 	if err = store.ResolveSubmission(ctx, lost.ID, claim.Token, id, submitErr); err != nil {

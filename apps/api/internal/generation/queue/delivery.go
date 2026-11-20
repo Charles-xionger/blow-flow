@@ -23,9 +23,6 @@ type ArtifactStore interface {
 }
 type DeliveryStore interface {
 	ClaimDelivery(context.Context, string) (postgres.DeliveryClaim, bool, error)
-	BeginOperation(context.Context, postgres.DeliveryClaim, string) (bool, error)
-	RecordOperation(context.Context, postgres.DeliveryClaim, string, error) error
-	DeferOperation(context.Context, postgres.DeliveryClaim) error
 	DueDeliveries(context.Context, int) ([]string, error)
 	SaveFailed(context.Context, postgres.DeliveryClaim, string, bool) error
 	Delivered(context.Context, postgres.DeliveryClaim, string) error
@@ -49,24 +46,10 @@ func (w DeliveryWorker) ProcessOne(ctx context.Context, id string) error {
 		return err
 	}
 	if claim.ProviderURL != "" {
-		allowed, err := w.Store.BeginOperation(ctx, claim, "save")
-		if err != nil {
-			return err
-		}
-		if !allowed {
-			return w.Store.DeferOperation(ctx, claim)
-		}
 		if w.Artifacts == nil {
 			return w.Store.SaveFailed(ctx, claim, "storage_unconfigured", false)
 		}
 		url, saveErr := w.Artifacts.Save(ctx, claim.ProviderURL, claim.TaskID, claim.FileType)
-		circuitErr := saveErr
-		if errors.Is(saveErr, ErrArtifactUnavailable) {
-			circuitErr = nil
-		}
-		if err := w.Store.RecordOperation(ctx, claim, "save", circuitErr); err != nil {
-			return err
-		}
 		if saveErr != nil {
 			return w.Store.SaveFailed(ctx, claim, saveCode(saveErr), errors.Is(saveErr, ErrArtifactUnavailable))
 		}
@@ -75,13 +58,6 @@ func (w DeliveryWorker) ProcessOne(ctx context.Context, id string) error {
 	timeout := w.WaitTimeout
 	if timeout <= 0 {
 		timeout = 30 * time.Minute
-	}
-	allowed, err := w.Store.BeginOperation(ctx, claim, "query")
-	if err != nil {
-		return err
-	}
-	if !allowed {
-		return w.Store.DeferOperation(ctx, claim)
 	}
 	query := func() (Observation, error) {
 		if claim.Input.Workflow != nil {
@@ -95,9 +71,6 @@ func (w DeliveryWorker) ProcessOne(ctx context.Context, id string) error {
 		return w.Provider.Query(ctx, claim.ProviderID)
 	}
 	observation, queryErr := query()
-	if err := w.Store.RecordOperation(ctx, claim, "query", queryErr); err != nil {
-		return err
-	}
 	if queryErr != nil {
 		return w.Store.ScheduleQuery(ctx, claim, "waiting_provider", queryErr, timeout)
 	}
@@ -116,9 +89,6 @@ func (w DeliveryWorker) ProcessOne(ctx context.Context, id string) error {
 		cancel()
 		// Socket completion, disconnection and timeout all lead back to the same HTTP query.
 		observation, queryErr = query()
-		if err := w.Store.RecordOperation(ctx, claim, "query", queryErr); err != nil {
-			return err
-		}
 		if queryErr != nil {
 			return w.Store.ScheduleQuery(ctx, claim, "generating", queryErr, timeout)
 		}

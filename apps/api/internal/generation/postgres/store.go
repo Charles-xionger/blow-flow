@@ -115,11 +115,12 @@ func (s *Store) Create(ctx context.Context, owner, key, hash string, input gener
 	var row struct {
 		ID, InputHash                              string
 		Status                                     generation.Status
+		Priority                                   generation.Priority
 		ProjectID, NodeID, Model, ResultURL, Stage string
 		CreatedAt, UpdatedAt                       time.Time
 		Version                                    int64
 	}
-	err = s.DB.WithContext(ctx).Raw(`SELECT t.id,input_hash,status,stage,project_id,node_id,model,result_url,created_at,updated_at,COALESCE((SELECT max(id) FROM generation_task_events WHERE task_id=t.id),0) AS version FROM generation_tasks t WHERE owner_id=? AND idempotency_key=?`, owner, key).Scan(&row).Error
+	err = s.DB.WithContext(ctx).Raw(`SELECT t.id,input_hash,status,priority,stage,project_id,node_id,model,result_url,created_at,updated_at,COALESCE((SELECT max(id) FROM generation_task_events WHERE task_id=t.id),0) AS version FROM generation_tasks t WHERE owner_id=? AND idempotency_key=?`, owner, key).Scan(&row).Error
 	if err != nil {
 		return generation.Task{}, err
 	}
@@ -129,24 +130,56 @@ func (s *Store) Create(ctx context.Context, owner, key, hash string, input gener
 	if row.ID == id {
 		s.notify(ctx, id)
 	}
-	return generation.Task{ID: row.ID, Version: row.Version, Status: row.Status, Stage: row.Stage, ProjectID: row.ProjectID, NodeID: row.NodeID, Model: row.Model, ResultURL: row.ResultURL, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}, nil
+	return generation.Task{ID: row.ID, Version: row.Version, Status: row.Status, Priority: row.Priority, Stage: row.Stage, ProjectID: row.ProjectID, NodeID: row.NodeID, Model: row.Model, ResultURL: row.ResultURL, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}, nil
 }
 func (s *Store) Get(ctx context.Context, id string) (generation.Task, string, error) {
 	var r struct {
 		ID, OwnerID, ProjectID, NodeID, Model, ResultURL, Stage, FailureCode, AttachedNodeID, AttachmentNote string
 		Percent                                                                                              *float64
 		Status                                                                                               generation.Status
+		Priority                                                                                             generation.Priority
 		CreatedAt, UpdatedAt                                                                                 time.Time
 		Version                                                                                              int64
 	}
-	tx := s.DB.WithContext(ctx).Raw(`SELECT t.id,t.owner_id,t.project_id,t.node_id,t.model,t.result_url,t.status,t.stage,t.percent,COALESCE(t.failure_code,'') AS failure_code,COALESCE(a.node_id,'') AS attached_node_id,COALESCE(a.note,'') AS attachment_note,t.created_at,t.updated_at,COALESCE((SELECT max(id) FROM generation_task_events WHERE task_id=t.id),0) AS version FROM generation_tasks t LEFT JOIN agent_generation_attachments a ON a.task_id=t.id WHERE t.id=?`, id).Scan(&r)
+	tx := s.DB.WithContext(ctx).Raw(`SELECT t.id,t.owner_id,t.project_id,t.node_id,t.model,t.result_url,t.status,t.priority,t.stage,t.percent,COALESCE(t.failure_code,'') AS failure_code,COALESCE(a.node_id,'') AS attached_node_id,COALESCE(a.note,'') AS attachment_note,t.created_at,t.updated_at,COALESCE((SELECT max(id) FROM generation_task_events WHERE task_id=t.id),0) AS version FROM generation_tasks t LEFT JOIN agent_generation_attachments a ON a.task_id=t.id WHERE t.id=?`, id).Scan(&r)
 	if tx.Error != nil {
 		return generation.Task{}, "", tx.Error
 	}
 	if tx.RowsAffected == 0 {
 		return generation.Task{}, "", generation.ErrNotFound
 	}
-	return generation.Task{ID: r.ID, Version: r.Version, ProjectID: r.ProjectID, NodeID: r.NodeID, Model: r.Model, ResultURL: r.ResultURL, AttachedNodeID: r.AttachedNodeID, AttachmentNote: r.AttachmentNote, Status: r.Status, Stage: r.Stage, Percent: r.Percent, FailureCode: r.FailureCode, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}, r.OwnerID, nil
+	return generation.Task{ID: r.ID, Version: r.Version, ProjectID: r.ProjectID, NodeID: r.NodeID, Model: r.Model, ResultURL: r.ResultURL, AttachedNodeID: r.AttachedNodeID, AttachmentNote: r.AttachmentNote, Status: r.Status, Priority: r.Priority, Stage: r.Stage, Percent: r.Percent, FailureCode: r.FailureCode, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}, r.OwnerID, nil
+}
+
+func (s *Store) SetPriority(ctx context.Context, id, actor string, priority generation.Priority) (generation.Task, error) {
+	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current struct {
+			Status   string
+			Priority generation.Priority
+		}
+		q := tx.Raw(`SELECT status,priority FROM generation_tasks WHERE id=? FOR UPDATE`, id).Scan(&current)
+		if q.Error != nil {
+			return q.Error
+		}
+		if q.RowsAffected == 0 {
+			return generation.ErrNotFound
+		}
+		if current.Status != "queued" {
+			return generation.ErrConflict
+		}
+		if current.Priority == priority {
+			return nil
+		}
+		if err := tx.Exec(`UPDATE generation_tasks SET priority=?,updated_at=now() WHERE id=?`, priority, id).Error; err != nil {
+			return err
+		}
+		return tx.Exec(`INSERT INTO generation_admin_audit(actor_id,action,target_type,target_id,change_details) VALUES(?,'set_generation_priority','generation_task',?,jsonb_build_object('from',?::text,'to',?::text))`, actor, id, string(current.Priority), string(priority)).Error
+	})
+	if err != nil {
+		return generation.Task{}, err
+	}
+	task, _, err := s.Get(ctx, id)
+	return task, err
 }
 func (s *Store) Cancel(ctx context.Context, id, owner string) (generation.Task, error) {
 	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

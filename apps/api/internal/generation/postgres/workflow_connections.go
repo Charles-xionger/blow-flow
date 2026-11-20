@@ -20,10 +20,8 @@ func (s *Store) ensureWorkflowConnection(ctx context.Context, m *generation.Work
 		if err := tx.Exec(`INSERT INTO generation_queue_limits(scope,key,max_active,max_queued) VALUES('model',?,?,100) ON CONFLICT(scope,key) DO NOTHING`, m.ID, c.Concurrency).Error; err != nil {
 			return err
 		}
-		for _, op := range []string{"submit", "query", "save"} {
-			if err := tx.Exec(`INSERT INTO generation_circuits(connection_id,operation) VALUES(?,?) ON CONFLICT(connection_id,operation) DO NOTHING`, c.ID, op).Error; err != nil {
-				return err
-			}
+		if err := tx.Exec(`INSERT INTO generation_circuits(connection_id,operation,failure_threshold,cooldown_seconds) VALUES(?,'submit',5,60) ON CONFLICT(connection_id,operation) DO NOTHING`, c.ID).Error; err != nil {
+			return err
 		}
 		return nil
 	})

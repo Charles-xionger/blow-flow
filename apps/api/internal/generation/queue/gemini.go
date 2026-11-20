@@ -69,15 +69,11 @@ func (p Gemini) SubmitTask(ctx context.Context, taskID string, input generation.
 	req.Header.Set("x-goog-api-key", p.APIKey)
 	res, err := safe.Do(req)
 	if err != nil {
-		return "", ErrSubmissionUncertain
+		return "", submissionTransportError(err)
 	}
 	defer res.Body.Close()
-	switch res.StatusCode {
-	case 400, 401, 403, 404, 422, 429:
-		return "", fmt.Errorf("%w: HTTP %d", ErrSubmissionRejected, res.StatusCode)
-	}
 	if res.StatusCode != 200 {
-		return "", ErrSubmissionUncertain
+		return "", submissionHTTPError(res)
 	}
 	var reply struct {
 		Candidates []struct {

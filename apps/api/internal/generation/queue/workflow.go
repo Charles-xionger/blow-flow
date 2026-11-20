@@ -78,11 +78,11 @@ func (p Providers) submitWorkflow(ctx context.Context, in generation.Input) (str
 	safe.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	response, err := safe.Do(req)
 	if err != nil {
-		return "", ErrSubmissionUncertain
+		return "", submissionTransportError(err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != 200 {
-		return "", ErrSubmissionUncertain
+		return "", submissionHTTPError(response)
 	}
 	answer, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 	if err != nil {
