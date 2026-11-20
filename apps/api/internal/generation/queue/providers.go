@@ -26,7 +26,7 @@ func (p Providers) Submit(ctx context.Context, in generation.Input) (string, err
 	}
 }
 func (p Providers) QueryInput(ctx context.Context, in generation.Input, id string) (Observation, error) {
-	if in.Workflow == nil || !generation.ValidInput(in) {
+	if in.Workflow == nil || !generation.ValidWorkflowInput(in) {
 		return Observation{}, generation.ErrInvalid
 	}
 	m := in.Workflow
