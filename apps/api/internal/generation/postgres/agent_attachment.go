@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"blow-flow/api/internal/generation"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -11,7 +12,10 @@ import (
 // attachAgentResult runs in the delivery transaction. A failed canvas write
 // leaves the provider result in the saving state for the existing save retry.
 func attachAgentResult(tx *gorm.DB, taskID, url string, now time.Time) error {
-	var task struct{ OwnerID, ProjectID, NodeID, Model string; InputSnapshot []byte }
+	var task struct {
+		OwnerID, ProjectID, NodeID, Model string
+		InputSnapshot                     []byte
+	}
 	q := tx.Raw(`SELECT owner_id,project_id,node_id,model,input_snapshot FROM generation_tasks WHERE id=?`, taskID).Scan(&task)
 	if q.Error != nil {
 		return q.Error
@@ -82,8 +86,10 @@ func attachAgentResult(tx *gorm.DB, taskID, url string, now time.Time) error {
 				}
 				outputField := "imageSrc"
 				var frozen generation.Input
-				if json.Unmarshal(task.InputSnapshot,&frozen)!=nil{return fmt.Errorf("invalid frozen generation input")}
-				if task.Model == generation.H3Model || frozen.Workflow!=nil && frozen.Workflow.Category=="VIDEO" {
+				if json.Unmarshal(task.InputSnapshot, &frozen) != nil {
+					return fmt.Errorf("invalid frozen generation input")
+				}
+				if task.Model == generation.H3Model || frozen.Workflow != nil && frozen.Workflow.Category == "VIDEO" {
 					outputField = "videoSrc"
 				}
 				output := map[string]any{outputField: url, "outputArtifacts": []string{url}}
