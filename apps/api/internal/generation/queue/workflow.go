@@ -62,7 +62,7 @@ func (p Providers) submitWorkflow(ctx context.Context, in generation.Input) (str
 		counts := map[string]int{}
 		uploader := H3{Krea2{BaseURL: m.Connection.BaseURL, APIKey: key, Client: p.RunningHub.Client}}
 		for _, ref := range in.References {
-			name, e := uploader.upload(ctx, ref)
+			name, info, e := uploader.upload(ctx, ref)
 			if e != nil {
 				return "", e
 			}
@@ -82,7 +82,9 @@ func (p Providers) submitWorkflow(ctx context.Context, in generation.Input) (str
 			loader.Inputs[field] = name
 			if ref.Kind == "video" {
 				loader.Inputs["force_rate"] = 24
-				loader.Inputs["frame_load_cap"] = max(5, in.Duration*24)
+				frames := max(5, in.Duration*24)
+				available := max(5, int(info.Duration*24))
+				loader.Inputs["frame_load_cap"] = min(frames, 5+17*((available-5)/17))
 				loader.Inputs["skip_first_frames"] = 0
 				loader.Inputs["select_every_nth"] = 1
 			}

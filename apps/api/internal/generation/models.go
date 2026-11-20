@@ -23,7 +23,8 @@ func ModelConfigured(model string) bool {
 	case GeminiImageModel:
 		return os.Getenv("GEMINI_API_KEY") != ""
 	default:
-		return false
+		m, _, err := ResolveModel(model)
+		return err == nil && os.Getenv(m.Connection.APIKeyEnv) != ""
 	}
 }
 func ModelCategory(model string) string {
@@ -33,7 +34,11 @@ func ModelCategory(model string) string {
 	if ConnectionForModel(model) != "" {
 		return "IMAGE"
 	}
-	return ""
+	m, _, err := ResolveModel(model)
+	if err != nil {
+		return ""
+	}
+	return m.Category
 }
 
 func ConnectionForModel(model string) string {
