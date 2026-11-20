@@ -25,6 +25,8 @@ import (
 
 func agentStore(t *testing.T) (*Store, *resource.Service, string, string) {
 	t.Helper()
+	t.Setenv("RUNNINGHUB_BASE_URL", "https://api.runninghub.example")
+	t.Setenv("RUNNINGHUB_API_KEY", "test-key")
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Fatal("TEST_DATABASE_URL required")
@@ -565,6 +567,86 @@ func TestAgentDeliveryWritesSavedResultToCanvasOnce(t *testing.T) {
 			}
 			if graph.Nodes[len(graph.Nodes)-1].Data.ImageSrc != "https://assets.example/new.png" {
 				t.Fatalf("result missing: %+v", graph.Nodes)
+			}
+		})
+	}
+}
+
+func TestAgentGenerationFreezesOwnedOrderedReferences(t *testing.T) {
+	for _, mode := range []string{"owned", "unowned"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Setenv("OSS_BUCKET_NAME", "assets")
+			t.Setenv("OSS_REGION", "oss-cn-test")
+			t.Setenv("ARK_API_KEY", "test-key")
+			s, resources, owner, project := agentStore(t)
+			ctx := context.Background()
+			a := "https://assets.oss-cn-test.aliyuncs.com/a.png"
+			b := "https://assets.oss-cn-test.aliyuncs.com/b.png"
+			canvas := json.RawMessage(fmt.Sprintf(`{"name":"Canvas","nodes":[{"id":"a","type":"image","position":{"x":0,"y":0},"data":{"type":"image","imageSrc":%q}},{"id":"b","type":"image","position":{"x":0,"y":400},"data":{"type":"image","imageSrc":%q}},{"id":"target","type":"image","position":{"x":500,"y":0},"data":{"type":"imageToImage"}}],"edges":[{"id":"a-target","source":"a","target":"target"},{"id":"b-target","source":"b","target":"target"}],"viewport":{"x":0,"y":0,"zoom":1},"history":{"schema":1}}`, a, b))
+			if _, err := resources.SaveCanvas(ctx, owner, project, resource.SaveCanvas{RequestID: "refs", BaseVersion: 1, Snapshot: canvas}); err != nil {
+				t.Fatal(err)
+			}
+			task, err := s.Command(ctx, owner, project, agent.Command{RequestID: "send-refs", Action: "send", Text: "use references", ModelID: "gemini", CanvasVersion: 2})
+			if err != nil {
+				t.Fatal(err)
+			}
+			run, err := s.Claim(ctx, task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = s.StartStep(ctx, run.Token, agent.StepStart{CallID: "refs", Name: "prepare_generation", Arguments: json.RawMessage(`{}`)}); err != nil {
+				t.Fatal(err)
+			}
+			if mode == "unowned" {
+				b = "https://assets.oss-cn-test.aliyuncs.com/foreign.png"
+			}
+			input := json.RawMessage(fmt.Sprintf(`{"prompt":"scene","width":2048,"height":2048,"references":[{"kind":"image","url":%q},{"kind":"image","url":%q}]}`, b, a))
+			batch, err := s.PrepareGeneration(ctx, run.Token, "refs", []GenerationItem{{NodeID: "target", ModelID: generation.Seedream55Model, Input: input}})
+			if mode == "unowned" {
+				if !errors.Is(err, agent.ErrInvalid) {
+					t.Fatalf("unowned reference: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			view, err := s.Snapshot(ctx, owner, project)
+			if err != nil || len(view.Tasks) != 1 || view.Tasks[0].Question == nil {
+				t.Fatalf("approval question: %+v %v", view, err)
+			}
+			var question struct {
+				Items []struct {
+					ModelID string `json:"modelId"`
+					Input   struct {
+						References []generation.Reference `json:"references"`
+					} `json:"input"`
+				} `json:"items"`
+			}
+			if err = json.Unmarshal(view.Tasks[0].Question.Scope, &question); err != nil || len(question.Items) != 1 || question.Items[0].ModelID != generation.Seedream55Model || len(question.Items[0].Input.References) != 2 || question.Items[0].Input.References[0].URL != b {
+				t.Fatalf("frozen approval scope: %+v %v", question, err)
+			}
+			if _, err = s.Command(ctx, owner, project, agent.Command{RequestID: "approve-refs", Action: "answer", QuestionID: "refs", Text: "确认生成"}); err != nil {
+				t.Fatal(err)
+			}
+			var ids string
+			if err = s.DB.Raw(`SELECT generation_task_ids FROM agent_generation_batches WHERE id=?`, batch.ID).Scan(&ids).Error; err != nil {
+				t.Fatal(err)
+			}
+			var list []string
+			if err = json.Unmarshal([]byte(ids), &list); err != nil || len(list) != 1 {
+				t.Fatalf("ids %q: %v", ids, err)
+			}
+			var snapshot string
+			if err = s.DB.Raw(`SELECT input_snapshot FROM generation_tasks WHERE id=?`, list[0]).Scan(&snapshot).Error; err != nil {
+				t.Fatal(err)
+			}
+			var frozen generation.Input
+			if err = json.Unmarshal([]byte(snapshot), &frozen); err != nil {
+				t.Fatal(err)
+			}
+			if len(frozen.References) != 2 || frozen.References[0].URL != b || frozen.References[1].URL != a {
+				t.Fatalf("reference order: %+v", frozen.References)
 			}
 		})
 	}

@@ -105,9 +105,9 @@ func (s *Store) PrepareGeneration(ctx context.Context, token, callID string, ite
 				return err
 			}
 			binding, nodeType, exists := generationBinding(project.Snapshot, item.NodeID)
-			isVideo := input.Model == "runninghub/h3"
+			isVideo := generation.ModelCategory(input.Model) == "VIDEO"
 			validTarget := isVideo && (nodeType == "textToVideo" || nodeType == "imageToVideo" || nodeType == "startEndToVideo" || nodeType == "video") || !isVideo && (nodeType == "textToImage" || nodeType == "imageToImage" || nodeType == "image")
-			if item.NodeID == "" || len(item.NodeID) > 200 || seen[item.NodeID] || !exists || !validTarget || !generation.ValidInput(input) || !ownedGenerationReferences(tx, row.OwnerID, row.ProjectID, item.NodeID, project.Snapshot, input.References) {
+			if item.NodeID == "" || len(item.NodeID) > 200 || seen[item.NodeID] || !exists || !validTarget || !generation.ModelConfigured(input.Model) || !generation.ValidInput(input) || !ownedGenerationReferences(tx, row.OwnerID, row.ProjectID, item.NodeID, project.Snapshot, input.References) {
 				return agent.ErrInvalid
 			}
 			seen[item.NodeID] = true
