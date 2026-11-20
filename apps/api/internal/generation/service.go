@@ -13,10 +13,17 @@ import (
 
 type Status string
 type Priority string
+type CircuitState string
 
 const (
 	PriorityNormal    Priority = "normal"
 	PriorityExpedited Priority = "expedited"
+)
+
+const (
+	CircuitNormal  CircuitState = "normal"
+	CircuitPaused  CircuitState = "paused"
+	CircuitProbing CircuitState = "probing"
 )
 
 const (
@@ -117,11 +124,11 @@ type WorkerHeartbeat struct {
 	SeenAt time.Time `json:"seenAt"`
 }
 type CircuitStatus struct {
-	ConnectionID        string     `json:"connectionId"`
-	State               string     `json:"state"`
-	ConsecutiveFailures int        `json:"consecutiveFailures"`
-	LastReason          string     `json:"lastReason,omitempty"`
-	NextProbeAt         *time.Time `json:"nextProbeAt,omitempty"`
+	ConnectionID        string       `json:"connectionId"`
+	State               CircuitState `json:"state"`
+	ConsecutiveFailures int          `json:"consecutiveFailures"`
+	LastReason          string       `json:"lastReason,omitempty"`
+	NextProbeAt         *time.Time   `json:"nextProbeAt,omitempty"`
 }
 type Resources interface {
 	OwnsProject(context.Context, string, string) (bool, error)

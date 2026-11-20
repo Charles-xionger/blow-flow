@@ -191,6 +191,84 @@ func TestExpeditedPriorityControlsClaimOrderAndAuditsOnlyChanges(t *testing.T) {
 	}
 }
 
+func TestElapsedSubmitCircuitRecordsSelectedExpeditedProbeAndClosesOnAcceptance(t *testing.T) {
+	s, owner := resilienceStore(t)
+	ctx := context.Background()
+	wakeup, _ := s.Create(ctx, owner, "probe-wakeup", "probe-wakeup", resilienceInput())
+	expedited, _ := s.Create(ctx, owner, "probe-expedited", "probe-expedited", resilienceInput())
+	if _, err := s.SetPriority(ctx, expedited.ID, owner, generation.PriorityExpedited); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DB.Exec(`UPDATE generation_circuits SET state='open',cooldown_step=1,next_probe_at=now()-interval '1 second' WHERE connection_id='runninghub-international' AND operation='submit'`).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	probe, ok, err := s.ClaimSubmission(ctx, wakeup.ID)
+	if err != nil || !ok || probe.TaskID != expedited.ID {
+		t.Fatalf("probe=%+v ok=%v err=%v", probe, ok, err)
+	}
+	var electedProbe string
+	if err = s.DB.Raw(`SELECT COALESCE(probe_task_id,'') FROM generation_circuits WHERE connection_id='runninghub-international' AND operation='submit'`).Scan(&electedProbe).Error; err != nil {
+		t.Fatal(err)
+	}
+	if electedProbe != expedited.ID {
+		t.Fatalf("elected probe=%s, want selected expedited task %s", electedProbe, expedited.ID)
+	}
+	if err = s.ResolveSubmission(ctx, probe.TaskID, probe.Token, "provider-probe", nil); err != nil {
+		t.Fatal(err)
+	}
+	var circuit struct {
+		State        string
+		ProbeTaskID  string
+		CooldownStep int
+	}
+	if err = s.DB.Raw(`SELECT state,COALESCE(probe_task_id,'') AS probe_task_id,cooldown_step FROM generation_circuits WHERE connection_id='runninghub-international' AND operation='submit'`).Scan(&circuit).Error; err != nil {
+		t.Fatal(err)
+	}
+	if circuit.State != "closed" || circuit.ProbeTaskID != "" || circuit.CooldownStep != 0 {
+		t.Fatalf("circuit=%+v", circuit)
+	}
+}
+
+func TestElapsedSubmitCircuitRecordsSelectedExpeditedProbeAndAdvancesOnCountedFailure(t *testing.T) {
+	s, owner := resilienceStore(t)
+	ctx := context.Background()
+	wakeup, _ := s.Create(ctx, owner, "failure-wakeup", "failure-wakeup", resilienceInput())
+	expedited, _ := s.Create(ctx, owner, "failure-expedited", "failure-expedited", resilienceInput())
+	if _, err := s.SetPriority(ctx, expedited.ID, owner, generation.PriorityExpedited); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DB.Exec(`UPDATE generation_circuits SET state='open',cooldown_step=0,next_probe_at=now()-interval '1 second' WHERE connection_id='runninghub-international' AND operation='submit'`).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	probe, ok, err := s.ClaimSubmission(ctx, wakeup.ID)
+	if err != nil || !ok || probe.TaskID != expedited.ID {
+		t.Fatalf("probe=%+v ok=%v err=%v", probe, ok, err)
+	}
+	var electedProbe string
+	if err = s.DB.Raw(`SELECT COALESCE(probe_task_id,'') FROM generation_circuits WHERE connection_id='runninghub-international' AND operation='submit'`).Scan(&electedProbe).Error; err != nil {
+		t.Fatal(err)
+	}
+	if electedProbe != expedited.ID {
+		t.Fatalf("elected probe=%s, want selected expedited task %s", electedProbe, expedited.ID)
+	}
+	failure := generation.NewSubmissionFailure(generation.SubmissionProvider5xx, true, 0, errors.New("HTTP 503"))
+	if err = s.ResolveSubmission(ctx, probe.TaskID, probe.Token, "", failure); err != nil {
+		t.Fatal(err)
+	}
+	var circuit struct {
+		State, ProbeTaskID string
+		CooldownStep       int
+	}
+	if err = s.DB.Raw(`SELECT state,COALESCE(probe_task_id,'') AS probe_task_id,cooldown_step FROM generation_circuits WHERE connection_id='runninghub-international' AND operation='submit'`).Scan(&circuit).Error; err != nil {
+		t.Fatal(err)
+	}
+	if circuit.State != "open" || circuit.ProbeTaskID != "" || circuit.CooldownStep != 1 {
+		t.Fatalf("circuit=%+v", circuit)
+	}
+}
+
 func TestSubmitCircuitUsesFiveFailuresAndSteppedCooldown(t *testing.T) {
 	s, owner := resilienceStore(t)
 	ctx := context.Background()
@@ -346,6 +424,33 @@ func TestQueuedTaskRecoversWithoutRabbitWakeupAfterGrantReturns(t *testing.T) {
 	}
 	if err := s.ResolveSubmission(ctx, task.ID, claim.Token, "provider-original", nil); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestQueuedRecoveryScanIsConnectionNeutral(t *testing.T) {
+	s, owner := resilienceStore(t)
+	ctx := context.Background()
+	otherConnection := "other-provider"
+	if err := s.DB.Exec(`INSERT INTO generation_connection_limits(id,max_active) VALUES(?,5)`, otherConnection).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DB.Exec(`INSERT INTO generation_circuits(connection_id,operation) VALUES(?,'submit')`, otherConnection).Error; err != nil {
+		t.Fatal(err)
+	}
+	other, _ := s.Create(ctx, owner, "other-oldest", "other-oldest", resilienceInput())
+	if err := s.DB.Exec(`UPDATE generation_tasks SET connection_id=?,created_at=now()-interval '1 hour' WHERE id=?`, otherConnection, other.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		task, _ := s.Create(ctx, owner, fmt.Sprintf("expedited-%d", i), fmt.Sprintf("expedited-%d", i), resilienceInput())
+		if _, err := s.SetPriority(ctx, task.ID, owner, generation.PriorityExpedited); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ids, err := s.DueQueued(ctx, 1)
+	if err != nil || len(ids) != 1 || ids[0] != other.ID {
+		t.Fatalf("connection-neutral recovery scan ids=%v err=%v", ids, err)
 	}
 }
 

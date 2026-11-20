@@ -62,12 +62,6 @@ func (s *Store) ClaimSubmission(ctx context.Context, id string) (Submission, boo
 			if circuit.NextProbeAt == nil && (circuit.OpenedAt == nil || time.Since(*circuit.OpenedAt) < time.Duration(circuit.CooldownSeconds)*time.Second) {
 				return ErrSubmitCircuitOpen
 			}
-			if err := tx.Exec(`UPDATE generation_circuits SET state='half_open',probe_until=now()+interval '20 minutes',probe_task_id=?,updated_at=now() WHERE connection_id=? AND operation='submit'`, id, connection).Error; err != nil {
-				return err
-			}
-			if err := tx.Exec(`INSERT INTO generation_circuit_events(connection_id,operation,state,reason) VALUES(?,'submit','half_open','cooldown_elapsed')`, connection).Error; err != nil {
-				return err
-			}
 		} else if circuit.State == "half_open" && circuit.ProbeUntil != nil && time.Now().Before(*circuit.ProbeUntil) {
 			return ErrSubmitCircuitOpen
 		}
@@ -126,6 +120,11 @@ func (s *Store) ClaimSubmission(ctx context.Context, id string) (Submission, boo
 		if circuit.State == "open" || circuit.State == "half_open" {
 			if err := tx.Exec(`UPDATE generation_circuits SET state='half_open',probe_until=?,probe_task_id=?,updated_at=? WHERE connection_id=? AND operation='submit'`, now.Add(20*time.Minute), id, now, connection).Error; err != nil {
 				return err
+			}
+			if circuit.State == "open" {
+				if err := tx.Exec(`INSERT INTO generation_circuit_events(connection_id,operation,state,reason) VALUES(?,'submit','half_open','cooldown_elapsed')`, connection).Error; err != nil {
+					return err
+				}
 			}
 		}
 		var raw string
@@ -196,8 +195,8 @@ func (s *Store) RequeueSubmission(ctx context.Context, id, token string) error {
 func (s *Store) ResolveSubmission(ctx context.Context, id, token, providerID string, submitErr error) error {
 	status, event := "running", "accepted"
 	if submitErr != nil {
-		class, certain, _ := generation.SubmissionFailureDetails(submitErr)
-		if certain && class != generation.SubmissionNonCounting {
+		class, definitelyNotAccepted, _ := generation.SubmissionFailureDetails(submitErr)
+		if definitelyNotAccepted && class != generation.SubmissionNonCounting {
 			status, event = "queued", "submission_deferred"
 		} else if errors.Is(submitErr, generation.ErrInvalid) || errors.Is(submitErr, generation.ErrSubmissionRejected) {
 			status, event = "failed", "rejected"
@@ -264,6 +263,9 @@ func (s *Store) recordSubmitOutcome(tx *gorm.DB, id string, submitErr error) err
 	class, _, retryAfter := generation.SubmissionFailureDetails(submitErr)
 	if class == generation.SubmissionNonCounting {
 		if circuit.State == "half_open" {
+			// Only provider acceptance closes a probing circuit. A definite,
+			// non-counting rejection releases this queued-task probe so the next
+			// real queued task can probe without advancing the cooldown ladder.
 			return tx.Exec(`UPDATE generation_circuits SET consecutive_failures=0,probe_until=NULL,probe_task_id=NULL,last_reason=?,updated_at=now() WHERE connection_id=? AND operation='submit'`, string(class), connection).Error
 		}
 		return tx.Exec(`UPDATE generation_circuits SET consecutive_failures=0,last_reason=?,updated_at=now() WHERE connection_id=? AND operation='submit'`, string(class), connection).Error
