@@ -117,7 +117,7 @@ export function deleteSkill(id: string, scope: SkillOwnerScope = currentLocalOwn
 
 const skillName = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
-export function uploadSkillMarkdown(input: { fileName: string; content: string; size: number; totalSize: number; resources?: Map<string, Buffer> }, scope: SkillOwnerScope = currentLocalOwner): SkillSummary {
+export function validateSkillMarkdown(input: { fileName: string; content: string; size: number; totalSize: number; resources?: Map<string, Buffer> }): { name: string; description: string; instructions: string; resources: Map<string, Buffer> } {
     const limits = getSkillUploadLimits();
     if (input.totalSize > limits.packageBytes) throw new SkillUploadError(`技能包不能超过 ${formatSkillUploadLimit(limits.packageMb)}`, 413);
     if (input.size > limits.fileBytes) throw new SkillUploadError(`SKILL.md 不能超过 ${formatSkillUploadLimit(limits.fileMb)}`, 413);
@@ -140,11 +140,16 @@ export function uploadSkillMarkdown(input: { fileName: string; content: string; 
 
     const instructions = input.content.slice(match[0].length).trim();
     if (!instructions) throw new SkillUploadError('SKILL.md 正文不能为空');
+    return { name, description: description.trim(), instructions, resources: input.resources ?? new Map() };
+}
+
+export function uploadSkillMarkdown(input: { fileName: string; content: string; size: number; totalSize: number; resources?: Map<string, Buffer> }, scope: SkillOwnerScope = currentLocalOwner): SkillSummary {
+    const { name, description, instructions } = validateSkillMarkdown(input);
     const db = getDatabase();
     try {
         db.transaction(() => {
             db.prepare('INSERT INTO user_skills (owner_id, name, description, instructions, created_at) VALUES (?, ?, ?, ?, ?)')
-                .run(scope.ownerId, name, description.trim(), instructions, Date.now());
+                .run(scope.ownerId, name, description, instructions, Date.now());
             const insertResource = db.prepare('INSERT INTO user_skill_resources (owner_id, skill_name, path, content) VALUES (?, ?, ?, ?)');
             for (const [resourcePath, content] of input.resources ?? []) insertResource.run(scope.ownerId, name, resourcePath, content);
         }).immediate();
@@ -152,5 +157,9 @@ export function uploadSkillMarkdown(input: { fileName: string; content: string; 
         if (error instanceof Error && /UNIQUE constraint failed/.test(error.message)) throw new SkillUploadError(`创作技能 ${name} 已存在`, 409);
         throw error;
     }
-    return { id: name, name, description: description.trim(), source: '用户上传', readOnly: false, resources: [...(input.resources?.keys() ?? [])].sort() };
+    return { id: name, name, description: description, source: '用户上传', readOnly: false, resources: [...(input.resources?.keys() ?? [])].sort() };
 }
+
+export function listBuiltInSkills(): SkillSummary[] { return (Object.keys(skills) as SkillId[]).map(toSkillSummary); }
+export function getBuiltInSkill(id: string): SkillDetail | undefined { const skill=builtInSkill(id); return skill ? {...toSkillSummary(id as SkillId), instructions:skill.instructions} : undefined; }
+export function readBuiltInSkill(id: string, resource?: string): string | undefined { const skill=builtInSkill(id); if (!skill) return undefined; if (!resource) return skill.instructions; return (skill.resources as Record<string,string>)[resource]; }

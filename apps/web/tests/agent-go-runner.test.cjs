@@ -1,11 +1,10 @@
 require('../scripts/register-typescript.cjs');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { createSkillTestFixture, skillUploadInput } = require('./helpers/skill-test-fixture.cjs');
+const { createSkillTestFixture } = require('./helpers/skill-test-fixture.cjs');
 const fixture = createSkillTestFixture(test, 'go-runner-skills');
 const { GoPiHost } = require('../lib/agent/go-runner-host');
 const { GoAgentRunClient } = require('../lib/agent/go-runner-client');
-const { uploadSkillMarkdown } = fixture.requireApp('lib/agent/skills.ts');
 
 test('Go Pi host edits canvas through scoped HTTP store without SQLite', async () => {
   let snapshot = { name: 'Canvas', nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } };
@@ -39,9 +38,15 @@ test('Go Pi host edits canvas through scoped HTTP store without SQLite', async (
   } finally { await mcp.close(); }
 });
 
-test('Go Pi host discovers a newly uploaded skill and reads its instructions on demand', async () => {
+test('Go Pi host discovers account-scoped skills and reads instructions only on demand', async () => {
+  let uploaded = [];
   const run = {
     isAlive: () => true,
+    skills: async () => uploaded,
+    readSkill: async (id, resource) => {
+      assert.equal(id, 'fresh-skill');
+      return resource ? 'resource bytes' : 'Write three beats.';
+    },
     startStep: async (callId, name, args) => ({ callId, name, arguments: args, status: 'running', runId: 'run-1' }),
     finishStep: async () => {},
   };
@@ -51,12 +56,16 @@ test('Go Pi host discovers a newly uploaded skill and reads its instructions on 
     const available = await mcp.client.listTools();
     assert.ok(available.tools.some(tool => tool.name === 'discover_skills'));
     assert.ok(available.tools.some(tool => tool.name === 'read_skill'));
-    assert.equal(host.listSkillDescriptions().some(skill => skill.id === 'fresh-skill'), false);
-    uploadSkillMarkdown(skillUploadInput('---\nname: fresh-skill\ndescription: Compose short scenes.\n---\n\n# Fresh Skill\n\nWrite three beats.'));
+    assert.equal((await host.listSkillDescriptions()).some(skill => skill.id === 'fresh-skill'), false);
+    uploaded = [{ id: 'fresh-skill', name: 'fresh-skill', description: 'Compose short scenes.', source: '用户上传', readOnly: false, resources: [] }];
     const discovered = await mcp.client.callTool({ name: 'discover_skills', arguments: { _callId: 'discover-1' } });
     assert.ok(JSON.parse(discovered.content[0].text).some(skill => skill.id === 'fresh-skill'));
     const read = await mcp.client.callTool({ name: 'read_skill', arguments: { _callId: 'read-1', id: 'fresh-skill' } });
     assert.match(JSON.parse(read.content[0].text), /Write three beats/);
+    const builtIn = await mcp.client.callTool({ name: 'read_skill', arguments: { _callId: 'read-2', id: 'screenplay' } });
+    assert.match(JSON.parse(builtIn.content[0].text), /用户/);
+    uploaded = [];
+    assert.equal((await host.listSkillDescriptions()).some(skill => skill.id === 'fresh-skill'), false);
   } finally { await mcp.close(); }
 });
 

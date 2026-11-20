@@ -73,8 +73,8 @@ func TestImportLegacyScriptTasksPreservesCheckpointAndInterruptsActiveWork(t *te
 	if err = db.Raw(`SELECT count(*) FROM script_requests WHERE task_id=?`, id).Scan(&aliases).Error; err != nil || aliases != 2 {
 		t.Fatalf("aliases=%d %v", aliases, err)
 	}
-	if err = Apply(context.Background(), db, owner, "", export); err == nil {
-		t.Fatal("duplicate import was accepted")
+	if err = Apply(context.Background(), db, owner, "", export); err != nil {
+		t.Fatalf("exact repeat import rejected: %v", err)
 	}
 	var projects int64
 	if err = db.Raw(`SELECT count(*) FROM projects`).Scan(&projects).Error; err != nil || projects != 1 {

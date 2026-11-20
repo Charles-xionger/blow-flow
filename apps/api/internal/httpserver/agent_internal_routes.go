@@ -9,6 +9,7 @@ import (
 
 	"blow-flow/api/internal/agent"
 	"blow-flow/api/internal/resource"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -61,6 +62,46 @@ func registerAgentInternalRoutes(r *gin.Engine, d Dependencies) {
 			return
 		}
 		c.JSON(200, run)
+	})
+	g.GET("/run/skills", func(c *gin.Context) {
+		owner, ok := d.AgentRuns.(interface {
+			OwnerForRun(context.Context, string) (string, error)
+		})
+		if !ok || d.Skills == nil {
+			c.JSON(503, errorBody(c, "service_unavailable"))
+			return
+		}
+		id, err := owner.OwnerForRun(c.Request.Context(), bearer(c))
+		if err != nil {
+			agentError(c, err)
+			return
+		}
+		rows, err := d.Skills.List(c.Request.Context(), id)
+		if err != nil {
+			skillError(c, err)
+			return
+		}
+		c.JSON(200, rows)
+	})
+	g.GET("/run/skills/:id", func(c *gin.Context) {
+		owner, ok := d.AgentRuns.(interface {
+			OwnerForRun(context.Context, string) (string, error)
+		})
+		if !ok || d.Skills == nil {
+			c.JSON(503, errorBody(c, "service_unavailable"))
+			return
+		}
+		id, err := owner.OwnerForRun(c.Request.Context(), bearer(c))
+		if err != nil {
+			agentError(c, err)
+			return
+		}
+		value, err := d.Skills.Read(c.Request.Context(), id, c.Param("id"), c.Query("resource"))
+		if err != nil {
+			skillError(c, err)
+			return
+		}
+		c.JSON(200, gin.H{"content": value})
 	})
 	g.POST("/run/heartbeat", func(c *gin.Context) {
 		lease, err := d.AgentRuns.Heartbeat(c.Request.Context(), bearer(c))

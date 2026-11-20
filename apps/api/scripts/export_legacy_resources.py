@@ -5,6 +5,7 @@ Stop Next.js writers before running. The export includes no platform credentials
 """
 
 import argparse
+import base64
 import json
 import os
 import sqlite3
@@ -13,6 +14,23 @@ from pathlib import Path
 
 def rows(db, table):
     return [dict(row) for row in db.execute(f"SELECT * FROM {table}")]
+
+
+def skill_rows(db, present):
+    if "user_skills" not in present:
+        return [], []
+    columns = {row[1] for row in db.execute("PRAGMA table_info(user_skills)")}
+    owner = "owner_id" if "owner_id" in columns else "'local-user-v1' AS owner_id"
+    skills = [dict(row) for row in db.execute(f"SELECT {owner},name,description,instructions,created_at FROM user_skills ORDER BY name")]
+    resources = []
+    if "user_skill_resources" in present:
+        columns = {row[1] for row in db.execute("PRAGMA table_info(user_skill_resources)")}
+        resource_owner = "owner_id" if "owner_id" in columns else "'local-user-v1' AS owner_id"
+        for row in db.execute(f"SELECT {resource_owner},skill_name,path,content FROM user_skill_resources ORDER BY skill_name,path"):
+            value = dict(row)
+            value["content_base64"] = base64.b64encode(value.pop("content")).decode("ascii")
+            resources.append(value)
+    return skills, resources
 
 
 def main():
@@ -31,8 +49,11 @@ def main():
         missing = sorted(required - present)
         if missing:
             parser.error("legacy database is missing required tables: " + ", ".join(missing))
+        skills, skill_resources = skill_rows(db, present)
         payload = {
             "schemaVersion": 1,
+            "userSkills": skills,
+            "userSkillResources": skill_resources,
             "projects": rows(db, "workflows"),
             "folders": rows(db, "project_folders"),
             "mediaFiles": rows(db, "media_files"),

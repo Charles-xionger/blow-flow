@@ -32,6 +32,7 @@ import (
 	"blow-flow/api/internal/script"
 	scriptpostgres "blow-flow/api/internal/script/postgres"
 	scriptprogress "blow-flow/api/internal/script/progress"
+	"blow-flow/api/internal/skill"
 	"blow-flow/api/internal/telemetry"
 	"blow-flow/api/internal/textmodel"
 	"github.com/getsentry/sentry-go"
@@ -64,6 +65,7 @@ func run() error {
 	var generationService httpserver.GenerationService
 	var resourceService *resource.Service
 	var scriptService *script.Service
+	var skillService *skill.Service
 	var textModels *textmodel.Client
 	var scriptWakeups *scriptprogress.Redis
 	var wakeups *progress.Redis
@@ -79,6 +81,7 @@ func run() error {
 			resourceRepository := resourcepostgres.New(db)
 			resourceRepository.OnNodesRemoved = generationpostgres.DetachRemovedNodes
 			resourceService = &resource.Service{Repository: resourceRepository}
+			skillService = skill.New(db)
 			scriptStore := scriptpostgres.New(db)
 			if n, e := strconv.Atoi(os.Getenv("SCRIPT_MAX_QUEUED_PER_USER")); e == nil && n > 0 && n <= 1000 {
 				scriptStore.MaxQueuedPerUser = n
@@ -201,7 +204,7 @@ func run() error {
 	} else {
 		readiness["redis"] = nil
 	}
-	server := &http.Server{Handler: httpserver.NewWithDependencies(httpserver.Dependencies{Ping: ping, ReadinessChecks: readiness, Accounts: accounts, IdentityVerifier: identityVerifier, LocalAdmin: localAdmin, CreatorAuth: creatorAuth, Captcha: captcha, RefreshSessions: refreshSessions, AgentRuns: agentRuns, AgentCommands: agentCommands, AgentRunnerKey: agentRunnerKey, Generation: generationService, GenerationWakeups: wakeups, GenerationStreamClose: ctx.Done(), Resources: resourceService, ResourceBlobs: resourceoss.FromEnv(), Scripts: scriptService, ScriptWakeups: scriptWakeups, TextModels: textModels}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
+	server := &http.Server{Handler: httpserver.NewWithDependencies(httpserver.Dependencies{Ping: ping, ReadinessChecks: readiness, Accounts: accounts, IdentityVerifier: identityVerifier, LocalAdmin: localAdmin, CreatorAuth: creatorAuth, Captcha: captcha, RefreshSessions: refreshSessions, AgentRuns: agentRuns, AgentCommands: agentCommands, AgentRunnerKey: agentRunnerKey, Generation: generationService, GenerationWakeups: wakeups, GenerationStreamClose: ctx.Done(), Resources: resourceService, ResourceBlobs: resourceoss.FromEnv(), Scripts: scriptService, Skills: skillService, ScriptWakeups: scriptWakeups, TextModels: textModels}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(listener) }()
 	slog.Info("API listening", "address", listener.Addr().String())

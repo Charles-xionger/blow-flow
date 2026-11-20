@@ -481,3 +481,11 @@ func generationNodeIDs(nodes []map[string]any) []string {
 	}
 	return ids
 }
+
+func (s *Store) OwnerForRun(ctx context.Context, token string) (string, error) {
+	row, err := s.activeRun(s.DB.WithContext(ctx), token, false)
+	if err != nil {
+		return "", err
+	}
+	return row.OwnerID, nil
+}

@@ -1,3 +1,4 @@
+import type { SkillSummary } from './skills';
 import type { CanvasNode } from '../../types';
 import type { AgentMessage, AgentQuestion, AgentTask } from './types';
 import type { CanvasOperation } from './canvas-plan';
@@ -55,6 +56,8 @@ export class GoAgentRun {
     const messages: AgentMessage[] = wire.messages.map(message => ({ ...message, createdAt: Date.parse(message.createdAt) }));
     return { task, messages };
   }
+  skills() { return this.call<SkillSummary[]>('/run/skills'); }
+  async readSkill(id: string, resource?: string) { const query=resource ? `?resource=${encodeURIComponent(resource)}` : ''; return (await this.call<{content:string}>(`/run/skills/${encodeURIComponent(id)}${query}`)).content; }
   heartbeat() { return this.call<{ leaseUntil: string }>('/run/heartbeat', { method: 'POST' }); }
   async reply(callId: string, text: string) { await this.call<void>('/run/reply', { method: 'POST', body: JSON.stringify({ callId, text }) }); }
   startStep(callId: string, name: string, args: Record<string, unknown>) { return this.call<WireStep>('/run/steps/start', { method: 'POST', body: JSON.stringify({ callId, name, arguments: args }) }); }

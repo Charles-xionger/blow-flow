@@ -81,6 +81,7 @@ type Dependencies struct {
 	Resources             *resource.Service
 	ResourceBlobs         ResourceBlobStore
 	Scripts               *script.Service
+	Skills                SkillService
 	ScriptWakeups         GenerationWakeups
 	TextModels            *textmodel.Client
 }
