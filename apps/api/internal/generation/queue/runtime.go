@@ -65,6 +65,9 @@ func (SimulatedProvider) Generate(_ context.Context, input generation.Input) (st
 type Submitter interface {
 	Submit(context.Context, generation.Input) (string, error)
 }
+type TaskSubmitter interface {
+	SubmitTask(context.Context, string, generation.Input) (string, error)
+}
 type SubmissionWorker struct {
 	Store    *postgres.Store
 	Rabbit   *Rabbit
@@ -96,7 +99,13 @@ func (w SubmissionWorker) ProcessOne(ctx context.Context, id string) error {
 	if !allowed {
 		return w.Store.ResolveSubmission(ctx, id, claim.Token, "", generation.ErrSubmissionRejected)
 	}
-	providerID, submitErr := w.Provider.Submit(ctx, claim.Input)
+	var providerID string
+	var submitErr error
+	if provider, ok := w.Provider.(TaskSubmitter); ok {
+		providerID, submitErr = provider.SubmitTask(ctx, id, claim.Input)
+	} else {
+		providerID, submitErr = w.Provider.Submit(ctx, claim.Input)
+	}
 	return w.Store.ResolveSubmission(ctx, id, claim.Token, providerID, submitErr)
 }
 
