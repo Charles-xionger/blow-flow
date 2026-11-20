@@ -1,10 +1,24 @@
 package generation
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 )
+
+func TestCircuitStateSerializesAsOpenAPIValues(t *testing.T) {
+	for _, state := range []CircuitState{CircuitNormal, CircuitPaused, CircuitProbing} {
+		encoded, err := json.Marshal(CircuitStatus{State: state})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Contains(encoded, []byte(`"state":"`+string(state)+`"`)) {
+			t.Fatalf("state %q encoded as %s", state, encoded)
+		}
+	}
+}
 
 type resourcesStub struct{ project, reference bool }
 

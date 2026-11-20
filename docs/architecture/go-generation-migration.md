@@ -67,7 +67,7 @@ Go 的“异步”是请求处理与任务执行分离：HTTP handler 只提交�
 
 创建任务仍使用 `POST /v1/generation/tasks` 与 `Idempotency-Key`，成功返回 `202` 和任务快照。队列限额由 PostgreSQL 的 `generation_queue_limits` 配置，按 `user`、`model`、`connection` 作用域分别限制 `max_active` 与 `max_queued`。队列达到上限时，用户或模型限制返回 `429`，连接限制返回 `503`，错误体的 `error` 分别为 `user_queue_full`、`model_queue_full`、`connection_queue_full`；重试原幂等键仍返回原任务。队列长度由数据库中 `queued` 状态计算，RabbitMQ 只提供唤醒消息。
 
-提交熔断在 `generation_circuits` 中按平台连接及 `submit` 操作配置 `failure_threshold` 和 `cooldown_seconds`。提交结果不明计入故障并使任务进入 `needs_review`；打开的熔断器使后续任务保持 `queued`。冷却后仅一个半开探测获得提交租约；成功或明确的请求拒绝关闭熔断器，故障重新打开。状态变化追加到 `generation_circuit_events`。`query` 和 `save` 有独立配置行，不受提交熔断阻挡。
+提交熔断在 `generation_circuits` 中按平台连接及 `submit` 操作配置故障阈值与阶梯冷却。提交结果不明计入故障并使任务进入 `needs_review`；打开的熔断器使后续任务保持 `queued`。冷却后仅该连接下一项真实排队任务获得试探提交租约。只有供应商明确接受试探提交才关闭熔断并重置冷却阶梯；明确但不计数的请求拒绝只释放当前试探，保持试探恢复状态，让下一项真实排队任务继续试探且不推进冷却阶梯。计数故障则重新打开熔断并推进阶梯。状态变化追加到 `generation_circuit_events`；已提交任务的查询和已有结果保存不受提交熔断阻挡。
 
 管理员读取 `GET /v1/admin/generation/operations`，得到 `queueLength`、`oldestWaitSeconds`、`needsReview`、各阶段平均秒数与样本数、失败事件分类、Worker 最近心跳，以及连接操作熔断状态。非管理员返回 `403`；每次成功读取先追加 `generation_admin_audit`。此接口不包含提示词、密钥或结果地址。
 
