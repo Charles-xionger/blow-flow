@@ -8,7 +8,7 @@ import { resolveReferenceFromCanvas } from './references';
 import { GoCanvasEditor } from './go-canvas';
 import { goCanvasModels } from './go-canvas-models';
 import { editCanvasOperationSchema } from './canvas-operation-schema';
-import { GoAgentRun, GoAgentRunClient } from './go-runner-client';
+import { GoAgentRun, GoAgentRunClient, type GoGenerationItem } from './go-runner-client';
 import { createPiRuntimeForHost, type PiRuntimeHost } from './runtime';
 import { listBuiltInSkills, readBuiltInSkill } from './skills';
 import type { AgentReference, AgentTask } from './types';
@@ -26,9 +26,10 @@ const definitions = [
   { name: 'delete_canvas_nodes', description: 'Delete named nodes and descendants after exact user authorization.', inputSchema: object({ ids: { type: 'array', minItems: 1, items: { type: 'string' } } }, ['ids']) },
   { name: 'layout_canvas', description: 'Arrange existing nodes on the canvas.', inputSchema: object({ ids: { type: 'array', minItems: 1, items: { type: 'string' } }, direction: { enum: ['RIGHT', 'DOWN'] } }, ['ids']) },
   { name: 'canvas_models', description: 'Discover configured canvas models and parameters.', inputSchema: object({}) },
+  { name: 'generation_models', description: 'Discover image and video models supported by Go generation, including reference and size capabilities.', inputSchema: object({}) },
   { name: 'ask_question', description: 'Ask the user a critical question and wait for an answer.', inputSchema: object({ text: { type: 'string' }, options: { type: 'array', items: { type: 'string' } } }, ['text']) },
-  { name: 'prepare_generation', description: 'Freeze a RunningHub Krea2 image batch for explicit user approval. Only empty image nodes are supported. This tool waits for the user and never submits a provider request.', inputSchema: object({ items: { type: 'array', minItems: 1, maxItems: 20, items: object({ nodeId: { type: 'string' }, model: { const: 'runninghub/krea2' }, prompt: { type: 'string' }, width: { type: 'integer' }, height: { type: 'integer' } }, ['nodeId','model','prompt','width','height']) } }, ['items']) },
-  { name: 'generation_results', description: 'Read the status of a previously approved Go generation batch. Never resubmit failed or uncertain items.', inputSchema: object({ batchId: { type: 'string' } }, ['batchId']) },
+  { name: 'prepare_generation', description: 'Freeze an image or video batch and wait for explicit approval. A target with an existing result receives a sibling node. References and options are part of the frozen request.', inputSchema: object({ items: { type: 'array', minItems: 1, maxItems: 20, items: object({ nodeId: { type: 'string' }, modelId: { type: 'string' }, input: object({ prompt: { type: 'string' }, width: { type: 'integer' }, height: { type: 'integer' }, duration: { type: 'integer' }, references: { type: 'array', items: object({ kind: { enum: ['image','video','audio'] }, url: { type: 'string' }, useAudio: { type: 'boolean' } }, ['kind','url']) }, instanceType: { enum: ['plus'] }, imageOptions: object({ outputFormat: { enum: ['png','jpeg'] }, watermark: { type: 'boolean' }, promptOptimization: { enum: ['standard','fast'] }, background: { enum: ['opaque','transparent'] } }) }, ['prompt','width','height']) }, ['nodeId','modelId','input']) } }, ['items']) },
+  { name: 'generation_results', description: 'Read a previously approved batch. wait polls durable status through missed notifications. retrySave resumes saving the same provider output; it never submits generation again.', inputSchema: object({ batchId: { type: 'string' }, wait: { type: 'boolean' }, retrySave: { type: 'boolean' } }, ['batchId']) },
 ] as const;
 
 export class GoPiHost implements PiRuntimeHost {
@@ -57,7 +58,7 @@ export class GoPiHost implements PiRuntimeHost {
       const step = await this.run.startStep(callId, name, args);
       if (step.status === 'completed') return step.result;
       if (step.status !== 'running' || step.runId !== this.task.runId) throw new Error('Previous generation preparation requires reconciliation');
-      const batch = await this.run.prepareGeneration(callId, args.items as { nodeId: string; model: string; prompt: string; width: number; height: number }[]);
+      const batch = await this.run.prepareGeneration(callId, args.items as GoGenerationItem[]);
       return { waiting: true, batchId: batch.id, digest: batch.digest };
     }
     const step = await this.run.startStep(callId, name, args);
@@ -70,6 +71,11 @@ export class GoPiHost implements PiRuntimeHost {
       switch (name) {
         case 'canvas_models': {
           result = goCanvasModels().filter(model => model.configured).map(model => { if (!model.legacy) return model; const { capabilities, ...legacy } = model; void capabilities; return { ...legacy, parameters: 'Existing editor presets (resolution, aspectRatio, duration); not available for Agent generation submission' }; });
+          break;
+        }
+        case 'generation_models': {
+          const names: Record<string,string> = { 'runninghub-krea2': 'runninghub/krea2', 'runninghub-h3': 'runninghub/h3' };
+          result = goCanvasModels().filter(model => model.configured && !model.legacy).map(model => ({ ...model, id: names[model.id] ?? model.id }));
           break;
         }
         case 'discover_skills': {
@@ -94,7 +100,13 @@ export class GoPiHost implements PiRuntimeHost {
         }
         case 'generation_results': {
           if (typeof args.batchId !== 'string') throw new Error('Batch ID required');
-          result = await this.run.generationResults(args.batchId);
+          if (args.retrySave) await this.run.retryGenerationSave(args.batchId);
+          let batch = await this.run.generationResults(args.batchId);
+          while (args.wait && this.run.isAlive() && batch.status === 'approved' && batch.tasks.some(task => !['completed','failed','canceled','needs_review','query_failed','save_exhausted','save_unavailable','wait_timeout'].includes((task as {status:string}).status))) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            batch = await this.run.generationResults(args.batchId);
+          }
+          result = batch;
           break;
         }
         case 'edit_canvas': {

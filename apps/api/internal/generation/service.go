@@ -50,18 +50,20 @@ type Input struct {
 	Seed         int64    `json:"seed,omitempty"`
 }
 type Task struct {
-	ID          string    `json:"id"`
-	Version     int64     `json:"version"`
-	Status      Status    `json:"status"`
-	Model       string    `json:"model"`
-	ProjectID   string    `json:"projectId"`
-	NodeID      string    `json:"nodeId,omitempty"`
-	ResultURL   string    `json:"resultUrl,omitempty"`
-	Stage       string    `json:"stage"`
-	Percent     *float64  `json:"percent,omitempty"`
-	FailureCode string    `json:"failureCode,omitempty"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	ID             string    `json:"id"`
+	Version        int64     `json:"version"`
+	Status         Status    `json:"status"`
+	Model          string    `json:"model"`
+	ProjectID      string    `json:"projectId"`
+	NodeID         string    `json:"nodeId,omitempty"`
+	ResultURL      string    `json:"resultUrl,omitempty"`
+	AttachedNodeID string    `json:"attachedNodeId,omitempty"`
+	AttachmentNote string    `json:"attachmentNote,omitempty"`
+	Stage          string    `json:"stage"`
+	Percent        *float64  `json:"percent,omitempty"`
+	FailureCode    string    `json:"failureCode,omitempty"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 type Event struct {
 	ID         int64     `json:"id"`

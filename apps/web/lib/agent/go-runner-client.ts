@@ -13,6 +13,7 @@ type WireMessage = Omit<AgentMessage, 'createdAt'> & { createdAt: string };
 type WireStep = { callId: string; runId: string; name: string; arguments: Record<string, unknown>; status: 'running' | 'completed' | 'failed'; result?: unknown; createdAt: string };
 type WireContext = { task: WireTask; messages: WireMessage[]; steps: WireStep[] };
 export type GoRunClaim = { task: WireTask; runId: string; token: string; leaseUntil: string };
+export type GoGenerationItem = { nodeId: string; modelId: string; input: { prompt: string; width: number; height: number; duration?: number; references?: { kind: 'image' | 'video' | 'audio'; url: string; useAudio?: boolean }[]; instanceType?: 'plus'; imageOptions?: { outputFormat?: 'png' | 'jpeg'; watermark?: boolean; promptOptimization?: 'standard' | 'fast'; background?: 'opaque' | 'transparent' } } };
 
 export class GoAgentRunClient {
   constructor(private baseURL: string, private runnerKey: string, private fetcher: typeof fetch = fetch) {}
@@ -63,12 +64,13 @@ export class GoAgentRun {
   startStep(callId: string, name: string, args: Record<string, unknown>) { return this.call<WireStep>('/run/steps/start', { method: 'POST', body: JSON.stringify({ callId, name, arguments: args }) }); }
   finishStep(callId: string, status: 'completed' | 'failed', result: unknown) { return this.call<WireStep>('/run/steps/finish', { method: 'POST', body: JSON.stringify({ callId, status, result }) }); }
   async question(question: AgentQuestion) { await this.call<void>('/run/question', { method: 'POST', body: JSON.stringify(question) }); this.alive = false; }
-  async prepareGeneration(callId: string, items: { nodeId: string; model: string; prompt: string; width: number; height: number }[]) {
+  async prepareGeneration(callId: string, items: GoGenerationItem[]) {
     const batch = await this.call<{ id: string; digest: string; status: string }>('/run/generation/prepare', { method: 'POST', body: JSON.stringify({ callId, items }) });
     this.alive = false;
     return batch;
   }
   generationResults(batchId: string) { return this.call<{ id: string; digest: string; status: string; items: unknown[]; tasks: unknown[] }>(`/run/generation/batches/${encodeURIComponent(batchId)}`); }
+  retryGenerationSave(batchId: string) { return this.call<{ id: string; digest: string; status: string; items: unknown[]; tasks: unknown[] }>(`/run/generation/batches/${encodeURIComponent(batchId)}/retry-save`,{method:'POST'}); }
   async finish(status: 'completed' | 'failed' | 'stopped') { await this.call<void>('/run/finish', { method: 'POST', body: JSON.stringify({ status }) }); this.alive = false; }
   async receipt(projectId: string, callId: string) { return this.canvas(projectId).receipt(projectId, callId); }
   async edit(projectId: string, callId: string, operations: CanvasOperation[], snapshot: unknown, baseVersion: number, label: string, skipped: string[]) {

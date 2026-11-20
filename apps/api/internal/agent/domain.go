@@ -41,11 +41,14 @@ type Question struct {
 }
 
 type GenerationItem struct {
-	NodeID string `json:"nodeId"`
-	Model  string `json:"model"`
-	Prompt string `json:"prompt"`
-	Width  int    `json:"width"`
-	Height int    `json:"height"`
+	NodeID  string          `json:"nodeId"`
+	ModelID string          `json:"modelId,omitempty"`
+	Input   json.RawMessage `json:"input,omitempty"`
+	// Legacy flat wire fields remain accepted for existing Go clients.
+	Model  string `json:"model,omitempty"`
+	Prompt string `json:"prompt,omitempty"`
+	Width  int    `json:"width,omitempty"`
+	Height int    `json:"height,omitempty"`
 }
 
 type GenerationBatch struct {
@@ -54,6 +57,17 @@ type GenerationBatch struct {
 	Status string            `json:"status"`
 	Items  []GenerationItem  `json:"items"`
 	Tasks  []generation.Task `json:"tasks"`
+}
+type GenerationSummary struct {
+	ID     string                  `json:"id"`
+	TaskID string                  `json:"taskId"`
+	Status string                  `json:"status"`
+	Items  []GenerationSummaryItem `json:"items"`
+}
+type GenerationSummaryItem struct {
+	NodeID string           `json:"nodeId"`
+	Task   *generation.Task `json:"task,omitempty"`
+	Note   string           `json:"note,omitempty"`
 }
 
 type Reference struct {
@@ -76,9 +90,10 @@ type Message struct {
 }
 
 type Snapshot struct {
-	Tasks                   []Task            `json:"tasks"`
-	Messages                []Message         `json:"messages"`
-	LegacyGenerationBatches []json.RawMessage `json:"legacyGenerationBatches,omitempty"`
+	Tasks                   []Task              `json:"tasks"`
+	Messages                []Message           `json:"messages"`
+	GenerationBatches       []GenerationSummary `json:"generationBatches,omitempty"`
+	LegacyGenerationBatches []json.RawMessage   `json:"legacyGenerationBatches,omitempty"`
 }
 
 type Command struct {

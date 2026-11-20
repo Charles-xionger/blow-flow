@@ -178,6 +178,9 @@ func (s *Store) Delivered(ctx context.Context, c DeliveryClaim, url string) erro
 		if err := tx.Exec(`UPDATE generation_node_results n SET result_url=?,updated_at=? FROM generation_tasks t WHERE t.id=? AND t.node_id<>'' AND n.owner_id=t.owner_id AND n.project_id=t.project_id AND n.node_id=t.node_id AND n.task_id=t.id`, url, now, c.TaskID).Error; err != nil {
 			return err
 		}
+		if err := attachAgentResult(tx, c.TaskID, url, now); err != nil {
+			return err
+		}
 		return tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,stage,occurred_at) VALUES(?,'delivered','delivered',?)`, c.TaskID, now).Error
 	})
 	if err == nil {

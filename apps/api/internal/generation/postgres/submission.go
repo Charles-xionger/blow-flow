@@ -133,6 +133,10 @@ func (s *Store) CheckSubmission(ctx context.Context, id, token string) (bool, er
 	if err != nil || n != 1 {
 		return false, err
 	}
+	var binding struct { Digest,NodeID string; Snapshot []byte }
+	q:=s.DB.WithContext(ctx).Raw(`SELECT b.digest,b.node_id,p.snapshot FROM agent_generation_submission_bindings b JOIN generation_tasks t ON t.id=b.task_id JOIN projects p ON p.id=t.project_id AND p.owner_id=t.owner_id WHERE b.task_id=?`,id).Scan(&binding)
+	if q.Error!=nil{return false,q.Error}
+	if q.RowsAffected>0 { current,_,exists:=generation.BindingDigest(binding.Snapshot,binding.NodeID);if !exists || current!=binding.Digest {return false,nil} }
 	var circuit struct{ State, ProbeTaskID string }
 	if err := s.DB.WithContext(ctx).Raw(`SELECT state,COALESCE(probe_task_id,'') AS probe_task_id FROM generation_circuits WHERE connection_id='runninghub-international' AND operation='submit'`).Scan(&circuit).Error; err != nil {
 		return false, err

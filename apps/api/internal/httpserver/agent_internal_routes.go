@@ -253,6 +253,21 @@ func registerAgentInternalRoutes(r *gin.Engine, d Dependencies) {
 		}
 		c.JSON(200, batch)
 	})
+	g.POST("/run/generation/batches/:id/retry-save", func(c *gin.Context) {
+		service, ok := d.AgentRuns.(interface {
+			RetryGenerationSave(context.Context, string, string) (agent.GenerationBatch, error)
+		})
+		if !ok {
+			c.JSON(503, errorBody(c, "service_unavailable"))
+			return
+		}
+		batch, err := service.RetryGenerationSave(c.Request.Context(), bearer(c), c.Param("id"))
+		if err != nil {
+			agentError(c, err)
+			return
+		}
+		c.JSON(200, batch)
+	})
 	g.POST("/run/deleted-nodes/check", func(c *gin.Context) {
 		var body struct {
 			IDs []string `json:"ids"`
