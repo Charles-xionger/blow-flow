@@ -24,7 +24,9 @@ pnpm db:migrate
 pnpm dev:api
 ```
 
-迁移是独立步骤，API 启动时不会执行 DDL。数据库或本地认证配置缺失时，存活探针仍可用，但就绪探针返回未就绪，账户接口拒绝访问。
+迁移是独立步骤，API 启动时不会执行 DDL。`/health/live` 只表示进程仍在运行；`/health/ready` 分别检查 PostgreSQL、RabbitMQ 和 Redis，返回各组件的 `ready` 或 `unavailable` 状态，不返回连接地址或错误详情。缺少数据库或签名配置时 PostgreSQL 组件也标记为不可用，账户接口拒绝访问。RabbitMQ 或 Redis 暂时不可用时，就绪探针返回 503；已经写入 PostgreSQL 的任务及 outbox 仍以 PostgreSQL 为准，通知不能取代持久状态。
+
+已接通的接口、需要的服务，以及仍由旧路径承担的能力见[整合基线](../../docs/architecture/go-consolidation-baseline.md)。
 
 ## 当前范围
 

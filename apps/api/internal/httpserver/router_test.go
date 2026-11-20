@@ -39,3 +39,19 @@ func TestHealthDistinguishesLiveFromReady(t *testing.T) {
 		})
 	}
 }
+
+func TestReadinessReportsDependencyFailuresWithoutLeakingErrors(t *testing.T) {
+	router := NewWithDependencies(Dependencies{ReadinessChecks: map[string]Ping{
+		"postgres": func(context.Context) error { return nil },
+		"rabbitmq": func(context.Context) error { return errors.New("amqp://secret") },
+		"redis":    nil,
+	}})
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest("GET", "/health/ready", nil))
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("got %d, want 503", w.Code)
+	}
+	if got := w.Body.String(); !strings.Contains(got, `"rabbitmq":"unavailable"`) || !strings.Contains(got, `"redis":"unavailable"`) || !strings.Contains(got, `"postgres":"ready"`) || strings.Contains(got, "secret") {
+		t.Fatalf("unexpected readiness response: %s", got)
+	}
+}

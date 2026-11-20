@@ -65,6 +65,7 @@ type AccountService interface {
 
 type Dependencies struct {
 	Ping                  Ping
+	ReadinessChecks       map[string]Ping
 	IdentityVerifier      IdentityVerifier
 	LocalAdmin            LocalAdminAuthenticator
 	CreatorAuth           CreatorAuthenticator
@@ -118,11 +119,25 @@ func NewWithDependencies(dependencies Dependencies) *gin.Engine {
 	r.GET("/health/ready", func(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 		defer cancel()
-		if dependencies.Ping == nil || dependencies.Ping(ctx) != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready"})
+		checks := dependencies.ReadinessChecks
+		if len(checks) == 0 {
+			checks = map[string]Ping{"postgres": dependencies.Ping}
+		}
+		components := make(map[string]string, len(checks))
+		ready := true
+		for name, check := range checks {
+			if check == nil || check(ctx) != nil {
+				components[name] = "unavailable"
+				ready = false
+				continue
+			}
+			components[name] = "ready"
+		}
+		if !ready {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready", "components": components})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"status": "ready"})
+		c.JSON(http.StatusOK, gin.H{"status": "ready", "components": components})
 	})
 	registerAccountRoutes(r, dependencies)
 	registerAgentInternalRoutes(r, dependencies)

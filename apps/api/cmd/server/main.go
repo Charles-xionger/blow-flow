@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -34,6 +35,7 @@ import (
 	"blow-flow/api/internal/telemetry"
 	"blow-flow/api/internal/textmodel"
 	"github.com/getsentry/sentry-go"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 func main() {
@@ -193,7 +195,13 @@ func run() error {
 			}
 		}()
 	}
-	server := &http.Server{Handler: httpserver.NewWithDependencies(httpserver.Dependencies{Ping: ping, Accounts: accounts, IdentityVerifier: identityVerifier, LocalAdmin: localAdmin, CreatorAuth: creatorAuth, Captcha: captcha, RefreshSessions: refreshSessions, AgentRuns: agentRuns, AgentCommands: agentCommands, AgentRunnerKey: agentRunnerKey, Generation: generationService, GenerationWakeups: wakeups, GenerationStreamClose: ctx.Done(), Resources: resourceService, ResourceBlobs: resourceoss.FromEnv(), Scripts: scriptService, ScriptWakeups: scriptWakeups, TextModels: textModels}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
+	readiness := map[string]httpserver.Ping{"postgres": ping, "rabbitmq": rabbitReady(os.Getenv("RABBITMQ_URL"))}
+	if wakeups != nil && scriptWakeups != nil {
+		readiness["redis"] = func(ctx context.Context) error { return wakeups.Client.Ping(ctx).Err() }
+	} else {
+		readiness["redis"] = nil
+	}
+	server := &http.Server{Handler: httpserver.NewWithDependencies(httpserver.Dependencies{Ping: ping, ReadinessChecks: readiness, Accounts: accounts, IdentityVerifier: identityVerifier, LocalAdmin: localAdmin, CreatorAuth: creatorAuth, Captcha: captcha, RefreshSessions: refreshSessions, AgentRuns: agentRuns, AgentCommands: agentCommands, AgentRunnerKey: agentRunnerKey, Generation: generationService, GenerationWakeups: wakeups, GenerationStreamClose: ctx.Done(), Resources: resourceService, ResourceBlobs: resourceoss.FromEnv(), Scripts: scriptService, ScriptWakeups: scriptWakeups, TextModels: textModels}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(listener) }()
 	slog.Info("API listening", "address", listener.Addr().String())
@@ -210,4 +218,28 @@ func run() error {
 		}
 	}
 	return nil
+}
+
+func rabbitReady(raw string) httpserver.Ping {
+	if raw == "" {
+		return nil
+	}
+	if parsed, err := url.Parse(raw); err != nil || (parsed.Scheme != "amqp" && parsed.Scheme != "amqps") {
+		return nil
+	}
+	return func(ctx context.Context) error {
+		connection, err := amqp.DialConfig(raw, amqp.Config{Dial: func(network, address string) (net.Conn, error) {
+			conn, err := (&net.Dialer{}).DialContext(ctx, network, address)
+			if err == nil {
+				if deadline, ok := ctx.Deadline(); ok {
+					_ = conn.SetDeadline(deadline)
+				}
+			}
+			return conn, err
+		}})
+		if err != nil {
+			return err
+		}
+		return connection.Close()
+	}
 }
