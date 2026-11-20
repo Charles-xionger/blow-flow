@@ -255,7 +255,7 @@ for (const stage of ['headers', 'body']) test(`a timed out request (${stage}) re
   const first = saver.save().then(() => { outcome = 'saved'; }, e => { outcome = e.message; });
   try {
     await until(() => sent.length === 1);
-    await wait(60);
+    await first;
     assert.match(outcome || '', /超时/);
     store.setState({ nodes: [node('newer')] });
     await saver.save();
