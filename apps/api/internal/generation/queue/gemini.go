@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path"
 	"strings"
 	"time"
 )
@@ -35,26 +36,19 @@ func (p Gemini) SubmitTask(ctx context.Context, taskID string, input generation.
 	safe := *client
 	safe.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	for _, ref := range input.References {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, ref.URL, nil)
+		body, filename, err := referenceBytes(ctx, client, ref)
 		if err != nil {
-			return "", err
+			return "", generation.ErrSubmissionRejected
 		}
-		res, err := safe.Do(req)
-		if err != nil {
-			return "", err
+		if _, err := inspectReference(ctx, body, filename, "image"); err != nil {
+			return "", generation.ErrSubmissionRejected
 		}
-		mime := strings.TrimSpace(strings.Split(res.Header.Get("Content-Type"), ";")[0])
-		if res.StatusCode != 200 || (mime != "image/png" && mime != "image/jpeg" && mime != "image/webp") {
-			res.Body.Close()
-			return "", generation.ErrInvalid
-		}
-		body, err := io.ReadAll(io.LimitReader(res.Body, (30<<20)+1))
-		res.Body.Close()
-		if err != nil {
-			return "", err
-		}
-		if len(body) == 0 || len(body) > 30<<20 {
-			return "", generation.ErrInvalid
+		mime := "image/png"
+		switch strings.ToLower(path.Ext(filename)) {
+		case ".jpg", ".jpeg":
+			mime = "image/jpeg"
+		case ".webp":
+			mime = "image/webp"
 		}
 		parts = append(parts, map[string]any{"inlineData": map[string]string{"mimeType": mime, "data": base64.StdEncoding.EncodeToString(body)}})
 	}

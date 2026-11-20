@@ -14,6 +14,28 @@ const (
 	GeminiImageModel = "gemini-3-pro-image-preview"
 )
 
+func ModelConfigured(model string) bool {
+	switch model {
+	case Krea2Model, H3Model:
+		return os.Getenv("RUNNINGHUB_API_KEY") != "" && os.Getenv("RUNNINGHUB_BASE_URL") != ""
+	case Seedream55Model, Seedream50Model:
+		return os.Getenv("ARK_API_KEY") != ""
+	case GeminiImageModel:
+		return os.Getenv("GEMINI_API_KEY") != ""
+	default:
+		return false
+	}
+}
+func ModelCategory(model string) string {
+	if model == H3Model {
+		return "VIDEO"
+	}
+	if ConnectionForModel(model) != "" {
+		return "IMAGE"
+	}
+	return ""
+}
+
 func ConnectionForModel(model string) string {
 	switch model {
 	case Krea2Model, H3Model:

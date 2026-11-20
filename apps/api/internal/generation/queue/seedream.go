@@ -27,6 +27,17 @@ func (p Seedream) Submit(ctx context.Context, input generation.Input) (string, e
 	}
 	images := make([]string, 0, len(input.References))
 	for _, r := range input.References {
+		body, filename, err := referenceBytes(ctx, p.Client, r)
+		if err != nil {
+			return "", generation.ErrSubmissionRejected
+		}
+		info, err := inspectReference(ctx, body, filename, "image")
+		if err != nil {
+			return "", generation.ErrSubmissionRejected
+		}
+		if input.Model == generation.Seedream50Model && input.ImageOptions != nil && input.ImageOptions.Background == "transparent" && !info.HasAlpha {
+			return "", generation.ErrInvalid
+		}
 		images = append(images, r.URL)
 	}
 	format, optimize, background := "png", "standard", "opaque"
