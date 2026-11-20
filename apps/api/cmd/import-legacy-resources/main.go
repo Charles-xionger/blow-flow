@@ -4,6 +4,8 @@ import (
 	"blow-flow/api/internal/database"
 	"blow-flow/api/internal/resource/legacy"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -31,7 +33,7 @@ func main() {
 	if err = export.Validate(); err != nil {
 		fatal(err)
 	}
-	fmt.Printf("validated: projects=%d folders=%d media=%d receipts=%d deletedNodes=%d scriptTasks=%d scriptRequests=%d agentTasks=%d agentMessages=%d agentReceipts=%d agentCanvasReceipts=%d agentBatches=%d\n", len(export.Projects), len(export.Folders), len(export.MediaFiles), len(export.SaveReceipts), len(export.DeletedNodes), len(export.ScriptTasks), len(export.ScriptRequests), len(export.AgentTasks), len(export.AgentMessages), len(export.AgentReceipts), len(export.AgentCanvasReceipts), len(export.AgentGenerationBatches))
+	fmt.Printf("validated: projects=%d folders=%d media=%d receipts=%d deletedNodes=%d scriptTasks=%d scriptRequests=%d agentTasks=%d agentMessages=%d agentReceipts=%d agentCanvasReceipts=%d agentBatches=%d skills=%d skillResources=%d skillResourceDigest=%s\n", len(export.Projects), len(export.Folders), len(export.MediaFiles), len(export.SaveReceipts), len(export.DeletedNodes), len(export.ScriptTasks), len(export.ScriptRequests), len(export.AgentTasks), len(export.AgentMessages), len(export.AgentReceipts), len(export.AgentCanvasReceipts), len(export.AgentGenerationBatches), len(export.UserSkills), len(export.UserSkillResources), skillResourceDigest(export.UserSkillResources))
 	if !*apply {
 		fmt.Println("dry run; PostgreSQL unchanged")
 		return
@@ -50,3 +52,16 @@ func main() {
 	fmt.Println("import committed")
 }
 func fatal(err error) { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
+
+func skillResourceDigest(resources []legacy.UserSkillResource) string {
+	h := sha256.New()
+	for _, r := range resources {
+		h.Write([]byte(r.SkillName))
+		h.Write([]byte{0})
+		h.Write([]byte(r.Path))
+		h.Write([]byte{0})
+		h.Write([]byte(r.ContentBase64))
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}

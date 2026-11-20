@@ -8,7 +8,7 @@ import { resolveReferenceFromCanvas } from './references';
 import { GoCanvasEditor } from './go-canvas';
 import { GoAgentRun, GoAgentRunClient } from './go-runner-client';
 import { createPiRuntimeForHost, type PiRuntimeHost } from './runtime';
-import { discoverSkills, listSkills, readSkill } from './skills';
+import { listBuiltInSkills, readBuiltInSkill } from './skills';
 import type { AgentReference, AgentTask } from './types';
 import type { CanvasOperation } from './canvas-plan';
 import type { CanvasNode } from '../../types';
@@ -30,7 +30,7 @@ const definitions = [
 export class GoPiHost implements PiRuntimeHost {
   constructor(private run: GoAgentRun, private task: AgentTask, private flushReplies: () => Promise<unknown> = async () => {}) {}
   isExecuting = (task: AgentTask) => this.run.isAlive() && task.id === this.task.id;
-  listSkillDescriptions = () => listSkills();
+  listSkillDescriptions = async () => [...listBuiltInSkills(), ...await this.run.skills()];
   resolveReference = async (projectId: string, reference: AgentReference, options: { historical?: boolean }) => {
     if (projectId !== this.task.projectId) throw new Error('Run project mismatch');
     const canvas = await this.run.canvas(projectId).read(projectId);
@@ -62,12 +62,12 @@ export class GoPiHost implements PiRuntimeHost {
       let result: unknown;
       switch (name) {
         case 'discover_skills': {
-          result = discoverSkills();
+          result = (await this.listSkillDescriptions()).map(({ id, name, description }) => ({ id, name, description }));
           break;
         }
         case 'read_skill': {
           if (typeof args.id !== 'string' || !args.id || args.resource !== undefined && typeof args.resource !== 'string') throw new Error('Skill ID or resource invalid');
-          result = readSkill(args.id, args.resource as string | undefined);
+          result = readBuiltInSkill(args.id, args.resource as string | undefined) ?? await this.run.readSkill(args.id, args.resource as string | undefined);
           break;
         }
         case 'read_canvas': {
