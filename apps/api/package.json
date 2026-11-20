@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "dev": "node scripts/with-env.cjs go run ./cmd/server",
-    "dev:all": "node scripts/with-env.cjs go run ./cmd/server",
+    "dev:all": "node scripts/dev-all.cjs",
     "admin:setup": "go run ./cmd/local-admin-setup",
     "creator:setup": "go run ./cmd/creator-setup",
     "resources:import": "go run ./cmd/import-legacy-resources",
@@ -13,7 +13,7 @@
     "test": "go test -race -count=1 ./... && node --test scripts/with-env.test.cjs",
     "test:integration": "go test -race -count=1 -tags=integration ./internal/...",
     "test:e2e": "node --test tests/server.test.mjs",
-    "db:migrate": "go run ./cmd/migrate",
+    "db:migrate": "node scripts/with-env.cjs go run ./cmd/migrate",
     "generation:worker": "node scripts/with-env.cjs go run ./cmd/generation-worker",
     "script:worker": "node scripts/with-env.cjs go run ./cmd/script-worker",
     "agent:dispatcher": "node scripts/with-env.cjs go run ./cmd/agent-dispatcher"

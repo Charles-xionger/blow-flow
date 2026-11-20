@@ -1,19 +1,20 @@
 # Blow Flow
 
-AI creative canvas. pnpm Workspace + Turborepo manages the repository; Next.js
-serves the existing product and Gin is the foundation for gradual Go migration.
+AI creative canvas. pnpm Workspace + Turborepo manages the repository. Next.js
+serves the existing product while the Go API and workers run as separate services.
 
 ## Layout
 
-- apps/web: existing Next.js canvas, APIs and generation/Agent/script workers.
-- apps/api: Go + Gin API, GORM/PostgreSQL connection, versioned migration runner.
+- apps/web: Next.js canvas and the legacy SQLite generation/Agent/script workers.
+- apps/api: Go API, PostgreSQL migrations, generation/script workers and Agent dispatcher.
 - packages/evals: deterministic evaluation dataset, CI gate and explicit Langfuse publication.
-- infra: local PostgreSQL Compose configuration.
+- infra: local PostgreSQL, RabbitMQ and Redis Compose configuration.
 - docs/architecture: migration boundaries and operational conventions.
 - .scratch/monorepo-foundation/spec.md: phased delivery plan.
 
-No business data is moved in phase 1. Existing SQLite files stay under root data/.
-The production replacement is PostgreSQL; SQLite is transitional legacy storage.
+Existing SQLite files stay under root data/. The Go API uses PostgreSQL; the
+browser product still has legacy Next.js/SQLite paths. Do not write the same
+project through both backends.
 Existing browser storage keys, PostgreSQL database credentials, and the Docker
 volume keep their original `ai-flow` identifiers so existing local data remains
 accessible after the product rename.
@@ -26,24 +27,38 @@ Node 22.14 (nvm use), pnpm 10.18.3, Go 1.24+, Docker with Compose v2.
     pnpm install --frozen-lockfile
     pnpm db:up
     export DATABASE_URL='postgres://ai_flow:ai_flow_local@127.0.0.1:15432/ai_flow?sslmode=disable'
+    export RABBITMQ_URL='amqp://guest:guest@127.0.0.1:15672/'
+    export REDIS_URL='redis://127.0.0.1:16379/0'
+    pnpm db:migrate
     pnpm dev:all
 
-Web is on port 3000; Gin is on 8080. Ctrl-C stops the foreground stack.
-pnpm dev starts only Web; pnpm dev:api starts only Gin.
+`db:up` waits for PostgreSQL, RabbitMQ and Redis. Web is on port 3000; the Go
+API is on 8080. `dev:all` starts Web and its legacy workers, Admin, the Go API,
+Go generation and script workers, and the Go Agent dispatcher. Ctrl-C stops
+the foreground stack. `pnpm dev` starts only Web; `pnpm dev:web` starts Web and
+its legacy workers. `pnpm dev:api` starts only the Go API; `pnpm dev:go` starts
+the Go API and its background processes.
+Standalone `pnpm generation:worker`, `pnpm agent:worker` and
+`pnpm script:worker` retain the Web/SQLite workers. Use the `go:` worker
+commands or the API package scripts to run Go workers separately.
+The Go Agent Runner is opt-in with `pnpm agent:go-worker`; its public command
+routes require `AGENT_GO_EXPERIMENTAL_COMMANDS=1` for controlled smoke tests.
 Legacy Web configuration in root .env.local is still loaded by normal app/worker
 launch scripts. Relative DATABASE_PATH values keep their repository-root meaning.
-The Go API and eval publication accept explicitly exported variables; see their
-.env.example files. Do not copy production credentials into CI.
+The Go API launcher loads root and `apps/api/.env.local` values; see
+`apps/api/.env.example` for RabbitMQ, Redis and provider settings. Configure
+the local admin separately with `pnpm admin:setup`. Do not copy production
+credentials into CI.
 
 Gin endpoints:
 - GET /health/live: process alive, independent of the database.
 - GET /health/ready: 200 only when PostgreSQL is reachable; otherwise 503.
 - Each response carries a server-generated X-Request-ID.
-- No business APIs or user authentication have been migrated yet.
+- Versioned account, project, generation, script and Agent APIs are implemented;
+  see `apps/api/README.md` for current cutover boundaries.
 
-pnpm db:down stops the development database without deleting its volume.
+pnpm db:down stops the local dependencies without deleting their volumes.
 Migration files belong in apps/api/migrations; pnpm db:migrate runs reviewed SQL.
-There are intentionally no domain migrations yet.
 
 ## Validation
 

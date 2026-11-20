@@ -1,11 +1,11 @@
-// Web alone leaves background tasks queued; run all workers together.
+// Keep the legacy Next.js/SQLite product path and its workers together.
 const { spawn } = require('node:child_process');
 const readline = require('node:readline');
 const processes = [
   ['web', 'dev'],
-  ['generation', 'generation:worker'],
-  ['agent', 'agent:worker'],
-  ['script', 'script:worker'],
+  ['generation', 'generation:worker:legacy'],
+  ['agent', 'agent:worker:legacy'],
+  ['script', 'script:worker:legacy'],
 ];
 const width = Math.max(...processes.map(([name]) => name.length));
 let stopping = false;

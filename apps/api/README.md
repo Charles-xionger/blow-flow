@@ -13,7 +13,7 @@ Go API 按完整领域逐步接管现有 TypeScript 实现的业务写入。Go �
 
 ## 本地配置
 
-`DATABASE_URL` 连接 PostgreSQL。`pnpm admin:setup` 生成 `ADMIN_AUTH_EMAIL`、Argon2id 密码哈希及 32 字节签名密钥，写入忽略提交的 `apps/api/.env.local`。登录信息保存在 `apps/api/.admin-login.local`；这些文件只用于本机开发，不能提交到仓库。API 不自动加载 dotenv，启动或迁移前需在 shell 中加载配置：
+`DATABASE_URL` 连接 PostgreSQL。`pnpm admin:setup` 生成 `ADMIN_AUTH_EMAIL`、Argon2id 密码哈希及 32 字节签名密钥，写入忽略提交的 `apps/api/.env.local`。登录信息保存在 `apps/api/.admin-login.local`；这些文件只用于本机开发，不能提交到仓库。pnpm 启动脚本会加载根目录和 API 的 `.env.local`；直接运行 Go 二进制时仍需在 shell 中提供配置：
 
 ```sh
 set -a
@@ -21,7 +21,7 @@ source apps/api/.env.local
 set +a
 pnpm db:up
 pnpm db:migrate
-pnpm dev:api
+pnpm dev:go
 ```
 
 迁移是独立步骤，API 启动时不会执行 DDL。`/health/live` 只表示进程仍在运行；`/health/ready` 分别检查 PostgreSQL、RabbitMQ 和 Redis，返回各组件的 `ready` 或 `unavailable` 状态，不返回连接地址或错误详情。缺少数据库或签名配置时 PostgreSQL 组件也标记为不可用，账户接口拒绝访问。RabbitMQ 或 Redis 暂时不可用时，就绪探针返回 503；已经写入 PostgreSQL 的任务及 outbox 仍以 PostgreSQL 为准，通知不能取代持久状态。
@@ -42,7 +42,7 @@ transaction. `pnpm --filter @blow-flow/api agent:dispatcher` publishes queued ta
 IDs to the RabbitMQ `agent.tasks.v1` quorum queue with publisher confirms. A
 claimed Node Runner can read `/internal/agent/run/context`, persist replies,
 tool steps and questions, and use the scoped canvas endpoints. An explicit
-`pnpm --filter @blow-flow/web agent:go-worker` can consume the new queue for
+`pnpm agent:go-worker` can consume the new queue for
 basic conversation and canvas edits. Public `/v1/agent/projects/:projectId`
 routes return `503` by default; `AGENT_GO_EXPERIMENTAL_COMMANDS=1` opens them
 only for controlled smoke tests because the new Runner does not yet cover every
