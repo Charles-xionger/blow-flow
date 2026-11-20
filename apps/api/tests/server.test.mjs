@@ -31,7 +31,7 @@ test('built Gin process serves health, dependency failures, request IDs and shut
     assert.match(live.headers.get('x-request-id'), /^[a-f0-9]{32}$/);
     const ready = await fetch('http://' + address + '/health/ready');
     assert.equal(ready.status, 503);
-    assert.deepEqual(await ready.json(), { status: 'not_ready' });
+    assert.deepEqual(await ready.json(), { status: 'not_ready', components: { postgres: 'unavailable', rabbitmq: 'unavailable', redis: 'unavailable' } });
     assert.equal((await fetch('http://' + address + '/unknown')).status, 404);
     child.kill('SIGTERM');
     const [code, signal] = await exited;
