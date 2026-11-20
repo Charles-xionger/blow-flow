@@ -14,25 +14,42 @@ const (
 	GeminiImageModel = "gemini-3-pro-image-preview"
 )
 
-func ModelConfigured(model string) bool {
-	switch model {
-	case Krea2Model, H3Model:
-		return os.Getenv("RUNNINGHUB_API_KEY") != "" && os.Getenv("RUNNINGHUB_BASE_URL") != ""
-	case Seedream55Model, Seedream50Model:
-		return os.Getenv("ARK_API_KEY") != ""
-	case GeminiImageModel:
-		return os.Getenv("GEMINI_API_KEY") != ""
-	default:
-		m, _, err := ResolveModel(model)
-		return err == nil && os.Getenv(m.Connection.APIKeyEnv) != ""
+type modelDescriptor struct{ category, connection, credential, route string }
+
+var builtInModels = map[string]modelDescriptor{
+	Krea2Model:       {"IMAGE", "runninghub-international", "RUNNINGHUB_API_KEY", "runninghub-image"},
+	H3Model:          {"VIDEO", "runninghub-international", "RUNNINGHUB_API_KEY", "runninghub-video"},
+	Seedream55Model:  {"IMAGE", "volcengine-ark", "ARK_API_KEY", "seedream"},
+	Seedream50Model:  {"IMAGE", "volcengine-ark", "ARK_API_KEY", "seedream"},
+	GeminiImageModel: {"IMAGE", "gemini-images", "GEMINI_API_KEY", "gemini"},
+}
+
+// RouteForModel selects the provider adapter for a built-in model. Configured
+// workflow models use their frozen workflow snapshot at submission time.
+func RouteForModel(model string) string {
+	if descriptor, ok := builtInModels[model]; ok {
+		return descriptor.route
 	}
+	return "workflow"
+}
+
+func CategoryForInput(in Input) string {
+	if in.Workflow != nil {
+		return in.Workflow.Category
+	}
+	return ModelCategory(in.Model)
+}
+
+func ModelConfigured(model string) bool {
+	if descriptor, ok := builtInModels[model]; ok {
+		return os.Getenv(descriptor.credential) != "" && (descriptor.connection != "runninghub-international" || os.Getenv("RUNNINGHUB_BASE_URL") != "")
+	}
+	m, _, err := ResolveModel(model)
+	return err == nil && os.Getenv(m.Connection.APIKeyEnv) != ""
 }
 func ModelCategory(model string) string {
-	if model == H3Model {
-		return "VIDEO"
-	}
-	if ConnectionForModel(model) != "" {
-		return "IMAGE"
+	if descriptor, ok := builtInModels[model]; ok {
+		return descriptor.category
 	}
 	m, _, err := ResolveModel(model)
 	if err != nil {
@@ -42,16 +59,10 @@ func ModelCategory(model string) string {
 }
 
 func ConnectionForModel(model string) string {
-	switch model {
-	case Krea2Model, H3Model:
-		return "runninghub-international"
-	case Seedream55Model, Seedream50Model:
-		return "volcengine-ark"
-	case GeminiImageModel:
-		return "gemini-images"
-	default:
-		return ""
+	if descriptor, ok := builtInModels[model]; ok {
+		return descriptor.connection
 	}
+	return ""
 }
 
 func ValidInput(in Input) bool {
@@ -65,17 +76,17 @@ func ValidInput(in Input) bool {
 		}
 		counts[ref.Kind]++
 	}
-	switch in.Model {
-	case Krea2Model:
+	switch RouteForModel(in.Model) {
+	case "runninghub-image":
 		return dimensions(in, 64, 8192, 8) && in.Duration == 0 && len(in.References) == 0 && (in.InstanceType == "" || in.InstanceType == "plus") && in.ImageOptions == nil
-	case H3Model:
+	case "runninghub-video":
 		return dimensions(in, 32, 4096, 32) && in.Duration >= 5 && in.Duration <= 15 && (in.InstanceType == "" || in.InstanceType == "plus") && in.ImageOptions == nil && counts["image"] <= 9 && counts["video"] <= 3 && counts["audio"] <= 3
-	case Seedream55Model, Seedream50Model:
+	case "seedream":
 		if in.Width < 16 || in.Height < 16 || in.Width > 8192 || in.Height > 8192 || in.Width*in.Height < 921600 || in.Width*in.Height > 4624220 || in.Width > 16*in.Height || in.Height > 16*in.Width || in.Duration != 0 || in.InstanceType != "" || counts["video"] != 0 || counts["audio"] != 0 || counts["image"] > 10 {
 			return false
 		}
 		return validImageOptions(in)
-	case GeminiImageModel:
+	case "gemini":
 		if !dimensions(in, 64, 8192, 8) || in.Duration != 0 || in.InstanceType != "" || in.ImageOptions != nil || counts["video"] != 0 || counts["audio"] != 0 || counts["image"] > 8 {
 			return false
 		}

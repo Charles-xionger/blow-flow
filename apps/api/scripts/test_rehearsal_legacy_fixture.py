@@ -39,6 +39,7 @@ class FixtureTest(unittest.TestCase):
             self.assertEqual(hashlib.sha256(resource).hexdigest(), manifest["skillResourceSha256"])
             oss_media = next(row for row in export["mediaFiles"] if row["id"] == "fixture-media-oss")
             self.assertEqual(oss_media["url"], "https://fixture.invalid/fixture/video.mp4")
+            self.assertEqual(manifest["externalMediaSha256"], hashlib.sha256(b"\x00\x00\x00\x18ftypmp42fixture-video").hexdigest())
             self.assertIn("dry run; PostgreSQL unchanged", result.stdout)
             self.assertEqual(os.stat(run_dir / "legacy-export.json").st_mode & 0o777, 0o600)
             self.assertNotIn("content_base64", (run_dir / "fixture-manifest.json").read_text())

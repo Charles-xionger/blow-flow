@@ -9,24 +9,45 @@ import (
 	"blow-flow/api/internal/database"
 	"blow-flow/api/internal/generation"
 	generationpostgres "blow-flow/api/internal/generation/postgres"
+	"blow-flow/api/internal/generation/queue"
 	"blow-flow/api/internal/identity/creatorauth"
 	"blow-flow/api/internal/identity/session"
 	"blow-flow/api/internal/resource"
 	resourcepostgres "blow-flow/api/internal/resource/postgres"
 	"blow-flow/api/internal/script"
 	scriptpostgres "blow-flow/api/internal/script/postgres"
+	"blow-flow/api/internal/skill"
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 type rehearsalScriptModels struct{}
+
+type rehearsalArtifacts struct{ runID string }
+
+func (a rehearsalArtifacts) Save(_ context.Context, source, _, fileType string) (string, error) {
+	if !strings.HasPrefix(source, "https://fake-provider.test/") {
+		return "", generation.ErrInvalid
+	}
+	kind := "image"
+	if fileType == "mp4" {
+		kind = "video"
+	}
+	return "https://assets.rehearsal.test/" + a.runID + "/" + kind + "." + fileType, nil
+}
 
 func (rehearsalScriptModels) Validate(string, bool) error { return nil }
 
@@ -85,6 +106,7 @@ func TestImportedCutoverAPIJourney(t *testing.T) {
 			Accounts: accountService, IdentityVerifier: verifier, CreatorAuth: auth,
 			Captcha: &captchaStub{}, RefreshSessions: &session.Store{DB: db, Now: time.Now, Key: key},
 			Resources: resources, AgentCommands: agents, AgentRuns: agents, AgentRunnerKey: runnerKey,
+			Skills:     skill.New(db),
 			Generation: generation.Service{Store: generationStore, Resources: generationpostgres.Resources{DB: db}},
 			Scripts:    &script.Service{Repository: scriptStore, Models: rehearsalScriptModels{}},
 		})
@@ -140,6 +162,11 @@ func TestImportedCutoverAPIJourney(t *testing.T) {
 	call(owned, "GET", "/v1/projects/"+importedID, nil, nil, 200)
 	call(other, "GET", "/v1/projects/"+importedID, nil, nil, 404)
 	call(other, "GET", "/v1/agent/projects/"+importedID, nil, nil, 404)
+	media := call(owned, "GET", "/v1/assets/fixture-media-oss", nil, nil, 200)
+	if media["id"] != "fixture-media-oss" || media["url"] != os.Getenv("REHEARSAL_MEDIA_URL") {
+		t.Fatalf("imported external media not accessible to owner: %v", media)
+	}
+	call(other, "GET", "/v1/assets/fixture-media-oss", nil, nil, 404)
 
 	projectID := "go-rehearsal-" + runID
 	project := call(owned, "POST", "/v1/projects", map[string]any{"id": projectID, "name": "Go rehearsal"}, nil, 201)
@@ -161,7 +188,7 @@ func TestImportedCutoverAPIJourney(t *testing.T) {
 	}
 	call(other, "GET", "/v1/projects/"+projectID, nil, nil, 404)
 
-	command := map[string]any{"requestId": "rehearsal-agent-send", "action": "send", "modelId": "gemini", "text": "Sketch a scene and prepare image and video", "canvasVersion": 2}
+	command := map[string]any{"requestId": "rehearsal-agent-send", "action": "send", "modelId": "gemini-flash", "text": "Sketch a scene and prepare image and video", "canvasVersion": 2}
 	agentTask := call(owned, "POST", "/v1/agent/projects/"+projectID+"/commands", command, nil, 200)
 	agentReplay := call(owned, "POST", "/v1/agent/projects/"+projectID+"/commands", command, nil, 200)
 	if agentTask["id"] == nil || agentReplay["id"] != agentTask["id"] {
@@ -173,39 +200,30 @@ func TestImportedCutoverAPIJourney(t *testing.T) {
 	}
 	call(other, "GET", "/v1/agent/projects/"+projectID, nil, nil, 404)
 
-	claimed := call(owned, "POST", "/internal/agent/tasks/"+agentTask["id"].(string)+"/claim", nil, map[string]string{"Authorization": string(runnerKey)}, 200)
-	runToken, _ := claimed["token"].(string)
-	if runToken == "" {
-		t.Fatalf("agent run token missing: %v", claimed)
+	server := httptest.NewServer(owned)
+	defer server.Close()
+	runNode := func(phase, batchID string) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "pnpm", "exec", "tsx", "tests/fixtures/go-cutover-runner.ts", agentTask["id"].(string), phase, batchID)
+		cmd.Dir = "../../../web"
+		cmd.Env = append(os.Environ(), "REHEARSAL_GO_URL="+server.URL, "AGENT_RUNNER_KEY="+string(runnerKey), "GEMINI_API_KEY=rehearsal-fake-model-key", "RUNNINGHUB_API_KEY=rehearsal-fake-key", "RUNNINGHUB_BASE_URL=https://fake-provider.test")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("Node Pi Runner %s: %v\n%s", phase, err, output)
+		}
 	}
-	runHeaders := map[string]string{"Authorization": runToken}
-	canvas := map[string]any{"name": "Go rehearsal", "nodes": []any{
-		map[string]any{"id": "rehearsal-image", "type": "image", "position": map[string]any{"x": 0, "y": 0}, "data": map[string]any{"type": "textToImage", "prompt": "A paper city"}},
-		map[string]any{"id": "rehearsal-video", "type": "video", "position": map[string]any{"x": 500, "y": 0}, "data": map[string]any{"type": "textToVideo", "prompt": "A moving paper city"}},
-		map[string]any{"id": "rehearsal-script", "type": "script", "position": map[string]any{"x": 1000, "y": 0}, "data": map[string]any{"type": "script", "prompt": []any{map[string]any{"text": "Write a scene"}}}},
-	}, "edges": []any{}, "viewport": map[string]any{"x": 0, "y": 0, "zoom": 1}}
-	operations := []any{
-		map[string]any{"kind": "create", "node": canvas["nodes"].([]any)[0]},
-		map[string]any{"kind": "create", "node": canvas["nodes"].([]any)[1]},
-		map[string]any{"kind": "create", "node": canvas["nodes"].([]any)[2]},
-	}
-	tool := map[string]any{"callId": "rehearsal-create-nodes", "label": "Create rehearsal nodes", "baseVersion": 2, "operations": operations, "snapshot": canvas}
-	ack := call(owned, "PUT", "/internal/agent/run/canvas", tool, runHeaders, 200)
-	if ack["version"] != float64(3) {
-		t.Fatalf("agent canvas operation missing: %v", ack)
-	}
-	call(owned, "PUT", "/internal/agent/run/canvas", tool, runHeaders, 200)
+	runNode("prepare", "")
 	projectView := call(owned, "GET", "/v1/projects/"+projectID, nil, nil, 200)
 	if projectView["version"] != float64(3) {
-		t.Fatalf("agent canvas edit not viewable: %v", projectView)
+		var steps string
+		_ = db.Raw(`SELECT coalesce(json_agg(t),'[]'::json)::text FROM (SELECT name,status,result FROM agent_tool_steps WHERE task_id=? ORDER BY created_at) t`, agentTask["id"]).Scan(&steps).Error
+		t.Fatalf("Node Runner canvas edit not visible: %v steps=%s", projectView, steps)
 	}
-	call(owned, "POST", "/internal/agent/run/steps/start", map[string]any{"callId": "rehearsal-generate", "name": "prepare_generation", "arguments": map[string]any{}}, runHeaders, 200)
-	batch := call(owned, "POST", "/internal/agent/run/generation/prepare", map[string]any{"callId": "rehearsal-generate", "items": []any{
-		map[string]any{"nodeId": "rehearsal-image", "modelId": "runninghub/krea2", "input": map[string]any{"prompt": "A paper city", "width": 1024, "height": 1024}},
-		map[string]any{"nodeId": "rehearsal-video", "modelId": "runninghub/h3", "input": map[string]any{"prompt": "A moving paper city", "width": 1280, "height": 736, "duration": 7}},
-	}}, runHeaders, 200)
-	if batch["status"] != "pending" {
-		t.Fatalf("generation was not held for confirmation: %v", batch)
+	var batchID string
+	if err := db.Raw(`SELECT id FROM agent_generation_batches WHERE task_id=?`, agentTask["id"]).Scan(&batchID).Error; err != nil || batchID == "" {
+		t.Fatalf("Node Runner generation batch: %q %v", batchID, err)
 	}
 	var beforeApproval int64
 	if err := db.Raw(`SELECT count(*) FROM generation_tasks WHERE owner_id=? AND project_id=?`, owner, projectID).Scan(&beforeApproval).Error; err != nil || beforeApproval != 0 {
@@ -219,53 +237,113 @@ func TestImportedCutoverAPIJourney(t *testing.T) {
 	approval := map[string]any{"requestId": "rehearsal-approve", "action": "answer", "questionId": "rehearsal-generate", "text": "确认生成"}
 	call(owned, "POST", "/v1/agent/projects/"+projectID+"/commands", approval, nil, 200)
 	call(owned, "POST", "/v1/agent/projects/"+projectID+"/commands", approval, nil, 200)
-	resumed := call(owned, "POST", "/internal/agent/tasks/"+agentTask["id"].(string)+"/claim", nil, map[string]string{"Authorization": string(runnerKey)}, 200)
-	runHeaders["Authorization"] = resumed["token"].(string)
-	approved := call(owned, "GET", "/internal/agent/run/generation/batches/"+batch["id"].(string), nil, runHeaders, 200)
-	tasks := approved["tasks"].([]any)
-	if len(tasks) != 2 || approved["status"] != "approved" {
-		t.Fatalf("confirmed batch did not create image and video: %v", approved)
+	var taskIDsJSON string
+	if err := db.Raw(`SELECT generation_task_ids::text FROM agent_generation_batches WHERE id=?`, batchID).Scan(&taskIDsJSON).Error; err != nil {
+		t.Fatal(err)
 	}
-
-	for i, raw := range tasks {
-		item := raw.(map[string]any)
-		id := item["id"].(string)
+	var taskIDs []string
+	if err := json.Unmarshal([]byte(taskIDsJSON), &taskIDs); err != nil || len(taskIDs) != 2 {
+		t.Fatalf("approved task IDs: %s %v", taskIDsJSON, err)
+	}
+	var submissions atomic.Int64
+	queryCount := map[string]int{}
+	var queryMu sync.Mutex
+	var provider *httptest.Server
+	provider = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/task/openapi/create":
+			submissions.Add(1)
+			var request struct {
+				WorkflowID string `json:"workflowId"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Error(err)
+				return
+			}
+			id := 123
+			if request.WorkflowID == "2116745173157138433" {
+				id = 124
+			}
+			_, _ = fmt.Fprintf(w, `{"code":0,"data":{"taskId":%d}}`, id)
+		case "/task/openapi/outputs":
+			var request struct {
+				TaskID string `json:"taskId"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Error(err)
+				return
+			}
+			queryMu.Lock()
+			queryCount[request.TaskID]++
+			n := queryCount[request.TaskID]
+			queryMu.Unlock()
+			if n == 1 {
+				_, _ = fmt.Fprintf(w, `{"code":0,"data":{"netWssUrl":"%s/ws","taskStatus":"RUNNING"}}`, strings.Replace(provider.URL, "http://", "ws://", 1))
+				return
+			}
+			kind, node, extension := "image", "103", "png"
+			if request.TaskID == "124" {
+				kind, node, extension = "video", "148", "mp4"
+			}
+			_, _ = fmt.Fprintf(w, `{"code":0,"data":[{"fileUrl":"https://fake-provider.test/%s.%s","fileType":"%s","nodeId":"%s"}]}`, kind, extension, extension, node)
+		case "/ws":
+			upgrader := websocket.Upgrader{}
+			connection, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			defer connection.Close()
+			_ = connection.WriteJSON(map[string]any{"type": "progress", "data": map[string]any{"value": 1, "max": 2}})
+			_ = connection.WriteJSON(map[string]any{"type": "execution_success"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer provider.Close()
+	providers := queue.Providers{RunningHub: queue.Krea2{BaseURL: provider.URL, APIKey: "rehearsal-fake-key", Client: provider.Client()}}
+	worker := queue.SubmissionWorker{Store: generationStore, Provider: providers}
+	deliveryWorker := queue.DeliveryWorker{Store: generationStore, Provider: providers, Artifacts: rehearsalArtifacts{runID}}
+	for i, id := range taskIDs {
 		kind, extension := "image", "png"
 		if i == 1 {
 			kind, extension = "video", "mp4"
 		}
-		claim, ok, err := generationStore.ClaimSubmission(context.Background(), id)
-		if err != nil || !ok {
-			t.Fatalf("fake %s submission claim: %v %v", kind, ok, err)
+		if err := worker.ProcessOne(context.Background(), id); err != nil {
+			t.Fatalf("%s worker submit: %v", kind, err)
 		}
-		if err := generationStore.ResolveSubmission(context.Background(), id, claim.Token, "fake-"+kind+"-"+runID, nil); err != nil {
-			t.Fatal(err)
+		if err := deliveryWorker.ProcessOne(context.Background(), id); err != nil {
+			t.Fatalf("%s worker query/progress: %v", kind, err)
 		}
-		delivery, ok, err := generationStore.ClaimDelivery(context.Background(), id)
-		if err != nil || !ok {
-			t.Fatalf("fake %s provider claim: %v %v", kind, ok, err)
-		}
-		if err := generationStore.ProviderSucceeded(context.Background(), delivery, "https://fake-provider.test/"+kind+"."+extension, extension); err != nil {
-			t.Fatal(err)
-		}
-		delivery, ok, err = generationStore.ClaimDelivery(context.Background(), id)
-		if err != nil || !ok {
-			t.Fatalf("%s result save claim: %v %v", kind, ok, err)
+		if err := deliveryWorker.ProcessOne(context.Background(), id); err != nil {
+			t.Fatalf("%s worker save: %v", kind, err)
 		}
 		resultURL := "https://assets.rehearsal.test/" + runID + "/" + kind + "." + extension
-		if err := generationStore.Delivered(context.Background(), delivery, resultURL); err != nil {
-			t.Fatal(err)
-		}
 		final := call(makeRouter(owner), "GET", "/v1/generation/tasks/"+id, nil, nil, 200)
 		if final["status"] != "completed" || final["resultUrl"] != resultURL {
-			t.Fatalf("%s result unavailable after restart: %v", kind, final)
+			t.Fatalf("%s result unavailable after worker: %v", kind, final)
 		}
 		call(other, "GET", "/v1/generation/tasks/"+id, nil, nil, 404)
+		if err := worker.ProcessOne(context.Background(), id); err != nil {
+			t.Fatalf("%s duplicate wakeup: %v", kind, err)
+		}
 	}
-	approved = call(owned, "GET", "/internal/agent/run/generation/batches/"+batch["id"].(string), nil, runHeaders, 200)
-	for _, raw := range approved["tasks"].([]any) {
-		if raw.(map[string]any)["status"] != "completed" {
-			t.Fatalf("agent result did not reach completed: %v", approved)
+	if submissions.Load() != 2 {
+		t.Fatalf("duplicate paid submissions: %d", submissions.Load())
+	}
+	runNode("finish", batchID)
+	state = call(owned, "GET", "/v1/agent/projects/"+projectID, nil, nil, 200)
+	if state["tasks"].([]any)[0].(map[string]any)["status"] != "completed" {
+		t.Fatalf("Node Pi Runner did not complete resumed task: %v", state["tasks"])
+	}
+	for _, id := range taskIDs {
+		final := call(owned, "GET", "/v1/generation/tasks/"+id, nil, nil, 200)
+		if final["status"] != "completed" {
+			t.Fatalf("Runner finished before delivery: %v", final)
+		}
+		var progressEvents int64
+		if err := db.Raw(`SELECT count(*) FROM generation_task_events WHERE task_id=? AND event_type='progress'`, id).Scan(&progressEvents).Error; err != nil || progressEvents == 0 {
+			t.Fatalf("worker progress missing for %s: %d %v", id, progressEvents, err)
 		}
 	}
 	scriptInput := script.Create{RequestID: "rehearsal-script", CanvasID: projectID, NodeID: "rehearsal-script", Input: script.Input{Model: "fake-script-model", Requirements: "Write a scene", Preset: "free"}}

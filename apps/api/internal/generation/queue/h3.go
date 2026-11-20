@@ -19,10 +19,7 @@ var h3Workflow []byte
 
 type H3 struct{ Krea2 }
 
-type workflowNode struct {
-	Inputs    map[string]any `json:"inputs"`
-	ClassType string         `json:"class_type"`
-}
+type workflowNode = generation.WorkflowNode
 
 func (p H3) Submit(ctx context.Context, input generation.Input) (string, error) {
 	if input.Model != generation.H3Model || !generation.ValidInput(input) {
@@ -43,84 +40,10 @@ func (p H3) Submit(ctx context.Context, input generation.Input) (string, error) 
 		n.Inputs[o.FieldName] = o.FieldValue
 		graph[o.NodeID] = n
 	}
-	target := graph["136"]
-	for key := range target.Inputs {
-		if strings.HasPrefix(key, "ref_images.") || strings.HasPrefix(key, "ref_videos.") || strings.HasPrefix(key, "ref_video_audios.") || strings.HasPrefix(key, "ref_audios.") {
-			delete(target.Inputs, key)
-		}
+	if err := attachReferences(ctx, graph, generation.WorkflowReferences{NodeID: "136", ImageLoader: "199", VideoLoader: "185", AudioLoader: "182"}, input, frames, p); err != nil {
+		return "", generation.ErrSubmissionRejected
 	}
-	counts := map[string]int{}
-	next := 1000
-	for _, ref := range input.References {
-		name, info, err := p.upload(ctx, ref)
-		if err != nil {
-			return "", generation.ErrSubmissionRejected
-		}
-		loaderID := "199"
-		field := "image"
-		prefix := "ref_images.ref_image_"
-		if ref.Kind == "video" {
-			loaderID = "185"
-			field = "video"
-			prefix = "ref_videos.ref_video_"
-		}
-		if ref.Kind == "audio" {
-			loaderID = "182"
-			field = "audio"
-			prefix = "ref_audios.ref_audio_"
-		}
-		id := fmt.Sprint(next)
-		next++
-		loader := graph[loaderID]
-		copyInputs := make(map[string]any, len(loader.Inputs))
-		for k, v := range loader.Inputs {
-			copyInputs[k] = v
-		}
-		loader.Inputs = copyInputs
-		loader.Inputs[field] = name
-		if ref.Kind == "video" {
-			loader.Inputs["force_rate"] = 24
-			available := max(5, int(info.Duration*24))
-			loader.Inputs["frame_load_cap"] = min(frames, 5+17*((available-5)/17))
-			loader.Inputs["skip_first_frames"] = 0
-			loader.Inputs["select_every_nth"] = 1
-		}
-		graph[id] = loader
-		index := counts[ref.Kind]
-		counts[ref.Kind]++
-		target.Inputs[prefix+fmt.Sprint(index)] = []any{id, 0}
-		if ref.Kind == "video" && ref.UseAudio {
-			target.Inputs["ref_video_audios.ref_video_audio_"+fmt.Sprint(index)] = []any{id, 2}
-		}
-	}
-	graph["136"] = target
-	// The exported graph contains sample media. Keep only nodes reachable from the output.
-	keep := map[string]bool{}
-	var visit func(string)
-	visit = func(id string) {
-		if keep[id] {
-			return
-		}
-		node, ok := graph[id]
-		if !ok {
-			return
-		}
-		keep[id] = true
-		for _, v := range node.Inputs {
-			a, ok := v.([]any)
-			if ok && len(a) == 2 {
-				if child, ok := a[0].(string); ok {
-					visit(child)
-				}
-			}
-		}
-	}
-	visit("148")
-	for id := range graph {
-		if !keep[id] {
-			delete(graph, id)
-		}
-	}
+	pruneReferenceGraph(graph, "148")
 	workflow, err := json.Marshal(graph)
 	if err != nil {
 		return "", err

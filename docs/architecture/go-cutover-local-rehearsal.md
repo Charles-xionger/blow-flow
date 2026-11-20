@@ -21,66 +21,39 @@ returns a nonzero exit status while still tearing down disposable resources.
 
 The fixture initializes the legacy Web schema, seeds projects, a folder, canvas
 and receipts, media, script tasks, Agent history and a personal skill with a
-binary resource, then uses the read-only legacy exporter. The rehearsal imports
-it twice into the isolated Go database, compares every resource count and
-checks representative content, owner and interrupted history. The Go HTTP test
-uses that imported account to exercise the cutover API. Focused integration
-cases cover generation, script and Agent recovery, duplicate messages, Redis
-notification loss, failure and late delivery. Finally, the runner compares the
-legacy SQLite digest and emits a manifest of Go-only IDs before destroying the
-disposable database.
+binary resource, then uses the read-only legacy exporter. The external video
+is served by a run-specific localhost fixture. The runner fetches its bytes
+and compares their digest, decodes and hashes inline image bytes, and checks
+owner access and cross-owner denial through the Go asset route.
 
-The local rollback proof is a safe stop plus delta capture. It is **not** a
-lossless reverse migration: the legacy SQLite cannot serve Go-only projects or
-tasks. Production rollback requires a disposition for those IDs and results,
-confirmed backups, credentialed provider smoke checks and monitoring. This
-script does not change production routing or exercise the Next.js browser UI.
+The Go HTTP journey uses the imported creator account. It starts the real Node
+Pi Runner with a deterministic model stream, so its canvas edit and generation
+confirmation pass through MCP and Go HTTP. After the owner approves, the real
+Go submission and delivery workers call fake RunningHub image and H3 adapters;
+the fake supplier supplies task IDs, output queries and WebSocket progress.
+A fake artifact store returns deterministic saved URLs. The journey verifies
+one provider submission per task, progress events, saved results, owner-scoped
+reads, duplicate wakeups and the resumed Runner's completion. Focused tests
+still cover recovery, failure, Redis loss and script checkpoints.
+
+After Go writes stop, the runner exports synthetic Go-only project and task rows
+into a private temporary delta, reconciles their IDs and records its digest.
+It then reopens the disposable legacy SQLite as immutable read-only, verifies
+its prior projects are readable, confirms Go-only IDs are absent and rejects a
+write. The temporary delta and both databases are deliberately discarded on
+teardown. This is a safe local restoration of the old read entry with an
+explicit synthetic-data disposition; it is not a lossless reverse migration.
+Production rollback still needs a disposition for real Go-only data, confirmed
+backups, credentialed provider smoke checks and monitoring. The rehearsal does
+not change production routing or exercise the full browser UI.
 
 ## Observed local run, 2026-11-20
 
-The [sanitized evidence](go-cutover-rehearsal-2026-11-20.json) is from commit
-`a46c94435336fb0571b4900806a7150ae99abfd0`, run
-`rehearsal_14672adbf02b` (55.6 seconds). All 18 recorded cases passed. The
-fixture exported two projects, one folder, two media files, two script tasks,
-two Agent tasks and messages, one personal skill and resource, plus save,
-deleted-node and legacy command receipts. Every exported resource count and
-identifier matched PostgreSQL after import. Canvas content, version, folder,
-trash state, media content, skill bytes and owner matched. The old waiting Agent
-task was interrupted with no legacy generation outbox.
-
-The imported creator logged in through Go, read the workspace, saved and
-replayed a canvas request, sent an Agent command, used the internal canvas tool,
-confirmed one image and one video generation, and read both delivered results
-and a completed script result from the saved project. A newly built API router
-read the saved state, and a second owner received 404 for project, Agent and task
-reads. Focused integration cases exercised replay, lost Rabbit wakeup and Redis
-notification, uncertain supplier response, task failure and retry, late delivery,
-script checkpoint recovery and old Agent read-only isolation. All supplier
-responses in this run were fake.
-
-The legacy SQLite digest stayed unchanged while Go created one new project
-(canvas version 7), one Agent task, one script task and two delivered generation
-tasks. The delta manifest lists Go-only IDs and confirms that the legacy export
-lacks them. All run-specific containers and volumes were removed.
-
-Earlier setup attempts failed before rehearsal cases ran: one fresh RabbitMQ
-container exited during startup, and one fresh worktree lacked installed Node
-dependencies. A later API test attempt exposed missing fake model configuration
-at generation preparation. The runner now has a bounded startup retry, the
-worktree dependencies were installed, and the fake model configuration was
-fixed. These failed attempts were not counted as passing evidence.
-
-This run used API and store boundaries, including fake suppliers; it did not
-start the full Web UI or make paid supplier calls. Restart behavior was tested by
-recreating the API router and through dedicated persistence/recovery integration
-cases, not by killing a live production process. The Go-only delta is preserved
-in the report, but reverse migration is still absent. Production cutover remains
-gated on backups, credentialed provider smoke checks, monitoring and a decision
-for Go-only data if rollback is needed.
-
-Validation on the final source: typecheck and lint passed, the Python fixture
-and isolation tests passed (3/3), and the full fast suite passed on its final
-run (Web 345/345; all API, admin and eval tasks passed). An earlier full fast
-run had one Web autosave test fail on a short timeout assertion under load
-(344/345 Web); that case passed a focused rerun, followed by the passing full
-run. No application source was changed between those two fast runs.
+The [review-fix evidence](go-cutover-rehearsal-review-fixes-2026-11-20.json) records
+a disposable local run of 20/20 cases. It includes imported resource counts,
+identifiers, content checks, owner access, the joined Node Pi Runner and Go
+worker journey, and the read-only legacy restoration. No paid supplier request
+or real supplier credential was used. The prior
+[18-case evidence](go-cutover-rehearsal-2026-11-20.json) remains as a historical
+record; its API journey manually advanced generation store states and its
+rollback stopped at a delta manifest, so it did not prove those two paths.

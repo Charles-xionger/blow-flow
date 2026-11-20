@@ -214,7 +214,8 @@ export class GoPiHost implements PiRuntimeHost {
   };
 }
 
-export async function runGoAgentTask(client: GoAgentRunClient, taskId: string, signal?: AbortSignal, onClaim?: () => void) {
+export async function runGoAgentTask(client: GoAgentRunClient, taskId: string, signal?: AbortSignal, onClaim?: () => void,
+  runtimeOptions?: Parameters<typeof createPiRuntimeForHost>[1]) {
   const claim = await client.claim(taskId);
   onClaim?.();
   const run = client.run(claim.token);
@@ -229,7 +230,7 @@ export async function runGoAgentTask(client: GoAgentRunClient, taskId: string, s
   if (signal?.aborted) controller.abort();
   const heartbeat = setInterval(() => { void run.heartbeat().catch(() => controller.abort()); }, 20_000);
   try {
-    const runtime = createPiRuntimeForHost(host);
+    const runtime = createPiRuntimeForHost(host, runtimeOptions);
     await runtime({ task: context.task, messages: context.messages, signal: controller.signal,
       tool: () => Promise.reject(new Error('Use in-process MCP tools')),
       reply: text => {
