@@ -194,7 +194,13 @@ func validateCanvasEdit(beforeRaw, afterRaw, operationsRaw []byte, editableIDs, 
 	editable := stringsSet(editableIDs)
 	consumed := []string{}
 	for root := range deletes {
-		if (!granted[root] && !editable[root]) || oldNodes[root] == nil {
+		if oldNodes[root] == nil {
+			if granted[root] {
+				consumed = append(consumed, root)
+			}
+			continue
+		}
+		if !granted[root] && !editable[root] {
 			return nil, nil, agent.ErrForbidden
 		}
 		if granted[root] {
@@ -247,7 +253,7 @@ func validateCanvasEdit(beforeRaw, afterRaw, operationsRaw []byte, editableIDs, 
 		}
 	}
 	for id := range deletes {
-		if newNodes[id] != nil {
+		if oldNodes[id] != nil && newNodes[id] != nil {
 			return nil, nil, agent.ErrForbidden
 		}
 	}

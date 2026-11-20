@@ -167,6 +167,66 @@ func sameJSON(a, b []byte) bool {
 	return json.Unmarshal(a, &left) == nil && json.Unmarshal(b, &right) == nil && reflect.DeepEqual(left, right)
 }
 
+func TestCanvasScopedConsentGrantsOnlyAnsweredNodesAndConsumesDeletion(t *testing.T) {
+	s, resources, owner, project := agentStore(t)
+	ctx := context.Background()
+	initial := json.RawMessage(`{"name":"Canvas","nodes":[{"id":"old","type":"text","position":{"x":0,"y":0},"data":{"type":"text","label":"Original"}}],"edges":[],"viewport":{"x":0,"y":0,"zoom":1},"history":{"schema":1}}`)
+	if _, err := resources.SaveCanvas(ctx, owner, project, resource.SaveCanvas{RequestID: "setup-old", BaseVersion: 1, Snapshot: initial}); err != nil {
+		t.Fatal(err)
+	}
+	task, err := s.Command(ctx, owner, project, agent.Command{RequestID: "send-old", Action: "send", Text: "修改内容", ModelID: "gemini", CanvasVersion: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := s.Claim(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := json.RawMessage(`{"name":"Canvas","nodes":[{"id":"old","type":"text","position":{"x":0,"y":0},"data":{"type":"text","label":"Changed"}}],"edges":[],"viewport":{"x":0,"y":0,"zoom":1},"history":{"schema":1}}`)
+	edit := agent.Commit{CallID: "edit-old", BaseVersion: 2, Label: "edit", Operations: json.RawMessage(`[{"kind":"update","id":"old","data":{"label":"Changed"}}]`), Snapshot: updated}
+	if _, err := s.CommitCanvas(ctx, run.Token, edit); !errors.Is(err, agent.ErrForbidden) {
+		t.Fatalf("unapproved edit: %v", err)
+	}
+	q := agent.Question{ID: "confirm-edit", Text: "修改已有节点？", Options: []string{"确认修改", "改为新建节点"}, Scope: json.RawMessage(`{"kind":"edit","ids":["old"]}`)}
+	if err := s.AskQuestion(ctx, run.Token, q); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Command(ctx, owner, project, agent.Command{RequestID: "answer-edit", Action: "answer", QuestionID: q.ID, Text: "确认修改"}); err != nil {
+		t.Fatal(err)
+	}
+	run, err = s.Claim(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	context, err := s.Context(ctx, run.Token)
+	if err != nil || !reflect.DeepEqual(context.Task.EditableNodeIDs, []string{"old"}) {
+		t.Fatalf("scoped edit grant: %+v %v", context.Task, err)
+	}
+	if _, err := s.CommitCanvas(ctx, run.Token, edit); err != nil {
+		t.Fatalf("approved edit: %v", err)
+	}
+	deleteQ := agent.Question{ID: "confirm-delete", Text: "删除节点？", Options: []string{"确认删除", "保留"}, Scope: json.RawMessage(`{"kind":"delete","ids":["old"]}`)}
+	if err := s.AskQuestion(ctx, run.Token, deleteQ); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Command(ctx, owner, project, agent.Command{RequestID: "answer-delete", Action: "answer", QuestionID: deleteQ.ID, Text: "确认删除"}); err != nil {
+		t.Fatal(err)
+	}
+	run, err = s.Claim(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty := json.RawMessage(`{"name":"Canvas","nodes":[],"edges":[],"viewport":{"x":0,"y":0,"zoom":1},"history":{"schema":1}}`)
+	deleted := agent.Commit{CallID: "delete-old", BaseVersion: 3, Label: "delete", Operations: json.RawMessage(`[{"kind":"delete","id":"old"}]`), Snapshot: empty}
+	if _, err := s.CommitCanvas(ctx, run.Token, deleted); err != nil {
+		t.Fatalf("approved delete: %v", err)
+	}
+	context, err = s.Context(ctx, run.Token)
+	if err != nil || len(context.Task.DeleteGrants) != 0 {
+		t.Fatalf("delete grant consumed: %+v %v", context.Task, err)
+	}
+}
+
 func TestExpiredRunInterruptsWithoutReclaim(t *testing.T) {
 	s, _, owner, project := agentStore(t)
 	now := time.Now().UTC()

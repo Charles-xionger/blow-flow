@@ -17,16 +17,18 @@ var (
 )
 
 type Task struct {
-	ID             string    `json:"id"`
-	OwnerID        string    `json:"-"`
-	ProjectID      string    `json:"projectId"`
-	ModelID        string    `json:"modelId"`
-	Status         string    `json:"status"`
-	Question       *Question `json:"question,omitempty"`
-	CreatedAt      time.Time `json:"createdAt"`
-	UpdatedAt      time.Time `json:"updatedAt"`
-	LegacyImported bool      `json:"legacyImported,omitempty"`
-	Steps          []Step    `json:"steps,omitempty"`
+	ID              string    `json:"id"`
+	OwnerID         string    `json:"-"`
+	ProjectID       string    `json:"projectId"`
+	ModelID         string    `json:"modelId"`
+	Status          string    `json:"status"`
+	Question        *Question `json:"question,omitempty"`
+	EditableNodeIDs []string  `json:"editableNodeIds,omitempty"`
+	DeleteGrants    []string  `json:"deleteGrants,omitempty"`
+	CreatedAt       time.Time `json:"createdAt"`
+	UpdatedAt       time.Time `json:"updatedAt"`
+	LegacyImported  bool      `json:"legacyImported,omitempty"`
+	Steps           []Step    `json:"steps,omitempty"`
 }
 
 type Question struct {

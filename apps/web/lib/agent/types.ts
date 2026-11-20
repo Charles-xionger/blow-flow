@@ -45,6 +45,7 @@ export interface AgentTask {
     awaitingGeneration?: boolean;
     /** Existing nodes the user let this task rewrite; never carried into another task. */
     editableNodeIds?: string[];
+    deleteGrants?: string[];
     workerId?: string;
     runId?: string;
     steps: AgentStep[];
