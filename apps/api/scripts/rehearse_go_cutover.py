@@ -38,6 +38,17 @@ IMPORT_TABLES = {
     "agentGenerationBatches": "agent_legacy_generation_batches",
     "userSkills": "user_skills", "userSkillResources": "user_skill_resources",
 }
+IMPORT_IDENTITIES = {
+    "projects": ("id", "id"), "folders": ("id", "id"), "mediaFiles": ("id", "id"),
+    "saveReceipts": ("canvas_id,request_id", "project_id || ':' || request_id"),
+    "deletedNodes": ("canvas_id,node_id", "project_id || ':' || node_id"),
+    "scriptTasks": ("id", "id::text"), "scriptRequests": ("request_id", "request_id"),
+    "agentTasks": ("id", "id::text"), "agentMessages": ("id", "id::text"),
+    "agentReceipts": ("project_id,request_id", "project_id || ':' || request_id"),
+    "agentCanvasReceipts": ("project_id,identity", "project_id || ':' || identity"),
+    "agentGenerationBatches": ("id", "id"), "userSkills": ("name", "name"),
+    "userSkillResources": ("skill_name,path", "skill_name || ':' || path"),
+}
 
 
 def available_port():
@@ -145,6 +156,14 @@ def main():
             owner_count = int(pg(compose, env, "SELECT count(*) FROM projects WHERE owner_id='" + owner + "'"))
             evidence["cases"]["imported_project_owner"] = "pass" if owner_count == evidence["fixtureCounts"]["projects"] else "fail: imported owner mismatch"
             exported = json.loads(export.read_text())
+            id_mismatches = []
+            for key, (source_columns, expression) in IMPORT_IDENTITIES.items():
+                columns = source_columns.split(",")
+                expected = sorted(":".join(str(row[column]) for column in columns) for row in exported[key])
+                actual = sorted(pg(compose, env, "SELECT " + expression + " FROM " + IMPORT_TABLES[key]).splitlines())
+                if expected != actual:
+                    id_mismatches.append(key)
+            evidence["cases"]["all_resource_identifiers"] = "pass" if not id_mismatches else "fail: IDs differ in " + ",".join(id_mismatches)
             active = next(project for project in exported["projects"] if project["id"] == "fixture-project-active")
             imported_snapshot = json.loads(pg(compose, env, "SELECT snapshot FROM projects WHERE id='fixture-project-active'"))
             imported_version = int(pg(compose, env, "SELECT version FROM projects WHERE id='fixture-project-active'"))
