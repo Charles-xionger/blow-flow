@@ -452,22 +452,28 @@ func TestGenerationApprovalCreatesExactTasksOnce(t *testing.T) {
 	if _, err = s.GenerationResults(ctx, resumed.Token, "another-batch"); !errors.Is(err, agent.ErrNotFound) {
 		t.Fatalf("foreign batch: %v", err)
 	}
-	changed:=json.RawMessage(`{"name":"Canvas","nodes":[{"id":"image-1","type":"image","position":{"x":0,"y":0},"data":{"type":"textToImage","prompt":"edited after approval"}}],"edges":[],"viewport":{"x":0,"y":0,"zoom":1},"history":{"schema":1}}`)
-	if _,err=resources.SaveCanvas(ctx,owner,project,resource.SaveCanvas{RequestID:"edited-after-approval",BaseVersion:2,Snapshot:changed});err!=nil{t.Fatal(err)}
-	genStore:=generationpostgres.New(s.DB)
-	claim,ok,err:=genStore.ClaimSubmission(ctx,results.Tasks[0].ID)
-	if err!=nil||!ok{t.Fatalf("claim: %v %v",ok,err)}
-	allowed,err:=genStore.CheckSubmission(ctx,results.Tasks[0].ID,claim.Token)
-	if err!=nil||allowed{t.Fatalf("changed binding was allowed: %v %v",allowed,err)}
+	changed := json.RawMessage(`{"name":"Canvas","nodes":[{"id":"image-1","type":"image","position":{"x":0,"y":0},"data":{"type":"textToImage","prompt":"edited after approval"}}],"edges":[],"viewport":{"x":0,"y":0,"zoom":1},"history":{"schema":1}}`)
+	if _, err = resources.SaveCanvas(ctx, owner, project, resource.SaveCanvas{RequestID: "edited-after-approval", BaseVersion: 2, Snapshot: changed}); err != nil {
+		t.Fatal(err)
+	}
+	genStore := generationpostgres.New(s.DB)
+	claim, ok, err := genStore.ClaimSubmission(ctx, results.Tasks[0].ID)
+	if err != nil || !ok {
+		t.Fatalf("claim: %v %v", ok, err)
+	}
+	allowed, err := genStore.CheckSubmission(ctx, results.Tasks[0].ID, claim.Token)
+	if err != nil || allowed {
+		t.Fatalf("changed binding was allowed: %v %v", allowed, err)
+	}
 }
 
 func TestAgentDeliveryWritesSavedResultToCanvasOnce(t *testing.T) {
-	for _, existing := range []bool{false, true} {
-		t.Run(fmt.Sprint("existing=", existing), func(t *testing.T) {
+	for _, mode := range []string{"empty", "existing", "deleted"} {
+		t.Run(mode, func(t *testing.T) {
 			s, resources, owner, project := agentStore(t)
 			ctx := context.Background()
 			image := ""
-			if existing {
+			if mode == "existing" {
 				image = `"imageSrc":"https://assets.example/old.png",`
 			}
 			canvas := json.RawMessage(fmt.Sprintf(`{"name":"Canvas","nodes":[{"id":"image-1","type":"image","position":{"x":0,"y":0},"data":{"type":"textToImage",%s"prompt":"cat"}}],"edges":[],"viewport":{"x":0,"y":0,"zoom":1},"history":{"schema":1}}`, image))
@@ -493,15 +499,24 @@ func TestAgentDeliveryWritesSavedResultToCanvasOnce(t *testing.T) {
 				t.Fatal(err)
 			}
 			var ids []string
-			var rawIDs []byte
+			var rawIDs string
 			if err = s.DB.Raw(`SELECT generation_task_ids FROM agent_generation_batches WHERE id=?`, batch.ID).Scan(&rawIDs).Error; err != nil {
 				t.Fatal(err)
 			}
-			if err = json.Unmarshal(rawIDs, &ids); err != nil {
+			if err = json.Unmarshal([]byte(rawIDs), &ids); err != nil {
 				t.Fatal(err)
 			}
 			if len(ids) != 1 {
 				t.Fatalf("tasks: %v", ids)
+			}
+			if mode == "deleted" {
+				if err = s.DB.Exec(`UPDATE generation_tasks SET status='running' WHERE id=?`, ids[0]).Error; err != nil {
+					t.Fatal(err)
+				}
+				empty := json.RawMessage(`{"name":"Canvas","nodes":[],"edges":[],"viewport":{"x":0,"y":0,"zoom":1},"history":{"schema":1}}`)
+				if _, err = resources.SaveCanvas(ctx, owner, project, resource.SaveCanvas{RequestID: "delete-target", BaseVersion: 2, Snapshot: empty}); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if err = s.DB.Exec(`UPDATE generation_tasks SET status='saving',stage='saving',lease_token='delivery-lease',lease_until=now()+interval '1 minute' WHERE id=?`, ids[0]).Error; err != nil {
 				t.Fatal(err)
@@ -510,7 +525,7 @@ func TestAgentDeliveryWritesSavedResultToCanvasOnce(t *testing.T) {
 			if err = gen.Delivered(ctx, generationpostgres.DeliveryClaim{TaskID: ids[0], Token: "delivery-lease"}, "https://assets.example/new.png"); err != nil {
 				t.Fatal(err)
 			}
-			var saved []byte
+			var saved string
 			if err = s.DB.Raw(`SELECT snapshot FROM projects WHERE id=?`, project).Scan(&saved).Error; err != nil {
 				t.Fatal(err)
 			}
@@ -522,17 +537,30 @@ func TestAgentDeliveryWritesSavedResultToCanvasOnce(t *testing.T) {
 					} `json:"data"`
 				} `json:"nodes"`
 			}
-			if err = json.Unmarshal(saved, &graph); err != nil {
+			if err = json.Unmarshal([]byte(saved), &graph); err != nil {
 				t.Fatal(err)
 			}
 			expected := 1
-			if existing {
+			if mode == "existing" {
 				expected = 2
+			}
+			if mode == "deleted" {
+				expected = 0
 			}
 			if len(graph.Nodes) != expected {
 				t.Fatalf("node count %d", len(graph.Nodes))
 			}
-			if existing && graph.Nodes[0].Data.ImageSrc != "https://assets.example/old.png" {
+			if mode == "deleted" {
+				result, _, err := gen.Get(ctx, ids[0])
+				if err != nil {
+					t.Fatal(err)
+				}
+				if result.ResultURL != "https://assets.example/new.png" || result.AttachmentNote == "" {
+					t.Fatalf("deleted target result: %+v", result)
+				}
+				return
+			}
+			if mode == "existing" && graph.Nodes[0].Data.ImageSrc != "https://assets.example/old.png" {
 				t.Fatal("old result overwritten")
 			}
 			if graph.Nodes[len(graph.Nodes)-1].Data.ImageSrc != "https://assets.example/new.png" {

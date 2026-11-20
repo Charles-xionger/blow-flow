@@ -19,10 +19,20 @@ type GenerationBatch = agent.GenerationBatch
 func generationInput(item GenerationItem, project string) (generation.Input, error) {
 	input := generation.Input{ProjectID: project, NodeID: item.NodeID, Model: item.Model, Prompt: item.Prompt, Width: item.Width, Height: item.Height}
 	if len(item.Input) > 0 {
-		if item.Model!="" || item.Prompt!="" || item.Width!=0 || item.Height!=0 { return generation.Input{},agent.ErrInvalid }
+		if item.Model != "" || item.Prompt != "" || item.Width != 0 || item.Height != 0 {
+			return generation.Input{}, agent.ErrInvalid
+		}
 		var fields map[string]json.RawMessage
-		if item.ModelID == "" || json.Unmarshal(item.Input,&fields)!=nil || len(fields)==0 { return generation.Input{},agent.ErrInvalid }
-		for key:=range fields { switch key { case "prompt","width","height","duration","references","instanceType","imageOptions": default: return generation.Input{},agent.ErrInvalid } }
+		if item.ModelID == "" || json.Unmarshal(item.Input, &fields) != nil || len(fields) == 0 {
+			return generation.Input{}, agent.ErrInvalid
+		}
+		for key := range fields {
+			switch key {
+			case "prompt", "width", "height", "duration", "references", "instanceType", "imageOptions":
+			default:
+				return generation.Input{}, agent.ErrInvalid
+			}
+		}
 		if json.Unmarshal(item.Input, &input) != nil {
 			return generation.Input{}, agent.ErrInvalid
 		}
@@ -97,7 +107,7 @@ func (s *Store) PrepareGeneration(ctx context.Context, token, callID string, ite
 			binding, nodeType, exists := generationBinding(project.Snapshot, item.NodeID)
 			isVideo := input.Model == "runninghub/h3"
 			validTarget := isVideo && (nodeType == "textToVideo" || nodeType == "imageToVideo" || nodeType == "startEndToVideo" || nodeType == "video") || !isVideo && (nodeType == "textToImage" || nodeType == "imageToImage" || nodeType == "image")
-			if item.NodeID == "" || len(item.NodeID) > 200 || seen[item.NodeID] || !exists || !validTarget || !generation.ValidInput(input) {
+			if item.NodeID == "" || len(item.NodeID) > 200 || seen[item.NodeID] || !exists || !validTarget || !generation.ValidInput(input) || !ownedGenerationReferences(tx, row.OwnerID, row.ProjectID, item.NodeID, project.Snapshot, input.References) {
 				return agent.ErrInvalid
 			}
 			seen[item.NodeID] = true
@@ -198,7 +208,9 @@ func approveGeneration(tx *gorm.DB, row taskRow, question agent.Question, answer
 		if err != nil {
 			return err
 		}
-		if err:=tx.Exec(`INSERT INTO agent_generation_submission_bindings(task_id,node_id,digest) VALUES(?,?,?) ON CONFLICT(task_id) DO NOTHING`,task.ID,item.NodeID,bindings[item.NodeID]).Error;err!=nil{return err}
+		if err := tx.Exec(`INSERT INTO agent_generation_submission_bindings(task_id,node_id,digest) VALUES(?,?,?) ON CONFLICT(task_id) DO NOTHING`, task.ID, item.NodeID, bindings[item.NodeID]).Error; err != nil {
+			return err
+		}
 		ids = append(ids, task.ID)
 	}
 	encoded, _ := json.Marshal(ids)

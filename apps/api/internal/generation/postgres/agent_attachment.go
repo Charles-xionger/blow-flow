@@ -35,8 +35,10 @@ func attachAgentResult(tx *gorm.DB, taskID, url string, now time.Time) error {
 	}
 	resultNode, note := task.NodeID, "结果已写回画布"
 	var latest string
-	latestRow:=tx.Raw(`SELECT task_id FROM generation_node_results WHERE owner_id=? AND project_id=? AND node_id=?`, task.OwnerID, task.ProjectID, task.NodeID).Scan(&latest)
-	if latestRow.Error != nil { return latestRow.Error }
+	latestRow := tx.Raw(`SELECT task_id FROM generation_node_results WHERE owner_id=? AND project_id=? AND node_id=?`, task.OwnerID, task.ProjectID, task.NodeID).Scan(&latest)
+	if latestRow.Error != nil {
+		return latestRow.Error
+	}
 	if latestRow.RowsAffected == 0 {
 		resultNode, note = "", "目标节点已删除；产物保留在生成任务中。"
 	} else if latest != taskID {
@@ -71,8 +73,8 @@ func attachAgentResult(tx *gorm.DB, taskID, url string, now time.Time) error {
 			if index < 0 {
 				resultNode, note = "", "目标节点已删除；产物保留在生成任务中。"
 			} else {
-				beforeNodes:=copyJSON(nodes)
-				beforeEdges:=copyJSON(canvas["edges"])
+				beforeNodes := copyJSON(nodes)
+				beforeEdges := copyJSON(canvas["edges"])
 				target := nodes[index].(map[string]any)
 				data, ok := target["data"].(map[string]any)
 				if !ok {
@@ -134,7 +136,7 @@ func attachAgentResult(tx *gorm.DB, taskID, url string, now time.Time) error {
 						data[key] = value
 					}
 				}
-				appendGenerationHistory(canvas,taskID,beforeNodes,beforeEdges,now)
+				appendGenerationHistory(canvas, taskID, beforeNodes, beforeEdges, now)
 				snapshot, err := json.Marshal(canvas)
 				if err != nil {
 					return err
@@ -151,22 +153,34 @@ func attachAgentResult(tx *gorm.DB, taskID, url string, now time.Time) error {
 func hasArtifacts(value any) bool { items, ok := value.([]any); return ok && len(items) > 0 }
 func number(value any) float64    { n, _ := value.(float64); return n }
 
-func copyJSON(value any) any { encoded,_:=json.Marshal(value);var copy any;_ = json.Unmarshal(encoded,&copy);return copy }
+func copyJSON(value any) any {
+	encoded, _ := json.Marshal(value)
+	var copy any
+	_ = json.Unmarshal(encoded, &copy)
+	return copy
+}
 
-func appendGenerationHistory(canvas map[string]any,taskID string,beforeNodes,beforeEdges any,now time.Time) {
-	history,ok:=canvas["history"].(map[string]any)
-	if !ok || history["checkpoint"]==nil {return}
-	records,okRecords:=history["records"].([]any)
-	undo,okUndo:=history["undo"].([]any)
-	_,okRedo:=history["redo"].([]any)
-	receipts,okReceipts:=history["receipts"].([]any)
-	if !okRecords||!okUndo||!okRedo||!okReceipts{return}
-	id:="generation-output:"+taskID
-	patches:=[]any{map[string]any{"op":"replace","path":[]any{"nodes"},"value":canvas["nodes"]},map[string]any{"op":"replace","path":[]any{"edges"},"value":canvas["edges"]}}
-	inverse:=[]any{map[string]any{"op":"replace","path":[]any{"nodes"},"value":beforeNodes},map[string]any{"op":"replace","path":[]any{"edges"},"value":beforeEdges}}
-	stamp:=now.UnixMilli();label:="助手生成结果"
-	history["records"]=append(records,map[string]any{"id":id,"label":label,"patches":patches,"inverse":inverse,"time":stamp})
-	history["undo"]=append(undo,id);history["redo"]=[]any{};history["receipts"]=append(receipts,id)
-	operations,_:=history["operations"].([]any)
-	history["operations"]=append(operations,map[string]any{"id":id,"batchId":id,"source":"agent","kind":"edit","label":label,"time":stamp,"patches":patches,"inverse":inverse})
+func appendGenerationHistory(canvas map[string]any, taskID string, beforeNodes, beforeEdges any, now time.Time) {
+	history, ok := canvas["history"].(map[string]any)
+	if !ok || history["checkpoint"] == nil {
+		return
+	}
+	records, okRecords := history["records"].([]any)
+	undo, okUndo := history["undo"].([]any)
+	_, okRedo := history["redo"].([]any)
+	receipts, okReceipts := history["receipts"].([]any)
+	if !okRecords || !okUndo || !okRedo || !okReceipts {
+		return
+	}
+	id := "generation-output:" + taskID
+	patches := []any{map[string]any{"op": "replace", "path": []any{"nodes"}, "value": canvas["nodes"]}, map[string]any{"op": "replace", "path": []any{"edges"}, "value": canvas["edges"]}}
+	inverse := []any{map[string]any{"op": "replace", "path": []any{"nodes"}, "value": beforeNodes}, map[string]any{"op": "replace", "path": []any{"edges"}, "value": beforeEdges}}
+	stamp := now.UnixMilli()
+	label := "助手生成结果"
+	history["records"] = append(records, map[string]any{"id": id, "label": label, "patches": patches, "inverse": inverse, "time": stamp})
+	history["undo"] = append(undo, id)
+	history["redo"] = []any{}
+	history["receipts"] = append(receipts, id)
+	operations, _ := history["operations"].([]any)
+	history["operations"] = append(operations, map[string]any{"id": id, "batchId": id, "source": "agent", "kind": "edit", "label": label, "time": stamp, "patches": patches, "inverse": inverse})
 }
