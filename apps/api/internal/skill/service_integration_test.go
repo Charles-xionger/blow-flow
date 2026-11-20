@@ -81,9 +81,9 @@ func TestPersonalSkillsPersistAndStayWithTheirOwners(t *testing.T) {
 	if err != nil || detail.Instructions != "Write three beats" || len(detail.Resources) != 1 {
 		t.Fatalf("restart detail=%+v err=%v", detail, err)
 	}
-	var persisted []byte
-	if err = db.Raw(`SELECT content FROM user_skill_resources WHERE owner_id=? AND skill_name=? AND path=?`, a, "scene-helper", "assets/pixel.bin").Scan(&persisted).Error; err != nil || string(persisted) != string(binary) {
-		t.Fatalf("resource bytes=%v err=%v", persisted, err)
+	var persisted struct{ Content []byte }
+	if err = db.Raw(`SELECT content FROM user_skill_resources WHERE owner_id=? AND skill_name=? AND path=?`, a, "scene-helper", "assets/pixel.bin").Scan(&persisted).Error; err != nil || string(persisted.Content) != string(binary) {
+		t.Fatalf("resource bytes=%v err=%v", persisted.Content, err)
 	}
 	if err = restarted.Delete(ctx, a, "scene-helper"); err != nil {
 		t.Fatal(err)

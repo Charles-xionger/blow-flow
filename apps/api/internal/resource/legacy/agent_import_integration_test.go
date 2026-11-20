@@ -93,7 +93,7 @@ func TestImportLegacyAgentHistoryWithoutReplayingGeneration(t *testing.T) {
 	if _, err = s.Command(context.Background(), owner, "project", agent.Command{RequestID: "new-send", Action: "send", Text: "new work", ModelID: "gemini", CanvasVersion: 1}); err != nil {
 		t.Fatalf("new work blocked: %v", err)
 	}
-	if err = Apply(context.Background(), db, owner, "", export); err == nil {
-		t.Fatal("duplicate import accepted")
+	if err = Apply(context.Background(), db, owner, "", export); err != nil {
+		t.Fatalf("idempotent import rejected: %v", err)
 	}
 }
