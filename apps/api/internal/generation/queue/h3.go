@@ -6,13 +6,10 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
-	"net/url"
-	"path"
 	"strings"
 	"time"
 )
@@ -55,9 +52,9 @@ func (p H3) Submit(ctx context.Context, input generation.Input) (string, error) 
 	counts := map[string]int{}
 	next := 1000
 	for _, ref := range input.References {
-		name, err := p.upload(ctx, ref)
+		name, info, err := p.upload(ctx, ref)
 		if err != nil {
-			return "", err
+			return "", generation.ErrSubmissionRejected
 		}
 		loaderID := "199"
 		field := "image"
@@ -83,7 +80,8 @@ func (p H3) Submit(ctx context.Context, input generation.Input) (string, error) 
 		loader.Inputs[field] = name
 		if ref.Kind == "video" {
 			loader.Inputs["force_rate"] = 24
-			loader.Inputs["frame_load_cap"] = frames
+			available := max(5, int(info.Duration*24))
+			loader.Inputs["frame_load_cap"] = min(frames, 5+17*((available-5)/17))
 			loader.Inputs["skip_first_frames"] = 0
 			loader.Inputs["select_every_nth"] = 1
 		}
@@ -176,63 +174,51 @@ func (p H3) Submit(ctx context.Context, input generation.Input) (string, error) 
 	return "", ErrSubmissionUncertain
 }
 
-func (p H3) upload(ctx context.Context, ref generation.Reference) (string, error) {
-	u, err := url.Parse(ref.URL)
-	if err != nil {
-		return "", generation.ErrInvalid
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ref.URL, nil)
-	if err != nil {
-		return "", err
-	}
+func (p H3) upload(ctx context.Context, ref generation.Reference) (string, referenceInfo, error) {
 	client := p.Client
 	if client == nil {
 		client = &http.Client{Timeout: 60 * time.Second}
 	}
 	safe := *client
 	safe.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	response, err := safe.Do(req)
+	bytesValue, filename, err := referenceBytes(ctx, client, ref)
 	if err != nil {
-		return "", err
+		return "", referenceInfo{}, err
 	}
-	defer response.Body.Close()
-	if response.StatusCode != 200 {
-		return "", errors.New("reference download failed")
-	}
-	bytesValue, err := io.ReadAll(io.LimitReader(response.Body, (30<<20)+1))
+	info, err := inspectReference(ctx, bytesValue, filename, ref.Kind)
 	if err != nil {
-		return "", err
+		return "", referenceInfo{}, err
 	}
-	if len(bytesValue) == 0 || len(bytesValue) > 30<<20 {
-		return "", generation.ErrInvalid
+	if ref.Kind == "video" && ref.UseAudio && !info.HasAudio {
+		return "", referenceInfo{}, generation.ErrInvalid
 	}
 	var body bytes.Buffer
 	form := multipart.NewWriter(&body)
 	_ = form.WriteField("apiKey", p.APIKey)
 	_ = form.WriteField("fileType", "input")
-	part, err := form.CreateFormFile("file", path.Base(u.Path))
+	part, err := form.CreateFormFile("file", filename)
 	if err != nil {
-		return "", err
+		return "", referenceInfo{}, err
 	}
 	if _, err = part.Write(bytesValue); err != nil {
-		return "", err
+		return "", referenceInfo{}, err
 	}
 	if err = form.Close(); err != nil {
-		return "", err
+		return "", referenceInfo{}, err
 	}
 	uploadReq, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(p.BaseURL, "/")+"/task/openapi/upload", &body)
 	if err != nil {
-		return "", err
+		return "", referenceInfo{}, err
 	}
 	uploadReq.Header.Set("Content-Type", form.FormDataContentType())
 	uploadReq.Header.Set("Authorization", "Bearer "+p.APIKey)
 	uploadResponse, err := safe.Do(uploadReq)
 	if err != nil {
-		return "", err
+		return "", referenceInfo{}, err
 	}
 	defer uploadResponse.Body.Close()
 	if uploadResponse.StatusCode != 200 {
-		return "", errors.New("reference upload failed")
+		return "", referenceInfo{}, generation.ErrSubmissionRejected
 	}
 	var reply struct {
 		Code int `json:"code"`
@@ -241,7 +227,7 @@ func (p H3) upload(ctx context.Context, ref generation.Reference) (string, error
 		} `json:"data"`
 	}
 	if json.NewDecoder(io.LimitReader(uploadResponse.Body, 1<<20)).Decode(&reply) != nil || reply.Code != 0 || reply.Data.FileName == "" {
-		return "", errors.New("invalid reference upload response")
+		return "", referenceInfo{}, generation.ErrSubmissionRejected
 	}
-	return reply.Data.FileName, nil
+	return reply.Data.FileName, info, nil
 }
