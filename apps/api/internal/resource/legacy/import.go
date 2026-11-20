@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"blow-flow/api/internal/skill"
+	"bytes"
 	"gorm.io/gorm"
 )
 
@@ -77,7 +79,22 @@ type ScriptRequest struct {
 	NodeID    string `json:"node_id"`
 	Input     string `json:"input"`
 }
+type UserSkill struct {
+	OwnerID      string `json:"owner_id"`
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	Instructions string `json:"instructions"`
+	CreatedAt    int64  `json:"created_at"`
+}
+type UserSkillResource struct {
+	OwnerID       string `json:"owner_id"`
+	SkillName     string `json:"skill_name"`
+	Path          string `json:"path"`
+	ContentBase64 string `json:"content_base64"`
+}
 type Export struct {
+	UserSkills             []UserSkill                `json:"userSkills"`
+	UserSkillResources     []UserSkillResource        `json:"userSkillResources"`
 	SchemaVersion          int                        `json:"schemaVersion"`
 	Projects               []Project                  `json:"projects"`
 	Folders                []Folder                   `json:"folders"`
@@ -169,7 +186,97 @@ func (e Export) Validate() error {
 		}
 		requests[r.RequestID] = true
 	}
+	if err := e.validateSkills(); err != nil {
+		return err
+	}
 	return e.validateAgents(projects)
+}
+func (e Export) validateSkills() error {
+	names := map[string]bool{}
+	for _, sk := range e.UserSkills {
+		if sk.OwnerID != "" && sk.OwnerID != "local-user-v1" || !skill.ValidImport(sk.Name, sk.Description, sk.Instructions) || sk.CreatedAt <= 0 || names[sk.Name] {
+			return errors.New("invalid or duplicate legacy personal skill")
+		}
+		names[sk.Name] = true
+	}
+	paths := map[string]bool{}
+	for _, r := range e.UserSkillResources {
+		key := r.SkillName + "\x00" + r.Path
+		if r.OwnerID != "" && r.OwnerID != "local-user-v1" || !names[r.SkillName] || !skill.ValidResourcePath(r.Path) || paths[key] {
+			return errors.New("invalid or orphaned legacy skill resource")
+		}
+		if _, err := base64.StdEncoding.Strict().DecodeString(r.ContentBase64); err != nil {
+			return errors.New("invalid legacy skill resource base64")
+		}
+		paths[key] = true
+	}
+	return nil
+}
+func verifyImportedSkills(tx *gorm.DB, owner string, e Export) error {
+	for _, sk := range e.UserSkills {
+		var current struct {
+			Description, Instructions string
+			CreatedAt                 time.Time
+		}
+		q := tx.Raw(`SELECT description,instructions,created_at FROM user_skills WHERE owner_id=? AND name=?`, owner, sk.Name).Scan(&current)
+		if q.Error != nil {
+			return q.Error
+		}
+		if q.RowsAffected != 1 || current.Description != sk.Description || current.Instructions != sk.Instructions || !current.CreatedAt.Equal(timestamp(sk.CreatedAt)) {
+			return fmt.Errorf("legacy skill changed: %s", sk.Name)
+		}
+	}
+	for _, r := range e.UserSkillResources {
+		data, _ := base64.StdEncoding.Strict().DecodeString(r.ContentBase64)
+		var current struct{ Content []byte }
+		q := tx.Raw(`SELECT content FROM user_skill_resources WHERE owner_id=? AND skill_name=? AND path=?`, owner, r.SkillName, r.Path).Scan(&current)
+		if q.Error != nil {
+			return q.Error
+		}
+		if q.RowsAffected != 1 || !bytes.Equal(current.Content, data) {
+			return fmt.Errorf("legacy skill resource changed: %s/%s", r.SkillName, r.Path)
+		}
+	}
+	return nil
+}
+func importSkills(tx *gorm.DB, owner string, e Export) error {
+	for _, sk := range e.UserSkills {
+		var existing struct {
+			OwnerID, Description, Instructions string
+			CreatedAt                          time.Time
+		}
+		q := tx.Raw(`SELECT owner_id,description,instructions,created_at FROM user_skills WHERE owner_id=? AND name=?`, owner, sk.Name).Scan(&existing)
+		if q.Error != nil {
+			return q.Error
+		}
+		if q.RowsAffected > 0 {
+			if existing.OwnerID != owner || existing.Description != sk.Description || existing.Instructions != sk.Instructions || !existing.CreatedAt.Equal(timestamp(sk.CreatedAt)) {
+				return fmt.Errorf("legacy skill collision: %s", sk.Name)
+			}
+			continue
+		}
+		if err := tx.Exec(`INSERT INTO user_skills(owner_id,name,description,instructions,created_at) VALUES(?,?,?,?,?)`, owner, sk.Name, sk.Description, sk.Instructions, timestamp(sk.CreatedAt)).Error; err != nil {
+			return err
+		}
+	}
+	for _, r := range e.UserSkillResources {
+		content, _ := base64.StdEncoding.Strict().DecodeString(r.ContentBase64)
+		var existing struct{ Content []byte }
+		q := tx.Raw(`SELECT content FROM user_skill_resources WHERE owner_id=? AND skill_name=? AND path=?`, owner, r.SkillName, r.Path).Scan(&existing)
+		if q.Error != nil {
+			return q.Error
+		}
+		if q.RowsAffected > 0 {
+			if !bytes.Equal(existing.Content, content) {
+				return fmt.Errorf("legacy skill resource collision: %s/%s", r.SkillName, r.Path)
+			}
+			continue
+		}
+		if err := tx.Exec(`INSERT INTO user_skill_resources(owner_id,skill_name,path,content) VALUES(?,?,?,?)`, owner, r.SkillName, r.Path, content).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 func valid(s string) bool          { return s != "" && len(s) <= 200 && strings.TrimSpace(s) == s }
 func timestamp(ms int64) time.Time { return time.UnixMilli(ms).UTC() }
@@ -187,6 +294,12 @@ func Apply(ctx context.Context, db *gorm.DB, owner, ossHost string, e Export) er
 	if err := e.Validate(); err != nil {
 		return err
 	}
+	encodedExport, err := json.Marshal(e)
+	if err != nil {
+		return err
+	}
+	digest := sha256.Sum256(encodedExport)
+	exportDigest := hex.EncodeToString(digest[:])
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec(`SELECT pg_advisory_xact_lock(1732447021)`).Error; err != nil {
 			return err
@@ -197,6 +310,17 @@ func Apply(ctx context.Context, db *gorm.DB, owner, ossHost string, e Export) er
 		}
 		if active != 1 {
 			return errors.New("initial owner must be an active Go user")
+		}
+		var previous struct{ ExportDigest string }
+		q := tx.Raw(`SELECT export_digest FROM legacy_import_runs WHERE owner_id=?`, owner).Scan(&previous)
+		if q.Error != nil {
+			return q.Error
+		}
+		if q.RowsAffected > 0 {
+			if previous.ExportDigest != exportDigest {
+				return errors.New("legacy export differs from previously imported data")
+			}
+			return verifyImportedSkills(tx, owner, e)
 		}
 		for _, f := range e.Folders {
 			res := tx.Exec(`INSERT INTO project_folders(id,owner_id,name,created_at,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(id) DO NOTHING`, f.ID, owner, f.Name, timestamp(f.CreatedAt), timestamp(f.UpdatedAt))
@@ -314,7 +438,13 @@ func Apply(ctx context.Context, db *gorm.DB, owner, ossHost string, e Export) er
 				return err
 			}
 		}
+		if err := importSkills(tx, owner, e); err != nil {
+			return err
+		}
 		if err := importAgents(tx, owner, e); err != nil {
+			return err
+		}
+		if err := tx.Exec(`INSERT INTO legacy_import_runs(owner_id,export_digest) VALUES(?,?)`, owner, exportDigest).Error; err != nil {
 			return err
 		}
 		return nil

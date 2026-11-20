@@ -5,6 +5,11 @@ import { PersonalSpaceMenu } from '@/components/workspace/PersonalSpaceMenu';
 import { getSkill, listSkills } from '@/lib/agent/skills';
 import { SkillUploadForm } from './SkillUploadForm';
 import { SkillDeleteButton } from './SkillDeleteButton';
+import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
+import { NextRequest } from 'next/server';
+import { goAuthorized, goCutoverEnabled } from '@/lib/go-cutover';
+import { listBuiltInSkills, getBuiltInSkill, type SkillSummary, type SkillDetail } from '@/lib/agent/skills';
 import { currentLocalOwner } from '@/lib/auth/current-user';
 import { getSkillUploadLimits } from '@/lib/agent/skill-upload-limits';
 import styles from './skills.module.css';
@@ -12,9 +17,28 @@ import styles from './skills.module.css';
 type Props = { searchParams: Promise<{ skill?: string }> };
 
 export default async function PersonalSkillsPage({ searchParams }: Props) {
-  const skills = listSkills(currentLocalOwner);
+  let skills: SkillSummary[];
+  let selected: SkillDetail;
   const requested = (await searchParams).skill;
-  const selected = getSkill(skills.some(skill => skill.id === requested) ? requested! : skills[0].id, currentLocalOwner);
+  if (goCutoverEnabled()) {
+    const cookieHeader = (await cookies()).toString();
+    const request = new NextRequest('http://localhost/personal/skills', { headers: { cookie: cookieHeader } });
+    const { response } = await goAuthorized(request, '/v1/personal/skills');
+    if (!response || response.status === 401) redirect('/login');
+    if (!response.ok) throw new Error('无法读取个人技能库');
+    skills = [...listBuiltInSkills(), ...await response.json() as SkillSummary[]];
+    const id = skills.some(skill => skill.id === requested) ? requested! : skills[0].id;
+    const builtIn = getBuiltInSkill(id);
+    if (builtIn) selected = builtIn;
+    else {
+      const detail = await goAuthorized(request, `/v1/personal/skills/${encodeURIComponent(id)}`);
+      if (!detail.response?.ok) throw new Error('无法读取创作技能');
+      selected = await detail.response.json() as SkillDetail;
+    }
+  } else {
+    skills = listSkills(currentLocalOwner);
+    selected = getSkill(skills.some(skill => skill.id === requested) ? requested! : skills[0].id, currentLocalOwner);
+  }
   const { packageMb, fileMb, expandedMb } = getSkillUploadLimits();
 
   return <div className={styles.page}>
