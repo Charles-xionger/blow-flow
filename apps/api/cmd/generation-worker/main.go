@@ -47,8 +47,9 @@ func run() error {
 		defer client.Close()
 		store.Notify = client.Publish
 	}
-	worker := queue.SubmissionWorker{Store: store, Rabbit: rabbit, Provider: queue.Krea2{BaseURL: os.Getenv("RUNNINGHUB_BASE_URL"), APIKey: os.Getenv("RUNNINGHUB_API_KEY")}}
-	delivery := queue.DeliveryWorker{Store: store, Provider: queue.Krea2{BaseURL: os.Getenv("RUNNINGHUB_BASE_URL"), APIKey: os.Getenv("RUNNINGHUB_API_KEY")}, Artifacts: queue.OSSFromEnv()}
+	providers := queue.Providers{RunningHub: queue.Krea2{BaseURL: os.Getenv("RUNNINGHUB_BASE_URL"), APIKey: os.Getenv("RUNNINGHUB_API_KEY")}, Seedream: queue.Seedream{BaseURL: "https://ark.cn-beijing.volces.com", APIKey: os.Getenv("ARK_API_KEY")}, Gemini: queue.Gemini{BaseURL: "https://generativelanguage.googleapis.com", APIKey: os.Getenv("GEMINI_API_KEY"), Stage: store}}
+	worker := queue.SubmissionWorker{Store: store, Rabbit: rabbit, Provider: providers}
+	delivery := queue.DeliveryWorker{Store: store, Provider: providers, Artifacts: queue.Artifacts{OSS: queue.OSSFromEnv(), Stage: store}}
 	result := make(chan error, 1)
 	go func() { result <- worker.Run(ctx) }()
 	go func() {

@@ -40,14 +40,29 @@ type Actor struct {
 	Admin bool
 }
 type Input struct {
-	ProjectID    string   `json:"projectId"`
-	NodeID       string   `json:"nodeId,omitempty"`
-	ReferenceIDs []string `json:"referenceIds,omitempty"`
-	Model        string   `json:"model"`
-	Prompt       string   `json:"prompt"`
-	Width        int      `json:"width"`
-	Height       int      `json:"height"`
-	Seed         int64    `json:"seed,omitempty"`
+	ProjectID    string        `json:"projectId"`
+	NodeID       string        `json:"nodeId,omitempty"`
+	ReferenceIDs []string      `json:"referenceIds,omitempty"`
+	Model        string        `json:"model"`
+	Prompt       string        `json:"prompt"`
+	Width        int           `json:"width"`
+	Height       int           `json:"height"`
+	Seed         int64         `json:"seed,omitempty"`
+	Duration     int           `json:"duration,omitempty"`
+	References   []Reference   `json:"references,omitempty"`
+	InstanceType string        `json:"instanceType,omitempty"`
+	ImageOptions *ImageOptions `json:"imageOptions,omitempty"`
+}
+type Reference struct {
+	Kind     string `json:"kind"`
+	URL      string `json:"url"`
+	UseAudio bool   `json:"useAudio,omitempty"`
+}
+type ImageOptions struct {
+	OutputFormat       string `json:"outputFormat,omitempty"`
+	Watermark          bool   `json:"watermark,omitempty"`
+	PromptOptimization string `json:"promptOptimization,omitempty"`
+	Background         string `json:"background,omitempty"`
 }
 type Task struct {
 	ID             string    `json:"id"`
@@ -114,7 +129,7 @@ type Service struct {
 }
 
 func (s Service) Create(ctx context.Context, actor Actor, key string, input Input) (Task, error) {
-	if actor.ID == "" || len(key) < 1 || len(key) > 200 || strings.TrimSpace(input.ProjectID) == "" || len(input.NodeID) > 200 || strings.TrimSpace(input.Prompt) == "" || len(input.Prompt) > 8000 || input.Width < 64 || input.Width > 8192 || input.Height < 64 || input.Height > 8192 || input.Width%8 != 0 || input.Height%8 != 0 || input.Model != "runninghub/krea2" || len(input.ReferenceIDs) > 0 || input.Seed != 0 {
+	if actor.ID == "" || len(key) < 1 || len(key) > 200 || strings.TrimSpace(input.ProjectID) == "" || len(input.NodeID) > 200 || !ValidInput(input) || input.Seed != 0 {
 		return Task{}, ErrInvalid
 	}
 	if s.Resources == nil {

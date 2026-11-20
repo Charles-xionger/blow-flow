@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"blow-flow/api/internal/generation"
 	"context"
 	"errors"
 	"gorm.io/gorm"
@@ -14,6 +15,10 @@ func (s *Store) BeginOperation(ctx context.Context, c DeliveryClaim, operation s
 		return false, errors.New("invalid delivery operation")
 	}
 	allowed := false
+	connection := generation.ConnectionForModel(c.Model)
+	if connection == "" {
+		connection = "runninghub-international"
+	}
 	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var current bool
 		if err := tx.Raw(`SELECT EXISTS(SELECT 1 FROM generation_tasks WHERE id=? AND lease_token=? AND lease_until>now())`, c.TaskID, c.Token).Scan(&current).Error; err != nil {
@@ -27,7 +32,7 @@ func (s *Store) BeginOperation(ctx context.Context, c DeliveryClaim, operation s
 			CooldownSeconds      int
 			OpenedAt, ProbeUntil *time.Time
 		}
-		if err := tx.Raw(`SELECT state,COALESCE(probe_task_id,'') AS probe_task_id,cooldown_seconds,opened_at,probe_until FROM generation_circuits WHERE connection_id='runninghub-international' AND operation=? FOR UPDATE`, operation).Scan(&row).Error; err != nil {
+		if err := tx.Raw(`SELECT state,COALESCE(probe_task_id,'') AS probe_task_id,cooldown_seconds,opened_at,probe_until FROM generation_circuits WHERE connection_id=? AND operation=? FOR UPDATE`, connection, operation).Scan(&row).Error; err != nil {
 			return err
 		}
 		if row.State == "" {
@@ -41,11 +46,11 @@ func (s *Store) BeginOperation(ctx context.Context, c DeliveryClaim, operation s
 			return nil
 		}
 		if row.State != "closed" {
-			if err := tx.Exec(`UPDATE generation_circuits SET state='half_open',probe_task_id=?,probe_until=?,updated_at=? WHERE connection_id='runninghub-international' AND operation=?`, c.TaskID, now.Add(60*time.Second), now, operation).Error; err != nil {
+			if err := tx.Exec(`UPDATE generation_circuits SET state='half_open',probe_task_id=?,probe_until=?,updated_at=? WHERE connection_id=? AND operation=?`, c.TaskID, now.Add(60*time.Second), now, connection, operation).Error; err != nil {
 				return err
 			}
 			if row.State == "open" {
-				if err := tx.Exec(`INSERT INTO generation_circuit_events(connection_id,operation,state,reason) VALUES('runninghub-international',?,'half_open','cooldown_elapsed')`, operation).Error; err != nil {
+				if err := tx.Exec(`INSERT INTO generation_circuit_events(connection_id,operation,state,reason) VALUES(? ,?,'half_open','cooldown_elapsed')`, connection, operation).Error; err != nil {
 					return err
 				}
 			}
@@ -60,6 +65,10 @@ func (s *Store) RecordOperation(ctx context.Context, c DeliveryClaim, operation 
 	if operation != "query" && operation != "save" {
 		return errors.New("invalid delivery operation")
 	}
+	connection := generation.ConnectionForModel(c.Model)
+	if connection == "" {
+		connection = "runninghub-international"
+	}
 	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var current bool
 		if err := tx.Raw(`SELECT EXISTS(SELECT 1 FROM generation_tasks WHERE id=? AND lease_token=? AND lease_until>now())`, c.TaskID, c.Token).Scan(&current).Error; err != nil {
@@ -72,7 +81,7 @@ func (s *Store) RecordOperation(ctx context.Context, c DeliveryClaim, operation 
 			State, ProbeTaskID                    string
 			ConsecutiveFailures, FailureThreshold int
 		}
-		if err := tx.Raw(`SELECT state,COALESCE(probe_task_id,'') AS probe_task_id,consecutive_failures,failure_threshold FROM generation_circuits WHERE connection_id='runninghub-international' AND operation=? FOR UPDATE`, operation).Scan(&row).Error; err != nil {
+		if err := tx.Raw(`SELECT state,COALESCE(probe_task_id,'') AS probe_task_id,consecutive_failures,failure_threshold FROM generation_circuits WHERE connection_id=? AND operation=? FOR UPDATE`, connection, operation).Scan(&row).Error; err != nil {
 			return err
 		}
 		if row.State == "" {
@@ -82,21 +91,21 @@ func (s *Store) RecordOperation(ctx context.Context, c DeliveryClaim, operation 
 			return nil
 		}
 		if operationErr == nil {
-			if err := tx.Exec(`UPDATE generation_circuits SET state='closed',consecutive_failures=0,opened_at=NULL,probe_until=NULL,probe_task_id=NULL,updated_at=now() WHERE connection_id='runninghub-international' AND operation=?`, operation).Error; err != nil {
+			if err := tx.Exec(`UPDATE generation_circuits SET state='closed',consecutive_failures=0,opened_at=NULL,probe_until=NULL,probe_task_id=NULL,updated_at=now() WHERE connection_id=? AND operation=?`, connection, operation).Error; err != nil {
 				return err
 			}
 			if row.State != "closed" {
-				return tx.Exec(`INSERT INTO generation_circuit_events(connection_id,operation,state,reason) VALUES('runninghub-international',?,'closed','probe_succeeded')`, operation).Error
+				return tx.Exec(`INSERT INTO generation_circuit_events(connection_id,operation,state,reason) VALUES(?,?,'closed','probe_succeeded')`, connection, operation).Error
 			}
 			return nil
 		}
 		if row.State == "half_open" || row.ConsecutiveFailures+1 >= row.FailureThreshold {
-			if err := tx.Exec(`UPDATE generation_circuits SET state='open',consecutive_failures=consecutive_failures+1,opened_at=now(),probe_until=NULL,probe_task_id=NULL,updated_at=now() WHERE connection_id='runninghub-international' AND operation=?`, operation).Error; err != nil {
+			if err := tx.Exec(`UPDATE generation_circuits SET state='open',consecutive_failures=consecutive_failures+1,opened_at=now(),probe_until=NULL,probe_task_id=NULL,updated_at=now() WHERE connection_id=? AND operation=?`, connection, operation).Error; err != nil {
 				return err
 			}
-			return tx.Exec(`INSERT INTO generation_circuit_events(connection_id,operation,state,reason) VALUES('runninghub-international',?,'open','operation_failure')`, operation).Error
+			return tx.Exec(`INSERT INTO generation_circuit_events(connection_id,operation,state,reason) VALUES(?,?,'open','operation_failure')`, connection, operation).Error
 		}
-		return tx.Exec(`UPDATE generation_circuits SET consecutive_failures=consecutive_failures+1,updated_at=now() WHERE connection_id='runninghub-international' AND operation=?`, operation).Error
+		return tx.Exec(`UPDATE generation_circuits SET consecutive_failures=consecutive_failures+1,updated_at=now() WHERE connection_id=? AND operation=?`, connection, operation).Error
 	})
 }
 

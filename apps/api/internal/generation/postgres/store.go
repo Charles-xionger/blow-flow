@@ -31,6 +31,10 @@ func (s *Store) Create(ctx context.Context, owner, key, hash string, input gener
 	if err != nil {
 		return generation.Task{}, err
 	}
+	connection := generation.ConnectionForModel(input.Model)
+	if connection == "" {
+		return generation.Task{}, generation.ErrInvalid
+	}
 	err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Serialize admissions across API instances on the connection's limit row.
 		var priorHash string
@@ -47,7 +51,7 @@ func (s *Store) Create(ctx context.Context, owner, key, hash string, input gener
 			Scope     string
 			MaxQueued int
 		}
-		if err := tx.Raw(`SELECT scope,max_queued FROM generation_queue_limits WHERE (scope='user' AND key IN (?, '*')) OR (scope='model' AND key IN (?, '*')) OR (scope='connection' AND key IN ('runninghub-international','*')) ORDER BY scope,key FOR UPDATE`, owner, input.Model).Scan(&limits).Error; err != nil {
+		if err := tx.Raw(`SELECT scope,max_queued FROM generation_queue_limits WHERE (scope='user' AND key IN (?, '*')) OR (scope='model' AND key IN (?, '*')) OR (scope='connection' AND key IN (?, '*')) ORDER BY scope,key FOR UPDATE`, owner, input.Model, connection).Scan(&limits).Error; err != nil {
 			return err
 		}
 		if len(limits) == 0 {
@@ -64,7 +68,7 @@ func (s *Store) Create(ctx context.Context, owner, key, hash string, input gener
 			case "model":
 				value = input.Model
 			case "connection":
-				value = "runninghub-international"
+				value = connection
 			}
 			if err := tx.Raw(`SELECT count(*) FROM generation_tasks WHERE status='queued' AND `+where+`=?`, value).Scan(&n).Error; err != nil {
 				return err
@@ -80,7 +84,7 @@ func (s *Store) Create(ctx context.Context, owner, key, hash string, input gener
 				}
 			}
 		}
-		result := tx.Exec(`INSERT INTO generation_tasks(id,owner_id,project_id,node_id,model,input_snapshot,input_hash,idempotency_key,status,created_at,updated_at) VALUES(?,?,?,?,?,?::jsonb,?,?,'queued',?,?) ON CONFLICT(owner_id,idempotency_key) DO NOTHING`, id, owner, input.ProjectID, input.NodeID, input.Model, string(data), hash, key, now, now)
+		result := tx.Exec(`INSERT INTO generation_tasks(id,owner_id,project_id,node_id,model,connection_id,input_snapshot,input_hash,idempotency_key,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?::jsonb,?,?,'queued',?,?) ON CONFLICT(owner_id,idempotency_key) DO NOTHING`, id, owner, input.ProjectID, input.NodeID, input.Model, connection, string(data), hash, key, now, now)
 		if result.Error != nil {
 			return result.Error
 		}

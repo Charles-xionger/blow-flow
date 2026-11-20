@@ -9,9 +9,9 @@ import (
 )
 
 type DeliveryClaim struct {
-	TaskID, ProviderID, ProviderURL, FileType, Token, Status string
-	StartedAt                                                time.Time
-	Attempts, SaveAttempts                                   int
+	TaskID, ProviderID, ProviderURL, FileType, Token, Status, Model string
+	StartedAt                                                       time.Time
+	Attempts, SaveAttempts                                          int
 }
 
 func (s *Store) DueDeliveries(ctx context.Context, limit int) ([]string, error) {
@@ -33,7 +33,7 @@ func (s *Store) ClaimDelivery(ctx context.Context, id string) (DeliveryClaim, bo
 	if res.RowsAffected == 0 {
 		return claim, false, nil
 	}
-	err = s.DB.WithContext(ctx).Raw(`SELECT id AS task_id,provider_task_id AS provider_id,COALESCE(provider_result_url,'') AS provider_url,COALESCE(provider_result_type,'') AS file_type,status,tracking_started_at AS started_at,poll_attempts AS attempts,save_attempts FROM generation_tasks WHERE id=?`, id).Scan(&claim).Error
+	err = s.DB.WithContext(ctx).Raw(`SELECT id AS task_id,provider_task_id AS provider_id,COALESCE(provider_result_url,'') AS provider_url,COALESCE(provider_result_type,'') AS file_type,status,model,tracking_started_at AS started_at,poll_attempts AS attempts,save_attempts FROM generation_tasks WHERE id=?`, id).Scan(&claim).Error
 	claim.Token = token
 	return claim, err == nil, err
 }
@@ -180,6 +180,11 @@ func (s *Store) Delivered(ctx context.Context, c DeliveryClaim, url string) erro
 		}
 		if err := attachAgentResult(tx, c.TaskID, url, now); err != nil {
 			return err
+		}
+		if c.Model == generation.GeminiImageModel {
+			if err := tx.Exec(`DELETE FROM generation_inline_results WHERE task_id=?`, c.TaskID).Error; err != nil {
+				return err
+			}
 		}
 		return tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,stage,occurred_at) VALUES(?,'delivered','delivered',?)`, c.TaskID, now).Error
 	})
