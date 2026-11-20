@@ -16,6 +16,9 @@ func (s *Store) BeginOperation(ctx context.Context, c DeliveryClaim, operation s
 	}
 	allowed := false
 	connection := generation.ConnectionForModel(c.Model)
+	if c.Input.Workflow != nil {
+		connection = c.Input.Workflow.ConnectionID
+	}
 	if connection == "" {
 		connection = "runninghub-international"
 	}
@@ -66,6 +69,9 @@ func (s *Store) RecordOperation(ctx context.Context, c DeliveryClaim, operation 
 		return errors.New("invalid delivery operation")
 	}
 	connection := generation.ConnectionForModel(c.Model)
+	if c.Input.Workflow != nil {
+		connection = c.Input.Workflow.ConnectionID
+	}
 	if connection == "" {
 		connection = "runninghub-international"
 	}

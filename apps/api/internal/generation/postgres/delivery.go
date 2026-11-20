@@ -3,6 +3,7 @@ package postgres
 import (
 	"blow-flow/api/internal/generation"
 	"context"
+	"encoding/json"
 	"errors"
 	"gorm.io/gorm"
 	"time"
@@ -10,6 +11,7 @@ import (
 
 type DeliveryClaim struct {
 	TaskID, ProviderID, ProviderURL, FileType, Token, Status, Model string
+	Input                                                           generation.Input
 	StartedAt                                                       time.Time
 	Attempts, SaveAttempts                                          int
 }
@@ -34,6 +36,13 @@ func (s *Store) ClaimDelivery(ctx context.Context, id string) (DeliveryClaim, bo
 		return claim, false, nil
 	}
 	err = s.DB.WithContext(ctx).Raw(`SELECT id AS task_id,provider_task_id AS provider_id,COALESCE(provider_result_url,'') AS provider_url,COALESCE(provider_result_type,'') AS file_type,status,model,tracking_started_at AS started_at,poll_attempts AS attempts,save_attempts FROM generation_tasks WHERE id=?`, id).Scan(&claim).Error
+	if err == nil {
+		var raw string
+		err = s.DB.WithContext(ctx).Raw(`SELECT input_snapshot::text FROM generation_tasks WHERE id=?`, id).Scan(&raw).Error
+		if err == nil {
+			err = json.Unmarshal([]byte(raw), &claim.Input)
+		}
+	}
 	claim.Token = token
 	return claim, err == nil, err
 }

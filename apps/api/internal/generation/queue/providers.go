@@ -3,6 +3,7 @@ package queue
 import (
 	"blow-flow/api/internal/generation"
 	"context"
+	"os"
 	"strings"
 )
 
@@ -21,8 +22,15 @@ func (p Providers) Submit(ctx context.Context, in generation.Input) (string, err
 	case generation.Seedream55Model, generation.Seedream50Model:
 		return p.Seedream.Submit(ctx, in)
 	default:
-		return "", generation.ErrInvalid
+		return p.submitWorkflow(ctx, in)
 	}
+}
+func (p Providers) QueryInput(ctx context.Context, in generation.Input, id string) (Observation, error) {
+	if in.Workflow == nil || !generation.ValidInput(in) {
+		return Observation{}, generation.ErrInvalid
+	}
+	m := in.Workflow
+	return (Krea2{BaseURL: m.Connection.BaseURL, APIKey: os.Getenv(m.Connection.APIKeyEnv), Client: p.RunningHub.Client}).query(ctx, id, m.OutputNode, m.Category == "VIDEO")
 }
 func (p Providers) SubmitTask(ctx context.Context, taskID string, in generation.Input) (string, error) {
 	if in.Model == generation.GeminiImageModel {

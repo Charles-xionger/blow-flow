@@ -40,18 +40,19 @@ type Actor struct {
 	Admin bool
 }
 type Input struct {
-	ProjectID    string        `json:"projectId"`
-	NodeID       string        `json:"nodeId,omitempty"`
-	ReferenceIDs []string      `json:"referenceIds,omitempty"`
-	Model        string        `json:"model"`
-	Prompt       string        `json:"prompt"`
-	Width        int           `json:"width"`
-	Height       int           `json:"height"`
-	Seed         int64         `json:"seed,omitempty"`
-	Duration     int           `json:"duration,omitempty"`
-	References   []Reference   `json:"references,omitempty"`
-	InstanceType string        `json:"instanceType,omitempty"`
-	ImageOptions *ImageOptions `json:"imageOptions,omitempty"`
+	ProjectID    string            `json:"projectId"`
+	NodeID       string            `json:"nodeId,omitempty"`
+	ReferenceIDs []string          `json:"referenceIds,omitempty"`
+	Model        string            `json:"model"`
+	Prompt       string            `json:"prompt"`
+	Width        int               `json:"width"`
+	Height       int               `json:"height"`
+	Seed         int64             `json:"seed,omitempty"`
+	Duration     int               `json:"duration,omitempty"`
+	References   []Reference       `json:"references,omitempty"`
+	InstanceType string            `json:"instanceType,omitempty"`
+	ImageOptions *ImageOptions     `json:"imageOptions,omitempty"`
+	Workflow     *WorkflowSnapshot `json:"workflow,omitempty"`
 }
 type Reference struct {
 	Kind     string `json:"kind"`
@@ -129,6 +130,16 @@ type Service struct {
 }
 
 func (s Service) Create(ctx context.Context, actor Actor, key string, input Input) (Task, error) {
+	if ConnectionForModel(input.Model) == "" && input.Workflow == nil {
+		snapshot, _, err := ResolveModel(input.Model)
+		if err != nil {
+			return Task{}, ErrInvalid
+		}
+		input.Workflow = snapshot
+	}
+	if ConnectionForModel(input.Model) != "" && input.Workflow != nil {
+		return Task{}, ErrInvalid
+	}
 	if actor.ID == "" || len(key) < 1 || len(key) > 200 || strings.TrimSpace(input.ProjectID) == "" || len(input.NodeID) > 200 || !ValidInput(input) || input.Seed != 0 {
 		return Task{}, ErrInvalid
 	}
