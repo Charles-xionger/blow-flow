@@ -55,7 +55,7 @@ func ConnectionForModel(model string) string {
 }
 
 func ValidInput(in Input) bool {
-	if strings.TrimSpace(in.Prompt) == "" || len(in.Prompt) > 8000 || in.Seed < 0 || len(in.ReferenceIDs) != 0 {
+	if strings.TrimSpace(in.Prompt) == "" || len(in.Prompt) > 20000 || in.Seed < 0 || len(in.ReferenceIDs) != 0 {
 		return false
 	}
 	counts := map[string]int{}

@@ -652,6 +652,123 @@ func TestAgentGenerationFreezesOwnedOrderedReferences(t *testing.T) {
 	}
 }
 
+func TestAgentGenerationApprovalKeepsConfiguredWorkflowSnapshot(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "generation.json")
+	t.Setenv("GENERATION_CONFIG_PATH", configPath)
+	t.Setenv("CUSTOM_KEY", "secret")
+	config := `{"connections":[{"id":"custom","baseUrl":"https://example.test","apiKeyEnv":"CUSTOM_KEY","concurrency":2,"requestTimeoutMs":1000,"pollIntervalMs":1000,"queryTimeoutMs":1000,"maxQueryErrors":3}],"models":[{"id":"custom/image","name":"Custom","category":"IMAGE","adapter":"runninghub-workflow","version":"1","connectionId":"custom","workflowId":"123","workflow":{"1":{"inputs":{"prompt":"","width":1024,"height":1024,"seed":0,"custom":false},"class_type":"Output"}},"outputNode":"1","mapping":{"prompt":{"nodeId":"1","fieldName":"prompt"},"width":{"nodeId":"1","fieldName":"width"},"height":{"nodeId":"1","fieldName":"height"},"seed":{"nodeId":"1","fieldName":"seed"},"customResolution":{"nodeId":"1","fieldName":"custom"}},"capabilities":{"prompt":true,"referenceImages":false,"dimensions":{"min":64,"max":8192,"step":8,"defaultWidth":1024,"defaultHeight":1024}}}]}`
+	if err := os.WriteFile(configPath, []byte(config), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s, resources, owner, project := agentStore(t)
+	ctx := context.Background()
+	canvas := json.RawMessage(`{"name":"Canvas","nodes":[{"id":"target","type":"image","position":{"x":0,"y":0},"data":{"type":"textToImage"}}],"edges":[],"viewport":{"x":0,"y":0,"zoom":1},"history":{"schema":1}}`)
+	if _, err := resources.SaveCanvas(ctx, owner, project, resource.SaveCanvas{RequestID: "custom", BaseVersion: 1, Snapshot: canvas}); err != nil {
+		t.Fatal(err)
+	}
+	task, err := s.Command(ctx, owner, project, agent.Command{RequestID: "custom-send", Action: "send", Text: "image", ModelID: "gemini", CanvasVersion: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := s.Claim(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.StartStep(ctx, run.Token, agent.StepStart{CallID: "custom-gen", Name: "prepare_generation", Arguments: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	batch, err := s.PrepareGeneration(ctx, run.Token, "custom-gen", []GenerationItem{{NodeID: "target", ModelID: "custom/image", Input: json.RawMessage(`{"prompt":"cat","width":1024,"height":1024}`)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(configPath, []byte(`{"connections":[],"models":[]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Command(ctx, owner, project, agent.Command{RequestID: "custom-approve", Action: "answer", QuestionID: "custom-gen", Text: "确认生成"}); err != nil {
+		t.Fatal(err)
+	}
+	var ids string
+	if err = s.DB.Raw(`SELECT generation_task_ids FROM agent_generation_batches WHERE id=?`, batch.ID).Scan(&ids).Error; err != nil {
+		t.Fatal(err)
+	}
+	var list []string
+	if err = json.Unmarshal([]byte(ids), &list); err != nil || len(list) != 1 {
+		t.Fatalf("task ids %q: %v", ids, err)
+	}
+	var raw string
+	if err = s.DB.Raw(`SELECT input_snapshot FROM generation_tasks WHERE id=?`, list[0]).Scan(&raw).Error; err != nil {
+		t.Fatal(err)
+	}
+	var input generation.Input
+	if err = json.Unmarshal([]byte(raw), &input); err != nil {
+		t.Fatal(err)
+	}
+	if input.Workflow == nil || input.Workflow.ID != "custom/image" || input.Workflow.Digest == "" {
+		t.Fatalf("workflow was not frozen: %+v", input.Workflow)
+	}
+}
+
+func TestAgentH3VideoReferenceDefaultsToOriginalAudio(t *testing.T) {
+	t.Setenv("OSS_BUCKET_NAME", "assets")
+	t.Setenv("OSS_REGION", "oss-cn-test")
+	s, resources, owner, project := agentStore(t)
+	ctx := context.Background()
+	videoURL := "https://assets.oss-cn-test.aliyuncs.com/clip.mp4"
+	canvas := json.RawMessage(fmt.Sprintf(`{"name":"Canvas","nodes":[{"id":"source","type":"video","position":{"x":0,"y":0},"data":{"type":"video","videoSrc":%q}},{"id":"target","type":"video","position":{"x":500,"y":0},"data":{"type":"textToVideo"}}],"edges":[{"id":"link","source":"source","target":"target"}],"viewport":{"x":0,"y":0,"zoom":1},"history":{"schema":1}}`, videoURL))
+	if _, err := resources.SaveCanvas(ctx, owner, project, resource.SaveCanvas{RequestID: "h3-setup", BaseVersion: 1, Snapshot: canvas}); err != nil {
+		t.Fatal(err)
+	}
+	task, err := s.Command(ctx, owner, project, agent.Command{RequestID: "h3-send", Action: "send", Text: "video", ModelID: "gemini", CanvasVersion: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := s.Claim(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.StartStep(ctx, run.Token, agent.StepStart{CallID: "h3-gen", Name: "prepare_generation", Arguments: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	input := json.RawMessage(fmt.Sprintf(`{"prompt":"motion","width":1280,"height":736,"duration":7,"references":[{"kind":"video","url":%q}]}`, videoURL))
+	batch, err := s.PrepareGeneration(ctx, run.Token, "h3-gen", []GenerationItem{{NodeID: "target", ModelID: generation.H3Model, Input: input}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := s.Snapshot(ctx, owner, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var scope struct {
+		Items []struct {
+			Input struct {
+				References []generation.Reference `json:"references"`
+			} `json:"input"`
+		} `json:"items"`
+	}
+	if err = json.Unmarshal(view.Tasks[0].Question.Scope, &scope); err != nil || len(scope.Items) != 1 || len(scope.Items[0].Input.References) != 1 || !scope.Items[0].Input.References[0].UseAudio {
+		t.Fatalf("approval omits original audio: %+v %v", scope, err)
+	}
+	if _, err = s.Command(ctx, owner, project, agent.Command{RequestID: "h3-approve", Action: "answer", QuestionID: "h3-gen", Text: "确认生成"}); err != nil {
+		t.Fatal(err)
+	}
+	var ids string
+	if err = s.DB.Raw(`SELECT generation_task_ids FROM agent_generation_batches WHERE id=?`, batch.ID).Scan(&ids).Error; err != nil {
+		t.Fatal(err)
+	}
+	var list []string
+	if err = json.Unmarshal([]byte(ids), &list); err != nil || len(list) != 1 {
+		t.Fatalf("ids %s: %v", ids, err)
+	}
+	var raw string
+	if err = s.DB.Raw(`SELECT input_snapshot FROM generation_tasks WHERE id=?`, list[0]).Scan(&raw).Error; err != nil {
+		t.Fatal(err)
+	}
+	var frozen generation.Input
+	if err = json.Unmarshal([]byte(raw), &frozen); err != nil || len(frozen.References) != 1 || !frozen.References[0].UseAudio {
+		t.Fatalf("frozen video audio: %+v %v", frozen, err)
+	}
+}
+
 func TestGenerationApprovalCancelAndStaleCanvasNeverSubmit(t *testing.T) {
 	for _, mode := range []string{"cancel", "stop", "changed", "unrelated"} {
 		t.Run(mode, func(t *testing.T) {
