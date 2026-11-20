@@ -22,4 +22,3 @@
 ## Comments
 
 - Completed in implementation commit `c604e6bb6c8bb5148775051d0842207f3d0c2898`; merged into the integration branch as `df6a0aeaa1d3dabd04f6f6ebb83056f79f61b369`.
-
