@@ -72,7 +72,9 @@ def run(args, *, env=None, cwd=ROOT, capture=True):
                             stdout=subprocess.PIPE if capture else None,
                             stderr=subprocess.STDOUT if capture else None)
     if result.returncode:
-        raise RuntimeError(f"{args[0]} failed ({result.returncode}): {(result.stdout or '')[-3000:]}")
+        output = result.stdout or ""
+        failures = [line for line in output.splitlines() if "--- FAIL:" in line or "_test.go:" in line or line.startswith("FAIL")]
+        raise RuntimeError(f"{args[0]} failed ({result.returncode}): {'; '.join(failures)[:3000] or output[-3000:]}")
     return result.stdout or ""
 
 
@@ -257,7 +259,7 @@ def main():
                     run(["go", "test", "-tags=integration", "-count=1", "./internal/...", "-run", "^(" + pattern + ")$"], cwd=API, env=env)
                     evidence["cases"][name] = "pass"
                 except Exception as exc:
-                    evidence["cases"][name] = "fail: " + str(exc)[-600:]
+                    evidence["cases"][name] = "fail: " + str(exc)[-3000:]
             try:
                 run(["go", "test", "-tags=integration", "-count=1", "./internal/httpserver", "-run", "^TestImportedCutoverAPIJourney$"], cwd=API, env=env)
                 evidence["cases"]["imported_api_journey"] = "pass"

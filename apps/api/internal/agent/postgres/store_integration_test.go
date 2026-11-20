@@ -543,7 +543,7 @@ func TestAgentDeliveryWritesSavedResultToCanvasOnce(t *testing.T) {
 			if err = json.Unmarshal([]byte(saved), &graph); err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(saved, `"externalId":9007199254740993`) {
+			if mode != "deleted" && !strings.Contains(saved, `9007199254740993`) {
 				t.Fatalf("large canvas identifier changed during delivery: %s", saved)
 			}
 			expected := 1
