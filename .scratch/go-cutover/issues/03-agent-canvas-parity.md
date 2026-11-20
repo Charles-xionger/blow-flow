@@ -4,9 +4,15 @@
 
 **Blocked by:** 01: 整合已完成的 Go 迁移代码。
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] 现有创作助手画布工具均可通过受项目和运行令牌约束的路径执行；已有节点编辑及删除必须取得对应用户授权。
-- [ ] 助手读取已确认保存的最新画布；人工同时编辑时重新读取并计算修改，不用旧快照覆盖无关内容。
-- [ ] 工具调用响应丢失、重复提交、目标节点被删和运行令牌过期均有稳定回执或明确错误，不重复应用副作用。
-- [ ] 画布历史仍可撤销和追溯，接口与并发案例覆盖跨用户隔离及确认边界。
+- [x] 现有创作助手画布工具均可通过受项目和运行令牌约束的路径执行；已有节点编辑及删除必须取得对应用户授权。
+- [x] 助手读取已确认保存的最新画布；人工同时编辑时重新读取并计算修改，不用旧快照覆盖无关内容。
+- [x] 工具调用响应丢失、重复提交、目标节点被删和运行令牌过期均有稳定回执或明确错误，不重复应用副作用。
+- [x] 画布历史仍可撤销和追溯，接口与并发案例覆盖跨用户隔离及确认边界。
+
+## Answer
+
+Merged `codex/go-cutover-03-agent-canvas` into `codex/go-cutover-integration` with a no-fast-forward merge (`c8db04f`). The Go runner now exposes scoped canvas editing, deletion, layout, model discovery, and saved-canvas reads. Existing-content edits and deletions use persisted per-task grants or an explicit confirmation question; Go validates those grants during the canvas commit. The editor applies operations to the latest saved canvas and uses the Go receipt to reconcile a lost response without repeating a commit. Go integration cases cover permission boundaries, concurrent edits, deleted targets, and receipt behavior; the Web runner cases cover the confirmation flow and scoped calls.
+
+Focused validation passed: `go test -count=1 -tags=integration ./internal/agent/postgres ./internal/agent` (including the PostgreSQL integration cases), `go vet ./internal/agent/...`, `gofmt -l` for changed Go files (no output), six cases in `apps/web/tests/agent-go-runner.test.cjs`, Web `typecheck`, and ESLint for the changed agent files. The full fast and browser suites remain for the integration cutover gate.
