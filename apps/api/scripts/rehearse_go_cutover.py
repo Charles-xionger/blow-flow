@@ -195,6 +195,7 @@ def main():
                                  "goOnlyProjectIds": pg(compose, env, "SELECT coalesce(string_agg(id,',' ORDER BY id),'') FROM projects WHERE id LIKE 'go-rehearsal-%'").split(","),
                                  "goCanvasVersions": pg(compose, env, "SELECT coalesce(string_agg(id || ':' || version::text,',' ORDER BY id),'') FROM projects WHERE id LIKE 'go-rehearsal-%'").split(","),
                                  "goAgentTaskIds": pg(compose, env, "SELECT coalesce(string_agg(id::text,',' ORDER BY id::text),'') FROM agent_tasks WHERE legacy_imported=false").split(","),
+                                 "goScriptTaskIds": pg(compose, env, "SELECT coalesce(string_agg(id::text,',' ORDER BY id::text),'') FROM script_tasks WHERE request_id='rehearsal-script'").split(","),
                                  "goGenerationTaskIds": pg(compose, env, "SELECT coalesce(string_agg(id::text,',' ORDER BY id::text),'') FROM generation_tasks").split(","),
                                  "deliveredGenerationCount": int(pg(compose, env, "SELECT count(*) FROM generation_tasks WHERE status='completed' AND result_url<>''"))}
             legacy_ids = {project["id"] for project in exported["projects"]}
