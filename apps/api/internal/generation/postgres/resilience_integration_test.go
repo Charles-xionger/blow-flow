@@ -125,7 +125,7 @@ func TestSubmitCircuitOpensProbesAndDoesNotBlockDeliveryClaim(t *testing.T) {
 	if err != nil || task.Status != generation.Queued {
 		t.Fatalf("queued: %+v %v", task, err)
 	}
-	if err = s.DB.Exec(`UPDATE generation_circuits SET opened_at=now()-interval '2 seconds' WHERE operation='submit'`).Error; err != nil {
+	if err = s.DB.Exec(`UPDATE generation_circuits SET opened_at=now()-interval '2 seconds',next_probe_at=now()-interval '1 second' WHERE operation='submit'`).Error; err != nil {
 		t.Fatal(err)
 	}
 	probe, ok, err := s.ClaimSubmission(ctx, b.ID)
@@ -157,13 +157,123 @@ func TestOperationsAuditsAdminReadAndReportsBacklog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if view.QueueLength != 1 || len(view.Workers) != 1 || len(view.Circuits) != 9 {
+	if view.QueueLength != 1 || len(view.Workers) != 1 || len(view.Circuits) != 3 || view.Circuits[0].State != "normal" {
 		t.Fatalf("operations=%+v", view)
 	}
 	var n int64
 	s.DB.Raw(`SELECT count(*) FROM generation_admin_audit WHERE actor_id=? AND action='view_generation_operations'`, owner).Scan(&n)
 	if n != 1 {
 		t.Fatalf("audit=%d", n)
+	}
+}
+func TestExpeditedPriorityControlsClaimOrderAndAuditsOnlyChanges(t *testing.T) {
+	s, owner := resilienceStore(t)
+	ctx := context.Background()
+	first, _ := s.Create(ctx, owner, "first", "first", resilienceInput())
+	expedited, _ := s.Create(ctx, owner, "expedited", "expedited", resilienceInput())
+	if _, err := s.SetPriority(ctx, expedited.ID, owner, generation.PriorityExpedited); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetPriority(ctx, expedited.ID, owner, generation.PriorityExpedited); err != nil {
+		t.Fatal(err)
+	}
+	claim, ok, err := s.ClaimSubmission(ctx, first.ID)
+	if err != nil || !ok || claim.TaskID != expedited.ID {
+		t.Fatalf("claim=%+v ok=%v err=%v", claim, ok, err)
+	}
+	var audits int64
+	s.DB.Raw(`SELECT count(*) FROM generation_admin_audit WHERE action='set_generation_priority' AND target_id=?`, expedited.ID).Scan(&audits)
+	if audits != 1 {
+		t.Fatalf("audits=%d", audits)
+	}
+	if _, err = s.SetPriority(ctx, expedited.ID, owner, generation.PriorityNormal); !errors.Is(err, generation.ErrConflict) {
+		t.Fatalf("running priority: %v", err)
+	}
+}
+
+func TestSubmitCircuitUsesFiveFailuresAndSteppedCooldown(t *testing.T) {
+	s, owner := resilienceStore(t)
+	ctx := context.Background()
+	task, _ := s.Create(ctx, owner, "breaker", "breaker", resilienceInput())
+	failure := generation.NewSubmissionFailure(generation.SubmissionProvider5xx, true, 0, errors.New("HTTP 503"))
+	for i := 0; i < 5; i++ {
+		claim, ok, err := s.ClaimSubmission(ctx, task.ID)
+		if err != nil || !ok {
+			t.Fatalf("claim %d: %v %v", i, ok, err)
+		}
+		if err = s.ResolveSubmission(ctx, claim.TaskID, claim.Token, "", failure); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var circuit struct {
+		State                                              string
+		CooldownStep, CooldownSeconds, ConsecutiveFailures int
+	}
+	s.DB.Raw(`SELECT state,cooldown_step,cooldown_seconds,consecutive_failures FROM generation_circuits WHERE connection_id='runninghub-international' AND operation='submit'`).Scan(&circuit)
+	if circuit.State != "open" || circuit.CooldownStep != 0 || circuit.CooldownSeconds != 60 || circuit.ConsecutiveFailures != 5 {
+		t.Fatalf("first open: %+v", circuit)
+	}
+	if err := s.DB.Exec(`UPDATE generation_circuits SET next_probe_at=now()-interval '1 second' WHERE connection_id='runninghub-international'`).Error; err != nil {
+		t.Fatal(err)
+	}
+	probe, ok, err := s.ClaimSubmission(ctx, task.ID)
+	if err != nil || !ok {
+		t.Fatalf("probe: %v %v", ok, err)
+	}
+	rateLimited := generation.NewSubmissionFailure(generation.SubmissionRateLimited, true, 7*time.Minute, errors.New("HTTP 429"))
+	if err = s.ResolveSubmission(ctx, probe.TaskID, probe.Token, "", rateLimited); err != nil {
+		t.Fatal(err)
+	}
+	s.DB.Raw(`SELECT state,cooldown_step,cooldown_seconds,consecutive_failures FROM generation_circuits WHERE connection_id='runninghub-international' AND operation='submit'`).Scan(&circuit)
+	if circuit.State != "open" || circuit.CooldownStep != 1 || circuit.CooldownSeconds != 420 {
+		t.Fatalf("second open: %+v", circuit)
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		if err := s.DB.Exec(`UPDATE generation_circuits SET next_probe_at=now()-interval '1 second' WHERE connection_id='runninghub-international'`).Error; err != nil {
+			t.Fatal(err)
+		}
+		probe, ok, err = s.ClaimSubmission(ctx, task.ID)
+		if err != nil || !ok {
+			t.Fatalf("15m probe %d: %v %v", attempt, ok, err)
+		}
+		if err = s.ResolveSubmission(ctx, probe.TaskID, probe.Token, "", failure); err != nil {
+			t.Fatal(err)
+		}
+		s.DB.Raw(`SELECT state,cooldown_step,cooldown_seconds,consecutive_failures FROM generation_circuits WHERE connection_id='runninghub-international' AND operation='submit'`).Scan(&circuit)
+		if circuit.CooldownStep != 2 || circuit.CooldownSeconds != 900 {
+			t.Fatalf("15m step %d: %+v", attempt, circuit)
+		}
+	}
+	nonCounting, _ := s.Create(ctx, owner, "non-counting-probe", "non-counting-probe", resilienceInput())
+	if err := s.DB.Exec(`UPDATE generation_circuits SET next_probe_at=now()-interval '1 second' WHERE connection_id='runninghub-international'`).Error; err != nil {
+		t.Fatal(err)
+	}
+	probe, ok, err = s.ClaimSubmission(ctx, nonCounting.ID)
+	if err != nil || !ok {
+		t.Fatalf("non-counting probe: %v %v", ok, err)
+	}
+	if err = s.ResolveSubmission(ctx, probe.TaskID, probe.Token, "", generation.ErrSubmissionRejected); err != nil {
+		t.Fatal(err)
+	}
+	var released struct {
+		State, ProbeTaskID                string
+		CooldownStep, ConsecutiveFailures int
+	}
+	s.DB.Raw(`SELECT state,cooldown_step,consecutive_failures,COALESCE(probe_task_id,'') AS probe_task_id FROM generation_circuits WHERE connection_id='runninghub-international'`).Scan(&released)
+	if released.State != "half_open" || released.CooldownStep != 2 || released.ConsecutiveFailures != 0 || released.ProbeTaskID != "" {
+		t.Fatalf("released probe: %+v", released)
+	}
+	accepted, _ := s.Create(ctx, owner, "accepted-probe", "accepted-probe", resilienceInput())
+	probe, ok, err = s.ClaimSubmission(ctx, accepted.ID)
+	if err != nil || !ok {
+		t.Fatalf("accepted probe: %v %v", ok, err)
+	}
+	if err = s.ResolveSubmission(ctx, probe.TaskID, probe.Token, "provider", nil); err != nil {
+		t.Fatal(err)
+	}
+	s.DB.Raw(`SELECT state,cooldown_step,consecutive_failures FROM generation_circuits WHERE connection_id='runninghub-international'`).Scan(&circuit)
+	if circuit.State != "closed" || circuit.CooldownStep != 0 || circuit.ConsecutiveFailures != 0 {
+		t.Fatalf("accepted reset: %+v", circuit)
 	}
 }
 func TestInFlightClaimDefersWhenSubmitCircuitOpens(t *testing.T) {
@@ -252,6 +362,9 @@ func TestLateNodeResultRemainsTaskScopedAndCannotReplaceCurrentResult(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err = s.SetPriority(ctx, newer.ID, owner, generation.PriorityExpedited); err != nil {
+		t.Fatal(err)
+	}
 	finish := func(task generation.Task, url string) {
 		t.Helper()
 		sub, ok, err := s.ClaimSubmission(ctx, task.ID)
@@ -291,7 +404,7 @@ func TestLateNodeResultRemainsTaskScopedAndCannotReplaceCurrentResult(t *testing
 	}
 }
 
-func TestDeliveryCircuitsAndRetryExhaustionAreIndependent(t *testing.T) {
+func TestOpenSubmitCircuitDoesNotBlockDeliveryAndRetryExhaustion(t *testing.T) {
 	s, owner := resilienceStore(t)
 	ctx := context.Background()
 	task, err := s.Create(ctx, owner, "retry", "retry", resilienceInput())
@@ -308,18 +421,9 @@ func TestDeliveryCircuitsAndRetryExhaustionAreIndependent(t *testing.T) {
 	if err := s.DB.Exec(`UPDATE generation_circuits SET state='open',opened_at=now(),cooldown_seconds=30 WHERE operation='submit'`).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DB.Exec(`UPDATE generation_circuits SET failure_threshold=1,cooldown_seconds=1 WHERE operation='query'`).Error; err != nil {
-		t.Fatal(err)
-	}
 	claim, ok, err := s.ClaimDelivery(ctx, task.ID)
 	if err != nil || !ok {
 		t.Fatalf("query claim %v %v", ok, err)
-	}
-	if allowed, err := s.BeginOperation(ctx, claim, "query"); err != nil || !allowed {
-		t.Fatalf("submit breaker blocked query %v %v", allowed, err)
-	}
-	if err := s.RecordOperation(ctx, claim, "query", errors.New("network")); err != nil {
-		t.Fatal(err)
 	}
 	if err := s.ScheduleQuery(ctx, claim, "waiting_provider", errors.New("network"), time.Hour); err != nil {
 		t.Fatal(err)
@@ -330,23 +434,6 @@ func TestDeliveryCircuitsAndRetryExhaustionAreIndependent(t *testing.T) {
 	claim, ok, err = s.ClaimDelivery(ctx, task.ID)
 	if err != nil || !ok {
 		t.Fatalf("query claim 2 %v %v", ok, err)
-	}
-	if allowed, err := s.BeginOperation(ctx, claim, "query"); err != nil || allowed {
-		t.Fatalf("open query circuit %v %v", allowed, err)
-	}
-	if err := s.DB.Exec(`UPDATE generation_circuits SET opened_at=now()-interval '2 seconds' WHERE operation='query'`).Error; err != nil {
-		t.Fatal(err)
-	}
-	if allowed, err := s.BeginOperation(ctx, claim, "query"); err != nil || !allowed {
-		t.Fatalf("half-open query %v %v", allowed, err)
-	}
-	if err := s.RecordOperation(ctx, claim, "query", nil); err != nil {
-		t.Fatal(err)
-	}
-	var state string
-	s.DB.Raw(`SELECT state FROM generation_circuits WHERE operation='query'`).Scan(&state)
-	if state != "closed" {
-		t.Fatalf("query circuit %s", state)
 	}
 	if err := s.DB.Exec(`UPDATE generation_tasks SET poll_attempts=5 WHERE id=?`, task.ID).Error; err != nil {
 		t.Fatal(err)
@@ -369,34 +456,9 @@ func TestDeliveryCircuitsAndRetryExhaustionAreIndependent(t *testing.T) {
 	if err := s.ProviderSucceeded(ctx, query, "https://provider.test/result.png", "png"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DB.Exec(`UPDATE generation_circuits SET failure_threshold=1,cooldown_seconds=1 WHERE operation='save'`).Error; err != nil {
-		t.Fatal(err)
-	}
 	save, ok, err := s.ClaimDelivery(ctx, task.ID)
 	if err != nil || !ok {
 		t.Fatalf("save claim %v %v", ok, err)
-	}
-	if allowed, err := s.BeginOperation(ctx, save, "save"); err != nil || !allowed {
-		t.Fatalf("submit breaker blocked save %v %v", allowed, err)
-	}
-	if err := s.RecordOperation(ctx, save, "save", errors.New("storage")); err != nil {
-		t.Fatal(err)
-	}
-	if allowed, err := s.BeginOperation(ctx, save, "save"); err != nil || allowed {
-		t.Fatalf("open save circuit %v %v", allowed, err)
-	}
-	if err := s.DB.Exec(`UPDATE generation_circuits SET opened_at=now()-interval '2 seconds' WHERE operation='save'`).Error; err != nil {
-		t.Fatal(err)
-	}
-	if allowed, err := s.BeginOperation(ctx, save, "save"); err != nil || !allowed {
-		t.Fatalf("half-open save %v %v", allowed, err)
-	}
-	if err := s.RecordOperation(ctx, save, "save", nil); err != nil {
-		t.Fatal(err)
-	}
-	s.DB.Raw(`SELECT state FROM generation_circuits WHERE operation='save'`).Scan(&state)
-	if state != "closed" {
-		t.Fatalf("save circuit %s", state)
 	}
 	if err := s.DB.Exec(`UPDATE generation_tasks SET save_attempts=4 WHERE id=?`, task.ID).Error; err != nil {
 		t.Fatal(err)

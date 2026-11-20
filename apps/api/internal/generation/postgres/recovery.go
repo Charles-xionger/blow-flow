@@ -16,7 +16,7 @@ func (s *Store) DueQueued(ctx context.Context, limit int) ([]string, error) {
 		return tx.Raw(`WITH due AS (
 			SELECT id FROM generation_tasks
 			WHERE status='queued' AND (recovery_checked_at IS NULL OR recovery_checked_at<=now()-interval '5 seconds')
-			ORDER BY recovery_checked_at NULLS FIRST,created_at,id LIMIT ? FOR UPDATE SKIP LOCKED
+			ORDER BY (priority='expedited') DESC,recovery_checked_at NULLS FIRST,created_at,id LIMIT ? FOR UPDATE SKIP LOCKED
 		)
 		UPDATE generation_tasks t SET recovery_checked_at=now() FROM due WHERE t.id=due.id RETURNING t.id`, limit).Scan(&ids).Error
 	})

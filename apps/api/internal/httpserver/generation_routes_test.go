@@ -79,6 +79,12 @@ func (s *generationStub) Operations(_ context.Context, a generation.Actor) (gene
 	}
 	return generation.Operations{QueueLength: 7, NeedsReview: 2}, nil
 }
+func (s *generationStub) SetPriority(_ context.Context, a generation.Actor, id string, priority generation.Priority) (generation.Task, error) {
+	if !a.Admin {
+		return generation.Task{}, generation.ErrForbidden
+	}
+	return generation.Task{ID: id, Status: generation.Queued, Priority: priority}, nil
+}
 func TestGenerationEventsAndTaskExposeStageWithoutUnverifiedPercent(t *testing.T) {
 	s := &generationStub{last: generation.Task{ID: "task-1", Status: generation.Running, Stage: "generating"}}
 	r := NewWithDependencies(Dependencies{Accounts: &accountServiceStub{resolved: account.User{ID: "owner-1", Status: account.StatusActive}}, IdentityVerifier: verifierStub{}, Generation: s})
@@ -97,6 +103,22 @@ func TestGenerationEventsAndTaskExposeStageWithoutUnverifiedPercent(t *testing.T
 	r.ServeHTTP(w, req)
 	if w.Code != 200 || strings.Contains(w.Body.String(), "provider_succeeded") {
 		t.Fatalf("cursor: %s", w.Body.String())
+	}
+}
+func TestGenerationPriorityMutationRequiresAdminAndReturnsPriority(t *testing.T) {
+	for _, tc := range []struct {
+		role   account.Role
+		status int
+	}{{account.RoleUser, 403}, {account.RoleAdmin, 200}} {
+		r := NewWithDependencies(Dependencies{Accounts: &accountServiceStub{resolved: account.User{ID: "actor-1", Role: tc.role, Status: account.StatusActive}}, IdentityVerifier: verifierStub{}, Generation: &generationStub{}})
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPut, "/v1/admin/generation/tasks/task-1/priority", strings.NewReader(`{"priority":"expedited"}`))
+		req.Header.Set("Authorization", "Bearer valid")
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		if w.Code != tc.status || (tc.status == 200 && !strings.Contains(w.Body.String(), `"priority":"expedited"`)) {
+			t.Fatalf("role=%s: %d %s", tc.role, w.Code, w.Body.String())
+		}
 	}
 }
 func TestGenerationCapacityErrorsHaveStableCodes(t *testing.T) {

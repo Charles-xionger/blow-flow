@@ -31,7 +31,7 @@ func (s *Store) Operations(ctx context.Context, actor string) (generation.Operat
 		if err := tx.Raw(`SELECT worker_id AS id,seen_at FROM generation_worker_heartbeats ORDER BY seen_at DESC`).Scan(&out.Workers).Error; err != nil {
 			return err
 		}
-		return tx.Raw(`SELECT connection_id,operation,state,consecutive_failures FROM generation_circuits ORDER BY connection_id,operation`).Scan(&out.Circuits).Error
+		return tx.Raw(`SELECT connection_id,CASE state WHEN 'closed' THEN 'normal' WHEN 'open' THEN 'paused' ELSE 'probing' END AS state,consecutive_failures,last_reason,next_probe_at FROM generation_circuits WHERE operation='submit' ORDER BY connection_id`).Scan(&out.Circuits).Error
 	})
 	return out, err
 }
