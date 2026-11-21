@@ -75,6 +75,28 @@ func registerAccountRoutes(router *gin.Engine, dependencies Dependencies) {
 		}
 		c.JSON(200, result)
 	})
+	admin.PUT("/generation/tasks/:id/priority", func(c *gin.Context) {
+		service, ok := dependencies.Generation.(interface {
+			SetPriority(context.Context, generation.Actor, string, generation.Priority) (generation.Task, error)
+		})
+		if !ok {
+			c.JSON(503, errorBody(c, "service_unavailable"))
+			return
+		}
+		var body struct {
+			Priority generation.Priority `json:"priority"`
+		}
+		if decodeJSON(c, &body) != nil {
+			generationError(c, generation.ErrInvalid)
+			return
+		}
+		task, err := service.SetPriority(c.Request.Context(), generationActor(c), c.Param("id"), body.Priority)
+		if err != nil {
+			generationError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, task)
+	})
 	admin.GET("/users", func(c *gin.Context) {
 		limit, err := parseLimit(c.Query("limit"))
 		if err != nil {

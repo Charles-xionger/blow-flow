@@ -78,15 +78,11 @@ func (p Seedream) submit(ctx context.Context, input generation.Input) (submissio
 	safe.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	response, err := safe.Do(req)
 	if err != nil {
-		return submissionResult{}, ErrSubmissionUncertain
+		return submissionResult{}, submissionTransportError(err)
 	}
 	defer response.Body.Close()
-	switch response.StatusCode {
-	case 400, 401, 403, 404, 422, 429:
-		return submissionResult{}, fmt.Errorf("%w: HTTP %d", ErrSubmissionRejected, response.StatusCode)
-	}
 	if response.StatusCode != 200 {
-		return submissionResult{}, ErrSubmissionUncertain
+		return submissionResult{}, submissionHTTPError(response)
 	}
 	var reply struct {
 		Data []struct {

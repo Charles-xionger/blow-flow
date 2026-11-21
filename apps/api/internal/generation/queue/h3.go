@@ -70,11 +70,11 @@ func (p H3) Submit(ctx context.Context, input generation.Input) (string, error) 
 	safe.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	response, err := safe.Do(req)
 	if err != nil {
-		return "", ErrSubmissionUncertain
+		return "", submissionTransportError(err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != 200 {
-		return "", ErrSubmissionUncertain
+		return "", submissionHTTPError(response)
 	}
 	var reply struct {
 		Code int `json:"code"`

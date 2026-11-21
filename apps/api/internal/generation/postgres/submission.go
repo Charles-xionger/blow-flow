@@ -14,8 +14,9 @@ var ErrSubmitCircuitOpen = errors.New("provider submit circuit open")
 var ErrStaleLease = errors.New("generation lease expired")
 
 type Submission struct {
-	Input generation.Input
-	Token string
+	TaskID string
+	Input  generation.Input
+	Token  string
 }
 
 // ClaimSubmission serializes slot decisions on the connection row across workers.
@@ -23,16 +24,19 @@ func (s *Store) ClaimSubmission(ctx context.Context, id string) (Submission, boo
 	var out Submission
 	claimed := false
 	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var queued bool
-		if err := tx.Raw(`SELECT EXISTS(SELECT 1 FROM generation_tasks WHERE id=? AND status='queued')`, id).Scan(&queued).Error; err != nil {
+		var requestedQueued bool
+		if err := tx.Raw(`SELECT EXISTS(SELECT 1 FROM generation_tasks WHERE id=? AND status='queued')`, id).Scan(&requestedQueued).Error; err != nil {
 			return err
 		}
-		if !queued {
+		if !requestedQueued {
 			return nil
 		}
 		var connection string
 		if err := tx.Raw(`SELECT connection_id FROM generation_tasks WHERE id=?`, id).Scan(&connection).Error; err != nil {
 			return err
+		}
+		if connection == "" {
+			return nil
 		}
 		var max int
 		if err := tx.Raw(`SELECT max_active FROM generation_connection_limits WHERE id=? FOR UPDATE`, connection).Scan(&max).Error; err != nil {
@@ -45,24 +49,30 @@ func (s *Store) ClaimSubmission(ctx context.Context, id string) (Submission, boo
 			State           string
 			CooldownSeconds int
 			OpenedAt        *time.Time
+			NextProbeAt     *time.Time
 			ProbeUntil      *time.Time
 		}
-		if err := tx.Raw(`SELECT state,cooldown_seconds,opened_at,probe_until FROM generation_circuits WHERE connection_id=? AND operation='submit' FOR UPDATE`, connection).Scan(&circuit).Error; err != nil {
+		if err := tx.Raw(`SELECT state,cooldown_seconds,opened_at,next_probe_at,probe_until FROM generation_circuits WHERE connection_id=? AND operation='submit' FOR UPDATE`, connection).Scan(&circuit).Error; err != nil {
 			return err
 		}
 		if circuit.State == "open" {
-			if circuit.OpenedAt == nil || time.Since(*circuit.OpenedAt) < time.Duration(circuit.CooldownSeconds)*time.Second {
+			if circuit.NextProbeAt != nil && time.Now().Before(*circuit.NextProbeAt) {
 				return ErrSubmitCircuitOpen
 			}
-			if err := tx.Exec(`UPDATE generation_circuits SET state='half_open',probe_until=now()+interval '20 minutes',probe_task_id=?,updated_at=now() WHERE connection_id=? AND operation='submit'`, id, connection).Error; err != nil {
-				return err
-			}
-			if err := tx.Exec(`INSERT INTO generation_circuit_events(connection_id,operation,state,reason) VALUES(?,'submit','half_open','cooldown_elapsed')`, connection).Error; err != nil {
-				return err
+			if circuit.NextProbeAt == nil && (circuit.OpenedAt == nil || time.Since(*circuit.OpenedAt) < time.Duration(circuit.CooldownSeconds)*time.Second) {
+				return ErrSubmitCircuitOpen
 			}
 		} else if circuit.State == "half_open" && circuit.ProbeUntil != nil && time.Now().Before(*circuit.ProbeUntil) {
 			return ErrSubmitCircuitOpen
 		}
+		var selected string
+		if err := tx.Raw(`SELECT id FROM generation_tasks WHERE connection_id=? AND status='queued' ORDER BY (priority='expedited') DESC,created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`, connection).Scan(&selected).Error; err != nil {
+			return err
+		}
+		if selected == "" {
+			return nil
+		}
+		id = selected
 		var active int64
 		if err := tx.Raw(`SELECT count(*) FROM generation_tasks WHERE connection_id=? AND status IN ('submitting','running','wait_timeout','needs_review')`, connection).Scan(&active).Error; err != nil {
 			return err
@@ -111,6 +121,11 @@ func (s *Store) ClaimSubmission(ctx context.Context, id string) (Submission, boo
 			if err := tx.Exec(`UPDATE generation_circuits SET state='half_open',probe_until=?,probe_task_id=?,updated_at=? WHERE connection_id=? AND operation='submit'`, now.Add(20*time.Minute), id, now, connection).Error; err != nil {
 				return err
 			}
+			if circuit.State == "open" {
+				if err := tx.Exec(`INSERT INTO generation_circuit_events(connection_id,operation,state,reason) VALUES(?,'submit','half_open','cooldown_elapsed')`, connection).Error; err != nil {
+					return err
+				}
+			}
 		}
 		var raw string
 		if err := tx.Raw(`SELECT input_snapshot::text FROM generation_tasks WHERE id=?`, id).Scan(&raw).Error; err != nil {
@@ -120,6 +135,7 @@ func (s *Store) ClaimSubmission(ctx context.Context, id string) (Submission, boo
 			return err
 		}
 		out.Token = token
+		out.TaskID = id
 		if err := tx.Exec(`INSERT INTO generation_task_events(task_id,event_type,stage,occurred_at) VALUES(?,'submitting','submitting',?)`, id, now).Error; err != nil {
 			return err
 		}
@@ -183,7 +199,10 @@ func (s *Store) ResolveSubmission(ctx context.Context, id, token, providerID str
 func (s *Store) ResolveSubmissionWithUsage(ctx context.Context, id, token, providerID string, submitErr error, usage *generation.ProviderUsage) error {
 	status, event := "running", "accepted"
 	if submitErr != nil {
-		if errors.Is(submitErr, generation.ErrInvalid) || errors.Is(submitErr, generation.ErrSubmissionRejected) {
+		class, definitelyNotAccepted, _ := generation.SubmissionFailureDetails(submitErr)
+		if definitelyNotAccepted && class != generation.SubmissionNonCounting {
+			status, event = "queued", "submission_deferred"
+		} else if errors.Is(submitErr, generation.ErrInvalid) || errors.Is(submitErr, generation.ErrSubmissionRejected) {
 			status, event = "failed", "rejected"
 		} else {
 			status, event = "needs_review", "submission_uncertain"
@@ -226,11 +245,12 @@ func (s *Store) recordSubmitOutcome(tx *gorm.DB, id string, submitErr error) err
 		return err
 	}
 	var circuit struct {
-		State                                                  string
-		ProbeTaskID                                            string
-		ConsecutiveFailures, FailureThreshold, CooldownSeconds int
+		State                                 string
+		ProbeTaskID                           string
+		ConsecutiveFailures, FailureThreshold int
+		CooldownStep                          int
 	}
-	if err := tx.Raw(`SELECT state,consecutive_failures,failure_threshold,cooldown_seconds,COALESCE(probe_task_id,'') AS probe_task_id FROM generation_circuits WHERE connection_id=? AND operation='submit' FOR UPDATE`, connection).Scan(&circuit).Error; err != nil {
+	if err := tx.Raw(`SELECT state,consecutive_failures,failure_threshold,cooldown_step,COALESCE(probe_task_id,'') AS probe_task_id FROM generation_circuits WHERE connection_id=? AND operation='submit' FOR UPDATE`, connection).Scan(&circuit).Error; err != nil {
 		return err
 	}
 	if circuit.State == "" {
@@ -239,22 +259,42 @@ func (s *Store) recordSubmitOutcome(tx *gorm.DB, id string, submitErr error) err
 	if circuit.State == "open" || (circuit.State == "half_open" && circuit.ProbeTaskID != id) {
 		return nil
 	}
-	if submitErr == nil || errors.Is(submitErr, generation.ErrSubmissionRejected) || errors.Is(submitErr, generation.ErrInvalid) {
-		if err := tx.Exec(`UPDATE generation_circuits SET state='closed',consecutive_failures=0,probe_until=NULL,probe_task_id=NULL,opened_at=NULL,updated_at=now() WHERE connection_id=? AND operation='submit'`, connection).Error; err != nil {
+	if submitErr == nil {
+		if err := tx.Exec(`UPDATE generation_circuits SET state='closed',consecutive_failures=0,cooldown_step=0,last_reason='',next_probe_at=NULL,probe_until=NULL,probe_task_id=NULL,opened_at=NULL,updated_at=now() WHERE connection_id=? AND operation='submit'`, connection).Error; err != nil {
 			return err
 		}
 		if circuit.State != "closed" {
-			return tx.Exec(`INSERT INTO generation_circuit_events(connection_id,operation,state,reason) VALUES(?,'submit','closed','probe_succeeded')`, connection).Error
+			return tx.Exec(`INSERT INTO generation_circuit_events(connection_id,operation,state,reason) VALUES(?,'submit','closed','provider_accepted')`, connection).Error
 		}
 		return nil
 	}
+	class, _, retryAfter := generation.SubmissionFailureDetails(submitErr)
+	if class == generation.SubmissionNonCounting {
+		if circuit.State == "half_open" {
+			// Only provider acceptance closes a probing circuit. A definite,
+			// non-counting rejection releases this queued-task probe so the next
+			// real queued task can probe without advancing the cooldown ladder.
+			return tx.Exec(`UPDATE generation_circuits SET consecutive_failures=0,probe_until=NULL,probe_task_id=NULL,last_reason=?,updated_at=now() WHERE connection_id=? AND operation='submit'`, string(class), connection).Error
+		}
+		return tx.Exec(`UPDATE generation_circuits SET consecutive_failures=0,last_reason=?,updated_at=now() WHERE connection_id=? AND operation='submit'`, string(class), connection).Error
+	}
 	if circuit.State == "half_open" || circuit.ConsecutiveFailures+1 >= circuit.FailureThreshold {
-		if err := tx.Exec(`UPDATE generation_circuits SET state='open',consecutive_failures=consecutive_failures+1,opened_at=now(),probe_until=NULL,probe_task_id=NULL,updated_at=now() WHERE connection_id=? AND operation='submit'`, connection).Error; err != nil {
+		step := circuit.CooldownStep
+		if circuit.State == "half_open" && step < 2 {
+			step++
+		}
+		cooldowns := []time.Duration{time.Minute, 5 * time.Minute, 15 * time.Minute}
+		cooldown := cooldowns[step]
+		if retryAfter > cooldown {
+			cooldown = retryAfter
+		}
+		nextProbe := time.Now().UTC().Add(cooldown)
+		if err := tx.Exec(`UPDATE generation_circuits SET state='open',consecutive_failures=consecutive_failures+1,cooldown_step=?,cooldown_seconds=?,last_reason=?,next_probe_at=?,opened_at=now(),probe_until=NULL,probe_task_id=NULL,updated_at=now() WHERE connection_id=? AND operation='submit'`, step, int(cooldown/time.Second), string(class), nextProbe, connection).Error; err != nil {
 			return err
 		}
-		return tx.Exec(`INSERT INTO generation_circuit_events(connection_id,operation,state,reason) VALUES(?,'submit','open','submit_failure')`, connection).Error
+		return tx.Exec(`INSERT INTO generation_circuit_events(connection_id,operation,state,reason) VALUES(?,'submit','open',?)`, connection, string(class)).Error
 	}
-	return tx.Exec(`UPDATE generation_circuits SET consecutive_failures=consecutive_failures+1,updated_at=now() WHERE connection_id=? AND operation='submit'`, connection).Error
+	return tx.Exec(`UPDATE generation_circuits SET consecutive_failures=consecutive_failures+1,last_reason=?,updated_at=now() WHERE connection_id=? AND operation='submit'`, string(class), connection).Error
 }
 
 // Expired submission is uncertain even if the process disappeared before recording a response.

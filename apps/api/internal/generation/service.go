@@ -12,6 +12,19 @@ import (
 )
 
 type Status string
+type Priority string
+type CircuitState string
+
+const (
+	PriorityNormal    Priority = "normal"
+	PriorityExpedited Priority = "expedited"
+)
+
+const (
+	CircuitNormal  CircuitState = "normal"
+	CircuitPaused  CircuitState = "paused"
+	CircuitProbing CircuitState = "probing"
+)
 
 const (
 	Queued        Status = "queued"
@@ -69,6 +82,7 @@ type Task struct {
 	ID             string    `json:"id"`
 	Version        int64     `json:"version"`
 	Status         Status    `json:"status"`
+	Priority       Priority  `json:"priority"`
 	Model          string    `json:"model"`
 	ProjectID      string    `json:"projectId"`
 	NodeID         string    `json:"nodeId,omitempty"`
@@ -110,10 +124,11 @@ type WorkerHeartbeat struct {
 	SeenAt time.Time `json:"seenAt"`
 }
 type CircuitStatus struct {
-	ConnectionID        string `json:"connectionId"`
-	Operation           string `json:"operation"`
-	State               string `json:"state"`
-	ConsecutiveFailures int    `json:"consecutiveFailures"`
+	ConnectionID        string       `json:"connectionId"`
+	State               CircuitState `json:"state"`
+	ConsecutiveFailures int          `json:"consecutiveFailures"`
+	LastReason          string       `json:"lastReason,omitempty"`
+	NextProbeAt         *time.Time   `json:"nextProbeAt,omitempty"`
 }
 type Resources interface {
 	OwnsProject(context.Context, string, string) (bool, error)
@@ -222,6 +237,21 @@ func (s Service) Operations(ctx context.Context, a Actor) (Operations, error) {
 		return Operations{}, ErrNotFound
 	}
 	return source.Operations(ctx, a.ID)
+}
+func (s Service) SetPriority(ctx context.Context, a Actor, id string, priority Priority) (Task, error) {
+	if !a.Admin || a.ID == "" {
+		return Task{}, ErrForbidden
+	}
+	if priority != PriorityNormal && priority != PriorityExpedited {
+		return Task{}, ErrInvalid
+	}
+	source, ok := s.Store.(interface {
+		SetPriority(context.Context, string, string, Priority) (Task, error)
+	})
+	if !ok {
+		return Task{}, ErrNotFound
+	}
+	return source.SetPriority(ctx, id, a.ID, priority)
 }
 func NewID() (string, error) {
 	var b [16]byte

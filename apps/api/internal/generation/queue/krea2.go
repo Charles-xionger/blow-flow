@@ -77,11 +77,11 @@ func (p Krea2) Submit(ctx context.Context, input generation.Input) (string, erro
 	copyClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	response, err := copyClient.Do(req)
 	if err != nil {
-		return "", ErrSubmissionUncertain
+		return "", submissionTransportError(err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return "", ErrSubmissionUncertain
+		return "", submissionHTTPError(response)
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 	if err != nil {

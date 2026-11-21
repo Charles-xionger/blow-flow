@@ -500,6 +500,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/generation/tasks/{id}/priority": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set a queued generation task to normal or expedited priority */
+        put: operations["setGenerationTaskPriority"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/me": {
         parameters: {
             query?: never;
@@ -693,6 +710,8 @@ export interface components {
             version: number;
             /** @enum {string} */
             status: "queued" | "running" | "completed" | "canceled" | "failed" | "needs_review" | "query_failed" | "save_exhausted";
+            /** @enum {string} */
+            priority: "normal" | "expedited";
             model: string;
             projectId: string;
             nodeId?: string;
@@ -762,10 +781,11 @@ export interface components {
             circuits: {
                 connectionId: string;
                 /** @enum {string} */
-                operation: "submit" | "query" | "save";
-                /** @enum {string} */
-                state: "closed" | "open" | "half_open";
+                state: "normal" | "paused" | "probing";
                 consecutiveFailures: number;
+                lastReason?: string;
+                /** Format: date-time */
+                nextProbeAt?: string;
             }[];
         };
         /** @enum {string} */
@@ -1891,6 +1911,38 @@ export interface operations {
                 };
             };
             403: components["responses"]["Forbidden"];
+        };
+    };
+    setGenerationTaskPriority: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    priority: "normal" | "expedited";
+                };
+            };
+        };
+        responses: {
+            /** @description Updated queued task */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerationTask"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     getCurrentUser: {

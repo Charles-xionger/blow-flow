@@ -91,6 +91,7 @@ func (w SubmissionWorker) ProcessOne(ctx context.Context, id string) error {
 	if !ok {
 		return nil
 	}
+	id = claim.TaskID
 	allowed, err := w.Store.CheckSubmission(ctx, id, claim.Token)
 	if errors.Is(err, postgres.ErrSubmitCircuitOpen) {
 		if requeueErr := w.Store.RequeueSubmission(ctx, id, claim.Token); requeueErr != nil {

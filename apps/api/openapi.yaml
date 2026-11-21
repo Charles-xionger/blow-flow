@@ -622,6 +622,34 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/GenerationOperations" }
         "403": { $ref: "#/components/responses/Forbidden" }
+  /admin/generation/tasks/{id}/priority:
+    put:
+      operationId: setGenerationTaskPriority
+      summary: Set a queued generation task to normal or expedited priority
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [priority]
+              properties:
+                priority: { type: string, enum: [normal, expedited] }
+      responses:
+        "200":
+          description: Updated queued task
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GenerationTask" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /me:
     get:
       operationId: getCurrentUser
@@ -865,11 +893,12 @@ components:
         error: { type: string }
     GenerationTask:
       type: object
-      required: [id, version, status, model, projectId, stage, createdAt, updatedAt]
+      required: [id, version, status, priority, model, projectId, stage, createdAt, updatedAt]
       properties:
         id: { type: string }
         version: { type: integer, format: int64 }
         status: { type: string, enum: [queued, running, completed, canceled, failed, needs_review, query_failed, save_exhausted] }
+        priority: { type: string, enum: [normal, expedited] }
         model: { type: string }
         projectId: { type: string }
         nodeId: { type: string }
@@ -949,12 +978,13 @@ components:
           type: array
           items:
             type: object
-            required: [connectionId, operation, state, consecutiveFailures]
+            required: [connectionId, state, consecutiveFailures]
             properties:
               connectionId: { type: string }
-              operation: { type: string, enum: [submit, query, save] }
-              state: { type: string, enum: [closed, open, half_open] }
+              state: { type: string, enum: [normal, paused, probing] }
               consecutiveFailures: { type: integer }
+              lastReason: { type: string }
+              nextProbeAt: { type: string, format: date-time }
     UserStatus:
       type: string
       enum: [active, disabled]
