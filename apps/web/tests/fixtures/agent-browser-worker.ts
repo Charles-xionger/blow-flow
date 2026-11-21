@@ -3,7 +3,8 @@ import { GenerationWorker } from '../../lib/generation/worker';
 import { getAgentService } from '../../lib/agent/server';
 import { registerCanvasTools } from '../../lib/agent/canvas';
 import { getGenerationService } from '../../lib/generation/server';
-const service=getAgentService({leaseMs:1000});
+// Match the normal worker lease so slow browser startup cannot imitate a crash.
+const service=getAgentService();
 const generationWorker=new GenerationWorker(getGenerationService(),{fetch:async()=>{throw new Error('Browser fixture cannot call providers');},generateImage:async(_snapshot,_input,beforeSubmit)=>{beforeSubmit();await new Promise(resolve=>setTimeout(resolve,3500));return 'data:image/png;base64,AAAA';},save:async()=> 'http://127.0.0.1:3217/favicon.ico'});
 registerCanvasTools(service, () => getGenerationService().models().map(model => ({ ...model, configured: true })));
 const failedOnce = new Set<string>();

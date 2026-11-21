@@ -310,6 +310,8 @@ test('workspace history loads metadata pages without downloading a canvas or his
   await page.getByLabel('搜索项目和文件夹').fill(`Paged ${id}`);
   await page.getByRole('button', { name: `Paged ${id}的更多操作` }).click();
   await page.getByRole('menuitem', { name: '操作历史', exact: true }).click();
+  // Wait for the uncached route before testing the history content.
+  await expect(page).toHaveURL(url => url.pathname === '/canvas/history' && url.searchParams.get('project') === id, { timeout: 25_000 });
   await expect(page.getByRole('heading', { name: '服务端操作历史' })).toBeVisible();
   await expect(page.getByTestId('remote-history-batch')).toHaveCount(20);
   await page.getByRole('button', { name: '下一页批次' }).click();

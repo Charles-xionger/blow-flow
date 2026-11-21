@@ -12,7 +12,8 @@ test('personal space opens the read-only built-in creative skill library', async
   await expect(creativeSkills).toBeFocused();
   await creativeSkills.press('Enter');
 
-  await expect(page).toHaveURL(/\/personal\/skills$/);
+  // The first keyboard navigation may compile this route in the dev server.
+  await expect(page).toHaveURL(/\/personal\/skills$/, { timeout: 25_000 });
   await expect(page.getByRole('heading', { name: '个人技能库' })).toBeVisible();
   await expect(page.getByText('跨所有项目使用和管理你的创作技能。')).toBeVisible();
 

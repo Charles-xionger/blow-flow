@@ -85,7 +85,7 @@ test('Agent finishes while the canvas is closed and the result survives an offli
 
 test('an idle canvas keeps one change stream without repeated snapshot reads', async ({ page, request }) => {
   const id = crypto.randomUUID();
-  await request.post('/api/workspace', { data: { action: 'create-project', id, folderId: null } });
+  await expect(await request.post('/api/workspace', { data: { action: 'create-project', id, folderId: null } })).toBeOK();
   const reads: string[] = [];
   page.on('request', request => {
     if (request.method() === 'GET' && new URL(request.url()).pathname === `/api/workflow/${id}`) reads.push(request.url());
@@ -97,6 +97,7 @@ test('an idle canvas keeps one change stream without repeated snapshot reads', a
   await page.waitForTimeout(3500);
   expect(reads).toHaveLength(0);
   // Reconnecting must receive the latest version even if the assistant panel is closed.
-  await request.post(`/api/agent/${id}`, { data: { action: 'send', requestId: crypto.randomUUID(), modelId: 'browser-fixture', text: '测试新建节点 在后台完成' } });
+  const taskId = await sendAgent(request, id, '测试新建节点 在后台完成');
+  await waitForAgentTask(request, id, taskId);
   await expect(page.locator('.react-flow__node')).toHaveCount(2);
 });

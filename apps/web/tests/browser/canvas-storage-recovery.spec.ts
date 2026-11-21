@@ -189,8 +189,12 @@ for (const action of ['clear', 'new', 'import', 'return'] as const) {
     expect(new URL(page.url()).searchParams.get('project')).toBe(id);
     expect(JSON.parse(await downloadText(page, '导出当前画布'))).toMatchObject({ id, name: '切换前未保存的内容', nodes: snapshot.nodes });
     expect((await (await request.get(`/api/workflow/${id}`)).json()).data.name).toBe(snapshot.name);
-    await page.evaluate(() => sessionStorage.setItem('storage-recovered', 'true'));
-    await page.getByRole('button', { name: '重试保存', exact: true }).click();
+    const retrySave = page.getByRole('button', { name: '重试保存', exact: true });
+    // Keep the fault active until this click so autosave cannot remove the button first.
+    await retrySave.evaluate(button => button.addEventListener('click', () => {
+      sessionStorage.setItem('storage-recovered', 'true');
+    }, { capture: true, once: true }));
+    await retrySave.click();
     await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
     expect((await (await request.get(`/api/workflow/${id}`)).json()).data.name).toBe('切换前未保存的内容');
   });
