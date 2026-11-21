@@ -50,6 +50,7 @@ func (s *Store) ClaimDelivery(ctx context.Context, id string) (DeliveryClaim, bo
 type deliveryTransition struct {
 	Status, Stage, Event, ProviderURL, FileType, Failure string
 	Percent                                              *float64
+	Usage                                                *generation.ProviderUsage
 	Next                                                 time.Time
 	IncrementAttempt                                     bool
 	IncrementSaveAttempt                                 bool
@@ -57,7 +58,11 @@ type deliveryTransition struct {
 }
 
 func (s *Store) apply(ctx context.Context, id, token string, change deliveryTransition) error {
-	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	usageJSON, err := marshalProviderUsage(change.Usage)
+	if err != nil {
+		return err
+	}
+	err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
 		var priorStage string
 		if err := tx.Raw(`SELECT stage FROM generation_tasks WHERE id=? FOR UPDATE`, id).Scan(&priorStage).Error; err != nil {
@@ -67,7 +72,7 @@ func (s *Store) apply(ctx context.Context, id, token string, change deliveryTran
 		if !change.Next.IsZero() {
 			nextValue = change.Next
 		}
-		res := tx.Exec(`UPDATE generation_tasks SET status=?,stage=?,percent=COALESCE(?,percent),provider_result_url=CASE WHEN ?<>'' THEN ? ELSE provider_result_url END,provider_result_type=CASE WHEN ?<>'' THEN ? ELSE provider_result_type END,failure_code=NULLIF(?,''),next_attempt_at=?,poll_attempts=CASE WHEN ? THEN 0 ELSE poll_attempts+? END,save_attempts=save_attempts+?,lease_token=NULL,lease_until=NULL,updated_at=? WHERE id=? AND lease_token=? AND lease_until>now()`, change.Status, change.Stage, change.Percent, change.ProviderURL, change.ProviderURL, change.FileType, change.FileType, change.Failure, nextValue, change.ResetQueryAttempts, boolInt(change.IncrementAttempt), boolInt(change.IncrementSaveAttempt), now, id, token)
+		res := tx.Exec(`UPDATE generation_tasks SET status=?,stage=?,percent=COALESCE(?,percent),provider_result_url=CASE WHEN ?<>'' THEN ? ELSE provider_result_url END,provider_result_type=CASE WHEN ?<>'' THEN ? ELSE provider_result_type END,provider_usage=COALESCE(?::jsonb,provider_usage),failure_code=NULLIF(?,''),next_attempt_at=?,poll_attempts=CASE WHEN ? THEN 0 ELSE poll_attempts+? END,save_attempts=save_attempts+?,lease_token=NULL,lease_until=NULL,updated_at=? WHERE id=? AND lease_token=? AND lease_until>now()`, change.Status, change.Stage, change.Percent, change.ProviderURL, change.ProviderURL, change.FileType, change.FileType, usageJSON, change.Failure, nextValue, change.ResetQueryAttempts, boolInt(change.IncrementAttempt), boolInt(change.IncrementSaveAttempt), now, id, token)
 		if res.Error != nil {
 			return res.Error
 		}
@@ -138,14 +143,14 @@ func (s *Store) ScheduleQuery(ctx context.Context, c DeliveryClaim, stage string
 	}
 	return s.apply(ctx, c.TaskID, c.Token, deliveryTransition{Status: "running", Stage: stage, Event: event, Next: time.Now().Add(delay), IncrementAttempt: err != nil, ResetQueryAttempts: err == nil})
 }
-func (s *Store) ProviderSucceeded(ctx context.Context, c DeliveryClaim, url, fileType string) error {
+func (s *Store) ProviderSucceeded(ctx context.Context, c DeliveryClaim, url, fileType string, usage *generation.ProviderUsage) error {
 	if url == "" {
 		return errors.New("empty provider output")
 	}
-	return s.apply(ctx, c.TaskID, c.Token, deliveryTransition{Status: "saving", Stage: "saving", Event: "provider_succeeded", ProviderURL: url, FileType: fileType, ResetQueryAttempts: true})
+	return s.apply(ctx, c.TaskID, c.Token, deliveryTransition{Status: "saving", Stage: "saving", Event: "provider_succeeded", ProviderURL: url, FileType: fileType, Usage: usage, ResetQueryAttempts: true})
 }
-func (s *Store) ProviderFailed(ctx context.Context, c DeliveryClaim) error {
-	return s.apply(ctx, c.TaskID, c.Token, deliveryTransition{Status: "failed", Stage: "provider_failed", Event: "provider_failed", Failure: "provider_failed"})
+func (s *Store) ProviderFailed(ctx context.Context, c DeliveryClaim, usage *generation.ProviderUsage) error {
+	return s.apply(ctx, c.TaskID, c.Token, deliveryTransition{Status: "failed", Stage: "provider_failed", Event: "provider_failed", Failure: "provider_failed", Usage: usage})
 }
 func (s *Store) SaveFailed(ctx context.Context, c DeliveryClaim, code string, permanent bool) error {
 	delay := time.Duration(1<<min(c.SaveAttempts+1, 6)) * time.Second

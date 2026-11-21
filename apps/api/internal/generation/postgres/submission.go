@@ -177,6 +177,10 @@ func (s *Store) RequeueSubmission(ctx context.Context, id, token string) error {
 	return err
 }
 func (s *Store) ResolveSubmission(ctx context.Context, id, token, providerID string, submitErr error) error {
+	return s.ResolveSubmissionWithUsage(ctx, id, token, providerID, submitErr, nil)
+}
+
+func (s *Store) ResolveSubmissionWithUsage(ctx context.Context, id, token, providerID string, submitErr error, usage *generation.ProviderUsage) error {
 	status, event := "running", "accepted"
 	if submitErr != nil {
 		if errors.Is(submitErr, generation.ErrInvalid) || errors.Is(submitErr, generation.ErrSubmissionRejected) {
@@ -185,7 +189,11 @@ func (s *Store) ResolveSubmission(ctx context.Context, id, token, providerID str
 			status, event = "needs_review", "submission_uncertain"
 		}
 	}
-	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	usageJSON, err := marshalProviderUsage(usage)
+	if err != nil {
+		return err
+	}
+	err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
 		var isCurrent bool
 		if err := tx.Raw(`SELECT EXISTS(SELECT 1 FROM generation_tasks WHERE id=? AND status='submitting' AND lease_token=? AND lease_until>now())`, id, token).Scan(&isCurrent).Error; err != nil {
@@ -194,7 +202,7 @@ func (s *Store) ResolveSubmission(ctx context.Context, id, token, providerID str
 		if !isCurrent {
 			return ErrStaleLease
 		}
-		res := tx.Exec(`UPDATE generation_tasks SET status=?,stage=?,provider_task_id=?,lease_token=NULL,lease_until=NULL,updated_at=? WHERE id=? AND status='submitting' AND lease_token=? AND lease_until>now()`, status, status, providerID, now, id, token)
+		res := tx.Exec(`UPDATE generation_tasks SET status=?,stage=?,provider_task_id=?,provider_usage=COALESCE(?::jsonb,provider_usage),lease_token=NULL,lease_until=NULL,updated_at=? WHERE id=? AND status='submitting' AND lease_token=? AND lease_until>now()`, status, status, providerID, usageJSON, now, id, token)
 		if res.Error != nil {
 			return res.Error
 		}

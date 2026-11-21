@@ -65,8 +65,13 @@ func (SimulatedProvider) Generate(_ context.Context, input generation.Input) (st
 type Submitter interface {
 	Submit(context.Context, generation.Input) (string, error)
 }
-type TaskSubmitter interface {
-	SubmitTask(context.Context, string, generation.Input) (string, error)
+type submissionResult struct {
+	ID    string
+	Usage *generation.ProviderUsage
+}
+
+type taskSubmitter interface {
+	submitTask(context.Context, string, generation.Input) (submissionResult, error)
 }
 type SubmissionWorker struct {
 	Store    *postgres.Store
@@ -99,14 +104,14 @@ func (w SubmissionWorker) ProcessOne(ctx context.Context, id string) error {
 	if !allowed {
 		return w.Store.ResolveSubmission(ctx, id, claim.Token, "", generation.ErrSubmissionRejected)
 	}
-	var providerID string
+	var result submissionResult
 	var submitErr error
-	if provider, ok := w.Provider.(TaskSubmitter); ok {
-		providerID, submitErr = provider.SubmitTask(ctx, id, claim.Input)
+	if provider, ok := w.Provider.(taskSubmitter); ok {
+		result, submitErr = provider.submitTask(ctx, id, claim.Input)
 	} else {
-		providerID, submitErr = w.Provider.Submit(ctx, claim.Input)
+		result.ID, submitErr = w.Provider.Submit(ctx, claim.Input)
 	}
-	return w.Store.ResolveSubmission(ctx, id, claim.Token, providerID, submitErr)
+	return w.Store.ResolveSubmissionWithUsage(ctx, id, claim.Token, result.ID, submitErr, result.Usage)
 }
 
 // ProcessDue recovers queued tasks even when a published Rabbit wakeup was

@@ -30,13 +30,25 @@ func (p Providers) QueryInput(ctx context.Context, in generation.Input, id strin
 		return Observation{}, generation.ErrInvalid
 	}
 	m := in.Workflow
-	return (Krea2{BaseURL: m.Connection.BaseURL, APIKey: os.Getenv(m.Connection.APIKeyEnv), Client: p.RunningHub.Client}).query(ctx, id, m.OutputNode, m.Category == "VIDEO")
+	return (Krea2{BaseURL: m.Connection.BaseURL, APIKey: os.Getenv(m.Connection.APIKeyEnv), Client: p.RunningHub.Client}).query(ctx, id, m.OutputNode, m.Category == "VIDEO", false)
 }
 func (p Providers) SubmitTask(ctx context.Context, taskID string, in generation.Input) (string, error) {
-	if generation.RouteForModel(in.Model) == "gemini" {
-		return p.Gemini.SubmitTask(ctx, taskID, in)
+	result, err := p.submitTask(ctx, taskID, in)
+	return result.ID, err
+}
+
+func (p Providers) submitTask(ctx context.Context, taskID string, in generation.Input) (submissionResult, error) {
+	var id string
+	var err error
+	switch generation.RouteForModel(in.Model) {
+	case "gemini":
+		id, err = p.Gemini.SubmitTask(ctx, taskID, in)
+	case "seedream":
+		return p.Seedream.submit(ctx, in)
+	default:
+		id, err = p.Submit(ctx, in)
 	}
-	return p.Submit(ctx, in)
+	return submissionResult{ID: id}, err
 }
 func (p Providers) Query(ctx context.Context, id string) (Observation, error) {
 	return p.RunningHub.Query(ctx, id)

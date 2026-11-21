@@ -6,6 +6,7 @@ import (
 	"blow-flow/api/internal/database"
 	"blow-flow/api/internal/generation"
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/pressly/goose/v3"
 	"net/url"
@@ -55,7 +56,7 @@ func TestProviderSuccessSaveRetryAndEventsSurviveRestart(t *testing.T) {
 	}
 	ctx := context.Background()
 	store := New(db)
-	input := generation.Input{ProjectID: "project", Model: "runninghub/krea2", Prompt: "cat", Width: 1024, Height: 1024, Seed: 42}
+	input := generation.Input{ProjectID: "project", Model: generation.H3Model, Prompt: "cat", Width: 1024, Height: 1024, Duration: 5, Seed: 42}
 	task, err := store.Create(ctx, owner, "key", "hash", input)
 	if err != nil {
 		t.Fatal(err)
@@ -84,7 +85,8 @@ func TestProviderSuccessSaveRetryAndEventsSurviveRestart(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("reclaim %v %v", ok, err)
 	}
-	if err = store.ProviderSucceeded(ctx, first, "https://provider.test/image.png", "png"); err != nil {
+	usage := &generation.ProviderUsage{Fields: map[string]json.RawMessage{"chargedPoint": json.RawMessage(`"1.28"`)}, Source: "runninghub_outputs", CollectedAt: time.Now().UTC()}
+	if err = store.ProviderSucceeded(ctx, first, "https://provider.test/image.png", "png", usage); err != nil {
 		t.Fatal(err)
 	}
 	// A fresh store instance represents a restarted worker. It never submits again.
@@ -99,6 +101,10 @@ func TestProviderSuccessSaveRetryAndEventsSurviveRestart(t *testing.T) {
 	got, ownerID, err := restarted.Get(ctx, task.ID)
 	if err != nil || ownerID != owner || got.Status != "save_failed" || got.FailureCode != "save_retryable" {
 		t.Fatalf("save failed %+v %s %v", got, ownerID, err)
+	}
+	detail, err := (generation.Service{Store: restarted}).AdminTaskDetail(ctx, generation.Actor{ID: owner, Admin: true}, task.ID)
+	if err != nil || detail.Usage == nil || string(detail.Usage.Fields["chargedPoint"]) != `"1.28"` || detail.Status != "save_failed" {
+		t.Fatalf("admin task after save failure: %+v, %v", detail, err)
 	}
 	if err = db.Exec(`UPDATE generation_tasks SET next_attempt_at=now()-interval '1 second' WHERE id=?`, task.ID).Error; err != nil {
 		t.Fatal(err)

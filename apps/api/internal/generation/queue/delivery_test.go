@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"blow-flow/api/internal/generation"
 	"blow-flow/api/internal/generation/postgres"
 	"context"
 	"errors"
@@ -53,14 +54,14 @@ func (s *deliveryStoreFake) ScheduleQuery(_ context.Context, _ postgres.Delivery
 	s.events = append(s.events, "query_retry")
 	return nil
 }
-func (s *deliveryStoreFake) ProviderSucceeded(_ context.Context, _ postgres.DeliveryClaim, url, fileType string) error {
+func (s *deliveryStoreFake) ProviderSucceeded(_ context.Context, _ postgres.DeliveryClaim, url, fileType string, _ *generation.ProviderUsage) error {
 	s.claim.ProviderURL = url
 	s.claim.FileType = fileType
 	s.status = "saving"
 	s.events = append(s.events, "provider_succeeded")
 	return nil
 }
-func (s *deliveryStoreFake) ProviderFailed(_ context.Context, _ postgres.DeliveryClaim) error {
+func (s *deliveryStoreFake) ProviderFailed(_ context.Context, _ postgres.DeliveryClaim, _ *generation.ProviderUsage) error {
 	s.status = "failed"
 	s.events = append(s.events, "provider_failed")
 	return nil

@@ -30,8 +30,8 @@ type DeliveryStore interface {
 	SaveFailed(context.Context, postgres.DeliveryClaim, string, bool) error
 	Delivered(context.Context, postgres.DeliveryClaim, string) error
 	ScheduleQuery(context.Context, postgres.DeliveryClaim, string, error, time.Duration) error
-	ProviderSucceeded(context.Context, postgres.DeliveryClaim, string, string) error
-	ProviderFailed(context.Context, postgres.DeliveryClaim) error
+	ProviderSucceeded(context.Context, postgres.DeliveryClaim, string, string, *generation.ProviderUsage) error
+	ProviderFailed(context.Context, postgres.DeliveryClaim, *generation.ProviderUsage) error
 	RecordProgress(context.Context, string, string, string, *float64) error
 }
 type DeliveryWorker struct {
@@ -102,10 +102,10 @@ func (w DeliveryWorker) ProcessOne(ctx context.Context, id string) error {
 		return w.Store.ScheduleQuery(ctx, claim, "waiting_provider", queryErr, timeout)
 	}
 	if observation.Failed {
-		return w.Store.ProviderFailed(ctx, claim)
+		return w.Store.ProviderFailed(ctx, claim, observation.Usage)
 	}
 	if observation.OutputURL != "" {
-		return w.Store.ProviderSucceeded(ctx, claim, observation.OutputURL, observation.FileType)
+		return w.Store.ProviderSucceeded(ctx, claim, observation.OutputURL, observation.FileType, observation.Usage)
 	}
 	if observation.WSSURL != "" {
 		socketCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -123,10 +123,10 @@ func (w DeliveryWorker) ProcessOne(ctx context.Context, id string) error {
 			return w.Store.ScheduleQuery(ctx, claim, "generating", queryErr, timeout)
 		}
 		if observation.Failed {
-			return w.Store.ProviderFailed(ctx, claim)
+			return w.Store.ProviderFailed(ctx, claim, observation.Usage)
 		}
 		if observation.OutputURL != "" {
-			return w.Store.ProviderSucceeded(ctx, claim, observation.OutputURL, observation.FileType)
+			return w.Store.ProviderSucceeded(ctx, claim, observation.OutputURL, observation.FileType, observation.Usage)
 		}
 		return w.Store.ScheduleQuery(ctx, claim, "generating", nil, timeout)
 	}

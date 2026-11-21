@@ -22,6 +22,7 @@ type Observation struct {
 	FileType  string
 	Failed    bool
 	Stage     string
+	Usage     *generation.ProviderUsage
 }
 type Progress struct {
 	Stage     string
@@ -31,12 +32,12 @@ type Progress struct {
 
 // Query is authoritative for output. The socket can only suggest that this query is due.
 func (p Krea2) Query(ctx context.Context, taskID string) (Observation, error) {
-	return p.query(ctx, taskID, "103", false)
+	return p.query(ctx, taskID, "103", false, false)
 }
 func (p H3) Query(ctx context.Context, taskID string) (Observation, error) {
-	return p.Krea2.query(ctx, taskID, "148", true)
+	return p.Krea2.query(ctx, taskID, "148", true, true)
 }
-func (p Krea2) query(ctx context.Context, taskID, outputNode string, video bool) (Observation, error) {
+func (p Krea2) query(ctx context.Context, taskID, outputNode string, video, collectUsage bool) (Observation, error) {
 	if taskID == "" || p.BaseURL == "" || p.APIKey == "" {
 		return Observation{}, generation.ErrInvalid
 	}
@@ -74,33 +75,42 @@ func (p Krea2) query(ctx context.Context, taskID, outputNode string, video bool)
 	if reply.Code == 813 {
 		return Observation{Stage: "waiting_provider"}, nil
 	}
+	var observation Observation
+	if collectUsage {
+		observation.Usage = runningHubUsage(reply.Data)
+	}
 	if reply.Code == 805 {
-		return Observation{Failed: true}, nil
+		observation.Failed = true
+		return observation, nil
 	}
 	if reply.Code != 0 {
 		return Observation{}, fmt.Errorf("runninghub outputs code %d", reply.Code)
 	}
-	var files []struct {
+	type resultFile struct {
 		FileURL  string `json:"fileUrl"`
 		FileType string `json:"fileType"`
 		NodeID   string `json:"nodeId"`
 	}
 	if len(reply.Data) > 0 && reply.Data[0] == '[' {
+		var files []json.RawMessage
 		if err := json.Unmarshal(reply.Data, &files); err != nil {
 			return Observation{}, err
 		}
-		var output *struct {
-			FileURL  string `json:"fileUrl"`
-			FileType string `json:"fileType"`
-			NodeID   string `json:"nodeId"`
-		}
-		for i := range files {
-			if files[i].NodeID == outputNode {
-				output = &files[i]
+		var output resultFile
+		for _, file := range files {
+			var candidate resultFile
+			if err := json.Unmarshal(file, &candidate); err != nil {
+				return Observation{}, err
+			}
+			if candidate.NodeID == outputNode {
+				output = candidate
+				if collectUsage {
+					observation.Usage = runningHubUsage(file)
+				}
 				break
 			}
 		}
-		if output == nil || output.FileURL == "" {
+		if output.FileURL == "" {
 			return Observation{}, errors.New("runninghub returned empty result")
 		}
 		u, err := url.Parse(output.FileURL)
@@ -114,7 +124,8 @@ func (p Krea2) query(ctx context.Context, taskID, outputNode string, video bool)
 		if video {
 			fileType = "mp4"
 		}
-		return Observation{OutputURL: output.FileURL, FileType: fileType}, nil
+		observation.OutputURL, observation.FileType = output.FileURL, fileType
+		return observation, nil
 	}
 	var pending struct {
 		NetWSSURL  string `json:"netWssUrl"`
@@ -126,7 +137,8 @@ func (p Krea2) query(ctx context.Context, taskID, outputNode string, video bool)
 		}
 	}
 	if pending.TaskStatus == "FAILED" {
-		return Observation{Failed: true}, nil
+		observation.Failed = true
+		return observation, nil
 	}
 	if pending.NetWSSURL != "" {
 		u, err := url.Parse(pending.NetWSSURL)

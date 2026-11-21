@@ -4,6 +4,7 @@ import (
 	"blow-flow/api/internal/account"
 	"blow-flow/api/internal/generation"
 	"context"
+	"encoding/json"
 	"github.com/gin-gonic/gin"
 	"net/http"
 	"net/http/httptest"
@@ -79,6 +80,15 @@ func (s *generationStub) Operations(_ context.Context, a generation.Actor) (gene
 	}
 	return generation.Operations{QueueLength: 7, NeedsReview: 2}, nil
 }
+func (s *generationStub) AdminTaskDetail(_ context.Context, _ generation.Actor, id string) (generation.AdminTaskDetail, error) {
+	if id != "task-1" {
+		return generation.AdminTaskDetail{}, generation.ErrNotFound
+	}
+	return generation.AdminTaskDetail{
+		ID: id, Model: generation.Seedream55Model, ConnectionID: "volcengine-ark", Status: "save_failed",
+		Usage: &generation.ProviderUsage{Fields: map[string]json.RawMessage{"generated_images": json.RawMessage("1")}, Amount: "0.23", Currency: "CNY", Source: "ark_image_generation"},
+	}, nil
+}
 func TestGenerationEventsAndTaskExposeStageWithoutUnverifiedPercent(t *testing.T) {
 	s := &generationStub{last: generation.Task{ID: "task-1", Status: generation.Running, Stage: "generating"}}
 	r := NewWithDependencies(Dependencies{Accounts: &accountServiceStub{resolved: account.User{ID: "owner-1", Status: account.StatusActive}}, IdentityVerifier: verifierStub{}, Generation: s})
@@ -132,6 +142,31 @@ func TestGenerationOperationsRequiresAdmin(t *testing.T) {
 		r.ServeHTTP(w, req)
 		if w.Code != tc.status {
 			t.Fatalf("role=%s: %d %s", tc.role, w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestAdminGenerationTaskDetailFromTaskID(t *testing.T) {
+	for _, tc := range []struct {
+		role   account.Role
+		id     string
+		status int
+	}{
+		{account.RoleUser, "task-1", http.StatusForbidden},
+		{account.RoleAdmin, "missing", http.StatusNotFound},
+		{account.RoleAdmin, "task-1", http.StatusOK},
+	} {
+		r := NewWithDependencies(Dependencies{Accounts: &accountServiceStub{resolved: account.User{ID: "actor-1", Role: tc.role, Status: account.StatusActive}}, IdentityVerifier: verifierStub{}, Generation: &generationStub{}})
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/v1/admin/generation/tasks/"+tc.id, nil)
+		req.Header.Set("Authorization", "Bearer valid")
+		r.ServeHTTP(w, req)
+		if w.Code != tc.status {
+			t.Fatalf("role=%s: %d %s", tc.role, w.Code, w.Body.String())
+		}
+		if tc.status == http.StatusOK && (!strings.Contains(w.Body.String(), `"amount":"0.23"`) ||
+			!strings.Contains(w.Body.String(), `"status":"save_failed"`) || w.Header().Get("Cache-Control") != "no-store") {
+			t.Fatalf("admin task detail: %s", w.Body.String())
 		}
 	}
 }

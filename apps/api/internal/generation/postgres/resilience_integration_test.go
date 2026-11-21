@@ -265,7 +265,7 @@ func TestLateNodeResultRemainsTaskScopedAndCannotReplaceCurrentResult(t *testing
 		if err != nil || !ok {
 			t.Fatalf("delivery %v %v", ok, err)
 		}
-		if err := s.ProviderSucceeded(ctx, query, "https://provider.test/"+task.ID, "png"); err != nil {
+		if err := s.ProviderSucceeded(ctx, query, "https://provider.test/"+task.ID, "png", nil); err != nil {
 			t.Fatal(err)
 		}
 		save, ok, err := s.ClaimDelivery(ctx, task.ID)
@@ -366,7 +366,7 @@ func TestDeliveryCircuitsAndRetryExhaustionAreIndependent(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("resumed query %v %v", ok, err)
 	}
-	if err := s.ProviderSucceeded(ctx, query, "https://provider.test/result.png", "png"); err != nil {
+	if err := s.ProviderSucceeded(ctx, query, "https://provider.test/result.png", "png", nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DB.Exec(`UPDATE generation_circuits SET failure_threshold=1,cooldown_seconds=1 WHERE operation='save'`).Error; err != nil {

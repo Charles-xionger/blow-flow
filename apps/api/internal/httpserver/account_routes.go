@@ -39,6 +39,27 @@ func registerAccountRoutes(router *gin.Engine, dependencies Dependencies) {
 	})
 
 	admin := v1.Group("/admin")
+	admin.GET("/generation/tasks/:id", func(c *gin.Context) {
+		actor := generationActor(c)
+		if !actor.Admin {
+			generationError(c, generation.ErrForbidden)
+			return
+		}
+		service, ok := dependencies.Generation.(interface {
+			AdminTaskDetail(context.Context, generation.Actor, string) (generation.AdminTaskDetail, error)
+		})
+		if !ok {
+			c.JSON(503, errorBody(c, "service_unavailable"))
+			return
+		}
+		result, err := service.AdminTaskDetail(c.Request.Context(), actor, c.Param("id"))
+		if err != nil {
+			generationError(c, err)
+			return
+		}
+		c.Header("Cache-Control", "no-store")
+		c.JSON(200, result)
+	})
 	admin.GET("/generation/operations", func(c *gin.Context) {
 		service, ok := dependencies.Generation.(interface {
 			Operations(context.Context, generation.Actor) (generation.Operations, error)

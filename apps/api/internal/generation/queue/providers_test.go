@@ -56,14 +56,18 @@ func TestSeedreamDirectResult(t *testing.T) {
 		if body["model"] != generation.Seedream55Model || body["background"] != "transparent" {
 			t.Fatalf("body %#v", body)
 		}
-		w.Write([]byte(`{"data":[{"url":"https://provider.test/result.png"}]}`))
+		w.Write([]byte(`{"data":[{"url":"https://provider.test/result.png","size":"2048x2048"}],"usage":{"input_images":0,"generated_images":1,"output_tokens":16384}}`))
 	}))
 	defer server.Close()
-	id, err := (Seedream{BaseURL: server.URL, APIKey: "key", Client: server.Client()}).Submit(context.Background(), generation.Input{Model: generation.Seedream55Model, Prompt: "cat", Width: 1024, Height: 1024, ImageOptions: &generation.ImageOptions{Background: "transparent"}})
+	provider := Providers{Seedream: Seedream{BaseURL: server.URL, APIKey: "key", Client: server.Client()}}
+	result, err := provider.submitTask(context.Background(), "task-1", generation.Input{Model: generation.Seedream55Model, Prompt: "cat", Width: 1024, Height: 1024, ImageOptions: &generation.ImageOptions{Background: "transparent"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := (Providers{}).QueryModel(context.Background(), generation.Seedream55Model, id)
+	if result.Usage == nil || result.Usage.Amount != "0.23" || result.Usage.Currency != "CNY" || string(result.Usage.Fields["generated_images"]) != "1" {
+		t.Fatalf("unexpected supplier usage: %+v", result.Usage)
+	}
+	got, err := provider.QueryModel(context.Background(), generation.Seedream55Model, result.ID)
 	if err != nil || got.OutputURL != "https://provider.test/result.png" || got.FileType != "png" {
 		t.Fatalf("got %#v err %v", got, err)
 	}

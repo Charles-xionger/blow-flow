@@ -466,6 +466,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/generation/tasks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read one audited task and its supplier usage as an administrator */
+        get: operations["getAdminGenerationTask"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/generation/operations": {
         parameters: {
             query?: never;
@@ -696,6 +713,28 @@ export interface components {
             stage?: string;
             /** Format: date-time */
             occurredAt: string;
+        };
+        AdminGenerationTask: {
+            id: string;
+            model: string;
+            connectionId: string;
+            status: string;
+            stage: string;
+            failureCode?: string;
+            usage?: {
+                fields: {
+                    [key: string]: (string | null) | number;
+                };
+                /** @enum {string} */
+                source: "runninghub_outputs" | "ark_image_generation";
+                /** Format: date-time */
+                collectedAt: string;
+                /** @description Decimal amount calculated from supplier usage and the published tariff */
+                amount?: string;
+                currency?: string;
+                /** Format: uri */
+                priceSource?: string;
+            };
         };
         GenerationOperations: {
             /** Format: int64 */
@@ -1803,6 +1842,33 @@ export interface operations {
                 };
                 content?: never;
             };
+        };
+    };
+    getAdminGenerationTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Generation task detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminGenerationTask"];
+                };
+            };
+            400: components["responses"]["InvalidRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getGenerationOperations: {

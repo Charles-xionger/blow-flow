@@ -25,7 +25,7 @@ func TestKrea2QueryUsesOriginalTaskAndVerifiesOutput(t *testing.T) {
 		if calls == 1 {
 			_, _ = w.Write([]byte(`{"code":0,"data":{"netWssUrl":"wss://example.test/ws"}}`))
 		} else {
-			_, _ = w.Write([]byte(`{"code":0,"data":[{"fileUrl":"https://example.test/result.png","fileType":"png","nodeId":"103"}]}`))
+			_, _ = w.Write([]byte(`{"code":0,"data":[{"fileUrl":"https://example.test/result.png","fileType":"png","nodeId":"103","consumeCoins":"17"},{"fileUrl":"https://example.test/result.mp4","fileType":"mp4","nodeId":"148","chargedPoint":"1.28","consumeMoney":null,"settleMode":"POINT","apiKey":"secret"}]}`))
 		}
 	}))
 	defer server.Close()
@@ -35,8 +35,14 @@ func TestKrea2QueryUsesOriginalTaskAndVerifiesOutput(t *testing.T) {
 		t.Fatalf("first=%+v %v", first, err)
 	}
 	second, err := p.Query(context.Background(), "original")
-	if err != nil || second.OutputURL != "https://example.test/result.png" {
+	if err != nil || second.OutputURL != "https://example.test/result.png" || second.Usage != nil {
 		t.Fatalf("second=%+v %v", second, err)
+	}
+	video, err := (H3{p}).Query(context.Background(), "original")
+	if err != nil || video.OutputURL != "https://example.test/result.mp4" || video.Usage == nil ||
+		string(video.Usage.Fields["chargedPoint"]) != `"1.28"` || string(video.Usage.Fields["consumeMoney"]) != "null" ||
+		video.Usage.Amount != "" || len(video.Usage.Fields) != 3 {
+		t.Fatalf("H3 result=%+v usage=%+v error=%v", video, video.Usage, err)
 	}
 }
 

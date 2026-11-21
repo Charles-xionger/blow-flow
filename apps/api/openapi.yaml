@@ -591,6 +591,26 @@ paths:
               schema: { type: string, description: 'SSE event task; id is the task version and data is GenerationTask JSON' }
         "404": { description: Task not found or not authorized }
         "503": { description: SSE stream capacity reached or generation service unavailable }
+  /admin/generation/tasks/{id}:
+    get:
+      operationId: getAdminGenerationTask
+      summary: Read one audited task and its supplier usage as an administrator
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, maxLength: 128 }
+      responses:
+        "200":
+          description: Generation task detail
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminGenerationTask" }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
   /admin/generation/operations:
     get:
       operationId: getGenerationOperations
@@ -867,6 +887,31 @@ components:
         type: { type: string }
         stage: { type: string }
         occurredAt: { type: string, format: date-time }
+    AdminGenerationTask:
+      type: object
+      required: [id, model, connectionId, status, stage]
+      properties:
+        id: { type: string }
+        model: { type: string }
+        connectionId: { type: string }
+        status: { type: string }
+        stage: { type: string }
+        failureCode: { type: string }
+        usage:
+          type: object
+          required: [fields, source, collectedAt]
+          properties:
+            fields:
+              type: object
+              additionalProperties:
+                oneOf:
+                  - { type: string, nullable: true }
+                  - { type: number }
+            source: { type: string, enum: [runninghub_outputs, ark_image_generation] }
+            collectedAt: { type: string, format: date-time }
+            amount: { type: string, description: Decimal amount calculated from supplier usage and the published tariff }
+            currency: { type: string }
+            priceSource: { type: string, format: uri }
     GenerationOperations:
       type: object
       required: [queueLength, oldestWaitSeconds, needsReview, stages, failures, workers, circuits]
