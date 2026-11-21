@@ -56,6 +56,35 @@ test('script generation creates independent sibling text outputs through the rea
   await expect(page.locator('.react-flow__node-text')).toHaveCount(2);
 });
 
+test('script generation saves the edited input while a background canvas check is in flight', async ({ page, request }) => {
+  let releaseCheck!: () => void;
+  const checkGate = new Promise<void>(resolve => { releaseCheck = resolve; });
+  let reads = 0;
+  await page.route(/\/api\/workflow\/[^/?]+$/, async route => {
+    if (route.request().method() === 'GET' && ++reads === 2) await checkGate;
+    await route.continue();
+  });
+  try {
+    const id = await openGraph(page, request, true);
+    await page.locator('.react-flow__node[data-id="source"]').click();
+    await page.getByRole('dialog').getByRole('button', { name: '创作设置', exact: true }).click();
+    await expect.poll(() => reads).toBeGreaterThanOrEqual(2);
+    await page.getByRole('button', { name: '自由创作', exact: true }).click();
+    await page.getByRole('button', { name: '生成文本', exact: true }).click();
+    await expect(page.getByTestId('canvas-save-status')).toHaveText('已保存到本地，待同步');
+    releaseCheck();
+    const blocked = page.getByRole('alert').filter({ hasText: '请先完成画布保存，再生成脚本' });
+    const output = page.locator('.react-flow__node-text').getByTestId('text-content');
+    await expect(output.or(blocked).first()).toBeVisible();
+    await expect(blocked).toHaveCount(0);
+    await expect(output).toContainText('勇士出发，平安归来。');
+    const graph = (await (await request.get('/api/workflow/' + id)).json()).data;
+    expect(graph.nodes.find((node: { id: string }) => node.id === 'source').data.scriptPreset).toBe('free');
+  } finally {
+    releaseCheck();
+  }
+});
+
 test('canvas add menu offers a basic editable text node', async ({ page }) => {
   await page.goto('/canvas');
   await page.locator('.react-flow__pane').click({ button: 'right', position: { x: 400, y: 200 } });

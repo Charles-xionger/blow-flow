@@ -41,7 +41,9 @@ export function useScriptTask(nodeId: string) {
     if (busy.current === originalSession) return;
     busy.current = originalSession; setOperation({ session:originalSession,submitting:true });
     try {
-      await canvasAutosave.flush();
+      // A background sync may only be reading the canvas. Explicit save waits
+      // for it to finish and uploads the latest draft before starting the task.
+      await canvasAutosave.save();
       if (!isCurrent(originalSession)) return;
       const state = useCanvasStore.getState();
       const submittedCanvas = state.currentWorkflowId;
@@ -51,7 +53,7 @@ export function useScriptTask(nodeId: string) {
       // Copied/imported nodes must never replay another canvas/node's request identity.
       const request: CreateScriptTask = pending?.canvasId === submittedCanvas && pending.nodeId === nodeId ? pending : { requestId:crypto.randomUUID(),canvasId:submittedCanvas,nodeId,input: typeof input === 'function' ? input() : input };
       state.updateNodeData(nodeId,{ pendingScript:request });
-      await canvasAutosave.flush();
+      await canvasAutosave.save();
       if (!isCurrent(originalSession)) return;
       if (useCanvasStore.getState().saveStatus !== 'synced') throw new Error('请求身份保存失败，请恢复保存后重试');
       const task = await createScriptTask(request);
