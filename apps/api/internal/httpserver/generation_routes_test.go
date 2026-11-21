@@ -85,7 +85,7 @@ func (s *generationStub) AdminTaskDetail(_ context.Context, _ generation.Actor, 
 		return generation.AdminTaskDetail{}, generation.ErrNotFound
 	}
 	return generation.AdminTaskDetail{
-		ID: id, Model: generation.Seedream55Model, ConnectionID: "volcengine-ark", Status: "save_failed",
+		ID: id, Model: generation.Seedream55Model, ConnectionID: "volcengine-ark", Status: "save_failed", UsageSupported: true,
 		Usage: &generation.ProviderUsage{Fields: map[string]json.RawMessage{"generated_images": json.RawMessage("1")}, Amount: "0.23", Currency: "CNY", Source: "ark_image_generation"},
 	}, nil
 }

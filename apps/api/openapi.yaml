@@ -889,7 +889,7 @@ components:
         occurredAt: { type: string, format: date-time }
     AdminGenerationTask:
       type: object
-      required: [id, model, connectionId, status, stage]
+      required: [id, model, connectionId, status, stage, usageSupported]
       properties:
         id: { type: string }
         model: { type: string }
@@ -897,6 +897,7 @@ components:
         status: { type: string }
         stage: { type: string }
         failureCode: { type: string }
+        usageSupported: { type: boolean }
         usage:
           type: object
           required: [fields, source, collectedAt]

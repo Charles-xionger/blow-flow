@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -48,28 +49,39 @@ func TestH3TextSubmissionPrunesSampleReferences(t *testing.T) {
 }
 
 func TestSeedreamDirectResult(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatal(err)
-		}
-		if body["model"] != generation.Seedream55Model || body["background"] != "transparent" {
-			t.Fatalf("body %#v", body)
-		}
-		w.Write([]byte(`{"data":[{"url":"https://provider.test/result.png","size":"2048x2048"}],"usage":{"input_images":0,"generated_images":1,"output_tokens":16384}}`))
-	}))
-	defer server.Close()
-	provider := Providers{Seedream: Seedream{BaseURL: server.URL, APIKey: "key", Client: server.Client()}}
-	result, err := provider.submitTask(context.Background(), "task-1", generation.Input{Model: generation.Seedream55Model, Prompt: "cat", Width: 1024, Height: 1024, ImageOptions: &generation.ImageOptions{Background: "transparent"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Usage == nil || result.Usage.Amount != "0.23" || result.Usage.Currency != "CNY" || string(result.Usage.Fields["generated_images"]) != "1" {
-		t.Fatalf("unexpected supplier usage: %+v", result.Usage)
-	}
-	got, err := provider.QueryModel(context.Background(), generation.Seedream55Model, result.ID)
-	if err != nil || got.OutputURL != "https://provider.test/result.png" || got.FileType != "png" {
-		t.Fatalf("got %#v err %v", got, err)
+	for _, tc := range []struct {
+		name, model, background, size, amount, currency string
+	}{
+		{"5.5 uses the output dimensions", generation.Seedream55Model, "transparent", "2048x2048", "0.23", "CNY"},
+		{"5.0 Pro uses its own tariff", generation.Seedream50Model, "opaque", "2048x2048", "0.60", "CNY"},
+		{"missing size leaves cost pending", generation.Seedream55Model, "opaque", "", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+					return
+				}
+				if body["model"] != tc.model || body["background"] != tc.background {
+					t.Errorf("body %#v", body)
+				}
+				fmt.Fprintf(w, `{"data":[{"url":"https://provider.test/result.png","size":%q}],"usage":{"input_images":0,"generated_images":1,"output_tokens":16384}}`, tc.size)
+			}))
+			defer server.Close()
+			provider := Providers{Seedream: Seedream{BaseURL: server.URL, APIKey: "key", Client: server.Client()}}
+			result, err := provider.submitTask(context.Background(), "task-1", generation.Input{Model: tc.model, Prompt: "cat", Width: 1024, Height: 1024, ImageOptions: &generation.ImageOptions{Background: tc.background}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Usage == nil || result.Usage.Amount != tc.amount || result.Usage.Currency != tc.currency || string(result.Usage.Fields["generated_images"]) != "1" {
+				t.Fatalf("unexpected supplier usage: %+v", result.Usage)
+			}
+			got, err := provider.QueryModel(context.Background(), tc.model, result.ID)
+			if err != nil || got.OutputURL != "https://provider.test/result.png" || got.FileType != "png" {
+				t.Fatalf("got %#v err %v", got, err)
+			}
+		})
 	}
 }
 

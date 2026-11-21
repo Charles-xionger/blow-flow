@@ -29,7 +29,7 @@ type DeliveryStore interface {
 	DueDeliveries(context.Context, int) ([]string, error)
 	SaveFailed(context.Context, postgres.DeliveryClaim, string, bool) error
 	Delivered(context.Context, postgres.DeliveryClaim, string) error
-	ScheduleQuery(context.Context, postgres.DeliveryClaim, string, error, time.Duration) error
+	ScheduleQuery(context.Context, postgres.DeliveryClaim, string, error, time.Duration, *generation.ProviderUsage) error
 	ProviderSucceeded(context.Context, postgres.DeliveryClaim, string, string, *generation.ProviderUsage) error
 	ProviderFailed(context.Context, postgres.DeliveryClaim, *generation.ProviderUsage) error
 	RecordProgress(context.Context, string, string, string, *float64) error
@@ -98,16 +98,11 @@ func (w DeliveryWorker) ProcessOne(ctx context.Context, id string) error {
 	if err := w.Store.RecordOperation(ctx, claim, "query", queryErr); err != nil {
 		return err
 	}
+	stage := observation.Stage
 	if queryErr != nil {
-		return w.Store.ScheduleQuery(ctx, claim, "waiting_provider", queryErr, timeout)
+		stage = "waiting_provider"
 	}
-	if observation.Failed {
-		return w.Store.ProviderFailed(ctx, claim, observation.Usage)
-	}
-	if observation.OutputURL != "" {
-		return w.Store.ProviderSucceeded(ctx, claim, observation.OutputURL, observation.FileType, observation.Usage)
-	}
-	if observation.WSSURL != "" {
+	if queryErr == nil && !observation.Failed && observation.OutputURL == "" && observation.WSSURL != "" {
 		socketCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		_ = w.Provider.Watch(socketCtx, observation.WSSURL, func(p Progress) error {
 			// The documented fraction is within one node, not overall Krea2 progress.
@@ -119,18 +114,17 @@ func (w DeliveryWorker) ProcessOne(ctx context.Context, id string) error {
 		if err := w.Store.RecordOperation(ctx, claim, "query", queryErr); err != nil {
 			return err
 		}
-		if queryErr != nil {
-			return w.Store.ScheduleQuery(ctx, claim, "generating", queryErr, timeout)
-		}
+		stage = "generating"
+	}
+	if queryErr == nil {
 		if observation.Failed {
 			return w.Store.ProviderFailed(ctx, claim, observation.Usage)
 		}
 		if observation.OutputURL != "" {
 			return w.Store.ProviderSucceeded(ctx, claim, observation.OutputURL, observation.FileType, observation.Usage)
 		}
-		return w.Store.ScheduleQuery(ctx, claim, "generating", nil, timeout)
 	}
-	return w.Store.ScheduleQuery(ctx, claim, observation.Stage, nil, timeout)
+	return w.Store.ScheduleQuery(ctx, claim, stage, queryErr, timeout, observation.Usage)
 }
 func (w DeliveryWorker) ProcessDue(ctx context.Context) error {
 	ids, err := w.Store.DueDeliveries(ctx, 25)

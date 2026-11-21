@@ -30,14 +30,20 @@ type Progress struct {
 	Completed bool
 }
 
+type runningHubOutput struct {
+	nodeID       string
+	video        bool
+	collectUsage bool
+}
+
 // Query is authoritative for output. The socket can only suggest that this query is due.
 func (p Krea2) Query(ctx context.Context, taskID string) (Observation, error) {
-	return p.query(ctx, taskID, "103", false, false)
+	return p.query(ctx, taskID, runningHubOutput{nodeID: "103"})
 }
 func (p H3) Query(ctx context.Context, taskID string) (Observation, error) {
-	return p.Krea2.query(ctx, taskID, "148", true, true)
+	return p.Krea2.query(ctx, taskID, runningHubOutput{nodeID: "148", video: true, collectUsage: true})
 }
-func (p Krea2) query(ctx context.Context, taskID, outputNode string, video, collectUsage bool) (Observation, error) {
+func (p Krea2) query(ctx context.Context, taskID string, config runningHubOutput) (Observation, error) {
 	if taskID == "" || p.BaseURL == "" || p.APIKey == "" {
 		return Observation{}, generation.ErrInvalid
 	}
@@ -76,7 +82,7 @@ func (p Krea2) query(ctx context.Context, taskID, outputNode string, video, coll
 		return Observation{Stage: "waiting_provider"}, nil
 	}
 	var observation Observation
-	if collectUsage {
+	if config.collectUsage {
 		observation.Usage = runningHubUsage(reply.Data)
 	}
 	if reply.Code == 805 {
@@ -96,32 +102,35 @@ func (p Krea2) query(ctx context.Context, taskID, outputNode string, video, coll
 		if err := json.Unmarshal(reply.Data, &files); err != nil {
 			return Observation{}, err
 		}
+		if config.collectUsage && len(files) == 1 {
+			observation.Usage = runningHubUsage(files[0])
+		}
 		var output resultFile
 		for _, file := range files {
 			var candidate resultFile
 			if err := json.Unmarshal(file, &candidate); err != nil {
 				return Observation{}, err
 			}
-			if candidate.NodeID == outputNode {
+			if candidate.NodeID == config.nodeID {
 				output = candidate
-				if collectUsage {
+				if config.collectUsage && len(files) != 1 {
 					observation.Usage = runningHubUsage(file)
 				}
 				break
 			}
 		}
 		if output.FileURL == "" {
-			return Observation{}, errors.New("runninghub returned empty result")
+			return observation, errors.New("runninghub returned empty result")
 		}
 		u, err := url.Parse(output.FileURL)
 		if err != nil || u.Scheme != "https" || u.Host == "" {
-			return Observation{}, errors.New("runninghub returned invalid result URL")
+			return observation, errors.New("runninghub returned invalid result URL")
 		}
-		if (!video && output.FileType != "png" && output.FileType != "jpg" && output.FileType != "jpeg") || (video && output.FileType != "mp4" && output.FileType != "video/mp4") {
-			return Observation{}, errors.New("runninghub returned unsupported image format")
+		if (!config.video && output.FileType != "png" && output.FileType != "jpg" && output.FileType != "jpeg") || (config.video && output.FileType != "mp4" && output.FileType != "video/mp4") {
+			return observation, errors.New("runninghub returned unsupported image format")
 		}
 		fileType := output.FileType
-		if video {
+		if config.video {
 			fileType = "mp4"
 		}
 		observation.OutputURL, observation.FileType = output.FileURL, fileType

@@ -119,15 +119,15 @@ func (s *Store) RecordProgress(ctx context.Context, id, token, stage string, per
 	}
 	return err
 }
-func (s *Store) ScheduleQuery(ctx context.Context, c DeliveryClaim, stage string, err error, timeout time.Duration) error {
+func (s *Store) ScheduleQuery(ctx context.Context, c DeliveryClaim, stage string, err error, timeout time.Duration, usage *generation.ProviderUsage) error {
 	if !c.StartedAt.IsZero() && time.Since(c.StartedAt) >= timeout {
-		return s.apply(ctx, c.TaskID, c.Token, deliveryTransition{Status: "wait_timeout", Stage: "wait_timeout", Event: "wait_timeout"})
+		return s.apply(ctx, c.TaskID, c.Token, deliveryTransition{Status: "wait_timeout", Stage: "wait_timeout", Event: "wait_timeout", Usage: usage})
 	}
 	attempts := 0
 	if err != nil {
 		attempts = c.Attempts + 1
 		if attempts >= 6 {
-			return s.apply(ctx, c.TaskID, c.Token, deliveryTransition{Status: string(generation.QueryFailed), Stage: string(generation.QueryFailed), Event: "query_exhausted", Failure: "query_exhausted", IncrementAttempt: true})
+			return s.apply(ctx, c.TaskID, c.Token, deliveryTransition{Status: string(generation.QueryFailed), Stage: string(generation.QueryFailed), Event: "query_exhausted", Failure: "query_exhausted", IncrementAttempt: true, Usage: usage})
 		}
 	}
 	delay := 2 * time.Second
@@ -141,7 +141,7 @@ func (s *Store) ScheduleQuery(ctx context.Context, c DeliveryClaim, stage string
 	if err != nil {
 		event = "query_retry"
 	}
-	return s.apply(ctx, c.TaskID, c.Token, deliveryTransition{Status: "running", Stage: stage, Event: event, Next: time.Now().Add(delay), IncrementAttempt: err != nil, ResetQueryAttempts: err == nil})
+	return s.apply(ctx, c.TaskID, c.Token, deliveryTransition{Status: "running", Stage: stage, Event: event, Next: time.Now().Add(delay), IncrementAttempt: err != nil, ResetQueryAttempts: err == nil, Usage: usage})
 }
 func (s *Store) ProviderSucceeded(ctx context.Context, c DeliveryClaim, url, fileType string, usage *generation.ProviderUsage) error {
 	if url == "" {

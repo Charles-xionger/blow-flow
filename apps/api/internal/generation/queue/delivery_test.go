@@ -49,7 +49,7 @@ func (s *deliveryStoreFake) Delivered(_ context.Context, _ postgres.DeliveryClai
 	s.events = append(s.events, "delivered")
 	return nil
 }
-func (s *deliveryStoreFake) ScheduleQuery(_ context.Context, _ postgres.DeliveryClaim, stage string, _ error, _ time.Duration) error {
+func (s *deliveryStoreFake) ScheduleQuery(_ context.Context, _ postgres.DeliveryClaim, stage string, _ error, _ time.Duration, _ *generation.ProviderUsage) error {
 	s.stage = stage
 	s.events = append(s.events, "query_retry")
 	return nil

@@ -18,13 +18,14 @@ type ProviderUsage struct {
 }
 
 type AdminTaskDetail struct {
-	ID           string         `json:"id"`
-	Model        string         `json:"model"`
-	ConnectionID string         `json:"connectionId"`
-	Status       Status         `json:"status"`
-	Stage        string         `json:"stage"`
-	FailureCode  string         `json:"failureCode,omitempty"`
-	Usage        *ProviderUsage `json:"usage,omitempty"`
+	ID             string         `json:"id"`
+	Model          string         `json:"model"`
+	ConnectionID   string         `json:"connectionId"`
+	Status         Status         `json:"status"`
+	Stage          string         `json:"stage"`
+	FailureCode    string         `json:"failureCode,omitempty"`
+	UsageSupported bool           `json:"usageSupported"`
+	Usage          *ProviderUsage `json:"usage,omitempty"`
 }
 
 func (s Service) AdminTaskDetail(ctx context.Context, actor Actor, id string) (AdminTaskDetail, error) {
@@ -40,5 +41,10 @@ func (s Service) AdminTaskDetail(ctx context.Context, actor Actor, id string) (A
 	if !ok {
 		return AdminTaskDetail{}, ErrNotFound
 	}
-	return store.AdminTaskDetail(ctx, actor.ID, id)
+	detail, err := store.AdminTaskDetail(ctx, actor.ID, id)
+	switch RouteForModel(detail.Model) {
+	case "runninghub-video", "seedream":
+		detail.UsageSupported = true
+	}
+	return detail, err
 }

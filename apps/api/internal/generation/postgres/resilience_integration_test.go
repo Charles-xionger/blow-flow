@@ -321,7 +321,7 @@ func TestDeliveryCircuitsAndRetryExhaustionAreIndependent(t *testing.T) {
 	if err := s.RecordOperation(ctx, claim, "query", errors.New("network")); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ScheduleQuery(ctx, claim, "waiting_provider", errors.New("network"), time.Hour); err != nil {
+	if err := s.ScheduleQuery(ctx, claim, "waiting_provider", errors.New("network"), time.Hour, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DB.Exec(`UPDATE generation_tasks SET next_attempt_at=now()-interval '1 second' WHERE id=?`, task.ID).Error; err != nil {
@@ -352,7 +352,7 @@ func TestDeliveryCircuitsAndRetryExhaustionAreIndependent(t *testing.T) {
 		t.Fatal(err)
 	}
 	claim.Attempts = 5
-	if err := s.ScheduleQuery(ctx, claim, "waiting_provider", errors.New("network"), time.Hour); err != nil {
+	if err := s.ScheduleQuery(ctx, claim, "waiting_provider", errors.New("network"), time.Hour, nil); err != nil {
 		t.Fatal(err)
 	}
 	got, _, err := s.Get(ctx, task.ID)

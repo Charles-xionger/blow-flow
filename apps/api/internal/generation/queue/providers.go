@@ -30,7 +30,7 @@ func (p Providers) QueryInput(ctx context.Context, in generation.Input, id strin
 		return Observation{}, generation.ErrInvalid
 	}
 	m := in.Workflow
-	return (Krea2{BaseURL: m.Connection.BaseURL, APIKey: os.Getenv(m.Connection.APIKeyEnv), Client: p.RunningHub.Client}).query(ctx, id, m.OutputNode, m.Category == "VIDEO", false)
+	return (Krea2{BaseURL: m.Connection.BaseURL, APIKey: os.Getenv(m.Connection.APIKeyEnv), Client: p.RunningHub.Client}).query(ctx, id, runningHubOutput{nodeID: m.OutputNode, video: m.Category == "VIDEO"})
 }
 func (p Providers) SubmitTask(ctx context.Context, taskID string, in generation.Input) (string, error) {
 	result, err := p.submitTask(ctx, taskID, in)

@@ -37,6 +37,11 @@ const usageLabels: Record<string, string> = {
   output_size: '输出尺寸',
 }
 
+const usageSources: Record<NonNullable<Task['usage']>['source'], string> = {
+  runninghub_outputs: 'RunningHub 任务结果',
+  ark_image_generation: '火山方舟图片生成响应',
+}
+
 export function GenerationTaskLookup({ token, onUnauthorized }: {
   token: string
   onUnauthorized: () => void
@@ -86,8 +91,7 @@ export function GenerationTaskLookup({ token, onUnauthorized }: {
 }
 
 function TaskDetail({ task }: { task: Task }) {
-  const { usage } = task
-  const supported = task.model === 'runninghub/h3' || task.model === 'doubao-seedream-5-0-pro-260628' || task.model === 'doubao-seedream-5-5-261028'
+  const { usage, usageSupported } = task
   const fields = Object.entries(usage?.fields ?? {})
   return <div className='space-y-4 border-t pt-4 text-sm' aria-live='polite'>
     <dl className='grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-2 break-words'>
@@ -96,15 +100,15 @@ function TaskDetail({ task }: { task: Task }) {
       <dt>平台连接</dt><dd>{task.connectionId}</dd>
       <dt>任务状态</dt><dd>{statusLabels[task.status] ?? task.status}</dd>
       {task.failureCode && <><dt>失败原因</dt><dd>{task.failureCode}</dd></>}
-      <dt>供应商成本</dt><dd>{usage?.amount && usage.currency ? `${usage.amount} ${usage.currency}` : supported ? '待确认' : '暂未采集'}</dd>
-      {usage && <><dt>用量来源</dt><dd>{usage.source === 'runninghub_outputs' ? 'RunningHub 任务结果' : '火山方舟图片生成响应'}</dd></>}
+      <dt>供应商成本</dt><dd>{usage?.amount && usage.currency ? `${usage.amount} ${usage.currency}` : usageSupported ? '待确认' : '暂未采集'}</dd>
+      {usage && <><dt>用量来源</dt><dd>{usageSources[usage.source]}</dd></>}
       {usage?.priceSource && <><dt>成本来源</dt><dd><a className='underline' href={usage.priceSource} target='_blank' rel='noreferrer'>火山方舟公开按量价表</a></dd></>}
     </dl>
     <div>
       <h2 className='mb-2 font-medium'>供应商用量</h2>
       {fields.length ? <dl className='grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-2 break-words'>
         {fields.map(([key, value]) => <div key={key} className='contents'><dt>{usageLabels[key] ?? key}</dt><dd>{value ?? '—'}</dd></div>)}
-      </dl> : <p className='text-muted-foreground'>{supported ? '暂无供应商用量' : '该模型暂未采集用量'}</p>}
+      </dl> : <p className='text-muted-foreground'>{usageSupported ? '暂无供应商用量' : '该模型暂未采集用量'}</p>}
     </div>
   </div>
 }

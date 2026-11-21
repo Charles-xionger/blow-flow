@@ -75,7 +75,8 @@ func TestProviderSuccessSaveRetryAndEventsSurviveRestart(t *testing.T) {
 	if err = store.RecordProgress(ctx, task.ID, first.Token, "generating", nil); err != nil {
 		t.Fatal(err)
 	}
-	if err = store.ScheduleQuery(ctx, first, "waiting_provider", nil, time.Minute); err != nil {
+	usage := &generation.ProviderUsage{Fields: map[string]json.RawMessage{"chargedPoint": json.RawMessage(`"1.28"`)}, Source: "runninghub_outputs", CollectedAt: time.Now().UTC()}
+	if err = store.ScheduleQuery(ctx, first, "waiting_provider", fmt.Errorf("invalid artifact URL"), time.Minute, usage); err != nil {
 		t.Fatal(err)
 	}
 	if err = db.Exec(`UPDATE generation_tasks SET next_attempt_at=now()-interval '1 second' WHERE id=?`, task.ID).Error; err != nil {
@@ -85,8 +86,7 @@ func TestProviderSuccessSaveRetryAndEventsSurviveRestart(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("reclaim %v %v", ok, err)
 	}
-	usage := &generation.ProviderUsage{Fields: map[string]json.RawMessage{"chargedPoint": json.RawMessage(`"1.28"`)}, Source: "runninghub_outputs", CollectedAt: time.Now().UTC()}
-	if err = store.ProviderSucceeded(ctx, first, "https://provider.test/image.png", "png", usage); err != nil {
+	if err = store.ProviderSucceeded(ctx, first, "https://provider.test/image.png", "png", nil); err != nil {
 		t.Fatal(err)
 	}
 	// A fresh store instance represents a restarted worker. It never submits again.
@@ -103,7 +103,7 @@ func TestProviderSuccessSaveRetryAndEventsSurviveRestart(t *testing.T) {
 		t.Fatalf("save failed %+v %s %v", got, ownerID, err)
 	}
 	detail, err := (generation.Service{Store: restarted}).AdminTaskDetail(ctx, generation.Actor{ID: owner, Admin: true}, task.ID)
-	if err != nil || detail.Usage == nil || string(detail.Usage.Fields["chargedPoint"]) != `"1.28"` || detail.Status != "save_failed" {
+	if err != nil || !detail.UsageSupported || detail.Usage == nil || string(detail.Usage.Fields["chargedPoint"]) != `"1.28"` || detail.Status != "save_failed" {
 		t.Fatalf("admin task after save failure: %+v, %v", detail, err)
 	}
 	if err = db.Exec(`UPDATE generation_tasks SET next_attempt_at=now()-interval '1 second' WHERE id=?`, task.ID).Error; err != nil {
@@ -130,11 +130,11 @@ func TestProviderSuccessSaveRetryAndEventsSurviveRestart(t *testing.T) {
 	var names []string
 	for _, event := range events {
 		names = append(names, event.Type)
-		if event.Type == "stage_changed" && event.Stage != "waiting_provider" {
+		if event.Type == "query_retry" && event.Stage != "waiting_provider" {
 			t.Fatalf("stage change=%+v", event)
 		}
 	}
-	if fmt.Sprint(names) != "[created submitting accepted progress stage_changed provider_succeeded save_retry delivered]" {
+	if fmt.Sprint(names) != "[created submitting accepted progress query_retry provider_succeeded save_retry delivered]" {
 		t.Fatalf("events %v", names)
 	}
 	after, err := restarted.Events(ctx, task.ID, events[len(events)-1].ID)
@@ -159,7 +159,7 @@ func TestProviderSuccessSaveRetryAndEventsSurviveRestart(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("stalled claim: %v %v", ok, err)
 	}
-	if err = store.ScheduleQuery(ctx, stalledClaim, "generating", nil, 30*time.Minute); err != nil {
+	if err = store.ScheduleQuery(ctx, stalledClaim, "generating", nil, 30*time.Minute, nil); err != nil {
 		t.Fatal(err)
 	}
 	stalledTask, _, err := store.Get(ctx, stalled.ID)

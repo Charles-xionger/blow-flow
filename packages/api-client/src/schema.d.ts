@@ -721,6 +721,7 @@ export interface components {
             status: string;
             stage: string;
             failureCode?: string;
+            usageSupported: boolean;
             usage?: {
                 fields: {
                     [key: string]: (string | null) | number;
