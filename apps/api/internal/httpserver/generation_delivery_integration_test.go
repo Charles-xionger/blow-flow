@@ -76,7 +76,7 @@ func TestGenerationDeliveryVisibleThroughGoAPI(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatal(err)
 	}
-	if err = store.ProviderSucceeded(ctx, claim, "https://provider.test/result.png", "png"); err != nil {
+	if err = store.ProviderSucceeded(ctx, claim, "https://provider.test/result.png", "png", nil); err != nil {
 		t.Fatal(err)
 	}
 	claim, ok, err = store.ClaimDelivery(ctx, task.ID)
