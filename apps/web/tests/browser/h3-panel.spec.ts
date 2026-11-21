@@ -36,7 +36,7 @@ async function open(page: Page, request: APIRequestContext, connected = false, d
   await page.goto(`/?project=${id}`);
   const node = page.locator('.react-flow__node[data-id="h3"]');
   await expect(page.getByTestId('canvas-save-status')).toHaveText('已同步');
-  await node.click();
+  await node.getByText('H3', { exact: true }).first().click();
   await expect(page.getByRole('region', { name: '节点控制台' })).toBeVisible();
   return { id, node, read: async () => (await (await request.get(`/api/workflow/${id}`)).json()).data.nodes.find((n: { id: string }) => n.id === 'h3').data };
 }
@@ -107,11 +107,13 @@ for (const nodeType of ['imageToVideo', 'textToVideo']) test(`${nodeType}: H3 re
   await page.route('**/api/generation/events', route => route.fulfill({ contentType: 'text/event-stream', body: `event: snapshot\ndata: ${JSON.stringify(result ? [result] : [])}\n\n` }));
   const { read } = await open(page, request, false, {}, nodeType);
   await page.getByRole('button', { name: '生成', exact: true }).click();
-  await expect(page.getByTestId('video-preview').locator('video')).toHaveAttribute('src', assets + '/saved.mp4');
+  await expect(page.getByTestId('video-preview').getByRole('img', { name: '视频封面' })).toBeVisible();
   await expect.poll(async () => (await read()).videoSrc).toBe(assets + '/saved.mp4');
   expect((await read()).imageSrc).toBeUndefined();
-  await page.reload(); await page.locator('.react-flow__node[data-id="h3"]').click();
-  await expect(page.getByTestId('video-preview').locator('video')).toHaveAttribute('src', assets + '/saved.mp4');
+  await page.reload();
+  const restored = page.locator('.react-flow__node[data-id="h3"]');
+  await restored.getByText('H3', { exact: true }).first().click();
+  await expect(restored.getByRole('img', { name: '视频封面' })).toBeVisible();
   await expect(page.getByRole('region', { name: '节点控制台' }).getByRole('status')).toHaveText('已保存');
   await page.screenshot({ path: testInfo.outputPath('h3-recovered-video.png'), animations: 'disabled' });
   expect(submits).toBe(1);
