@@ -76,3 +76,10 @@ next-env.d.ts
 **/.admin-totp-qr.local.png
 packages/evals/results/
 **/.langfuse/
+
+# Local deliverables and editor/design tooling
+/artifacts/
+/.vscode/settings.json
+/.impeccable/
+/apps/admin/.impeccable/
+/apps/admin/.gitignore
